@@ -1,0 +1,6 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "node organism/index.js"
+restartPolicyType = "always"
