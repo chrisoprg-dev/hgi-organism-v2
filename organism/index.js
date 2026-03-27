@@ -4,6 +4,8 @@
 
 import http from 'http';
 import { createClient } from '@supabase/supabase-js';
+import fs from 'fs';
+import path from 'path';
 
 process.on('unhandledRejection', (r) => log('UNHANDLED: ' + (r instanceof Error ? r.message : String(r)).slice(0,150)));
 process.on('uncaughtException', (e) => log('UNCAUGHT: ' + e.message.slice(0,150)));
@@ -144,110 +146,10 @@ function oppBase(opp) {
 }
 
 function getInterface() {
-  var d = [
-    "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\">",
-    "<title>HGI Organism V2</title>",
-    "<link href=\"https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap\" rel=\"stylesheet\">",
-    "<style>",
-    "*{margin:0;padding:0;box-sizing:border-box}",
-    ":root{--navy:#1B2A4A;--gold:#C8A55A;--cream:#F8F6F1;--warm:#E8E4DC;--text:#2C2C2C;--muted:#6B6B6B;--green:#2D7A4F}",
-    "body{font-family:Inter,sans-serif;background:var(--cream);color:var(--text);display:flex;flex-direction:column;min-height:100vh}",
-    ".sb{width:240px;background:var(--navy);min-height:100vh;position:fixed;left:0;top:0;bottom:0;display:flex;flex-direction:column;z-index:100}",
-    ".lg{padding:22px 20px;border-bottom:1px solid rgba(200,165,90,0.3)}",
-    ".lg h1{font-family:Cormorant Garamond,serif;color:var(--gold);font-size:18px;font-weight:600}",
-    ".lg p{color:rgba(255,255,255,0.45);font-size:11px;margin-top:3px}",
-    ".nav{flex:1;padding:12px 0;overflow-y:auto}",
-    ".ns{padding:8px 16px 4px;color:rgba(200,165,90,0.55);font-size:10px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase}",
-    ".ni{display:flex;align-items:center;gap:10px;padding:9px 20px;color:rgba(255,255,255,0.6);font-size:13px;cursor:pointer;border-left:3px solid transparent;transition:all 0.15s}",
-    ".ni:hover{color:#fff;background:rgba(255,255,255,0.06)} .ni.act{color:var(--gold);border-left-color:var(--gold);background:rgba(200,165,90,0.1)}",
-    ".dot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:0.5;flex-shrink:0}",
-    ".sf{padding:14px 20px;border-top:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;gap:8px;font-size:11px;color:rgba(255,255,255,0.35)}",
-    ".sd{width:7px;height:7px;border-radius:50%;background:#2D7A4F;box-shadow:0 0 6px #2D7A4F}",
-    ".main{margin-left:240px;flex:1;display:flex;flex-direction:column}",
-    ".tb{background:#fff;border-bottom:1px solid var(--warm);padding:0 32px;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50}",
-    ".tv{font-family:Cormorant Garamond,serif;font-size:20px;font-weight:600;color:var(--navy)} .tm{display:flex;align-items:center;gap:14px} .tt{font-size:12px;color:var(--muted)}",
-    ".rb{background:var(--gold);color:var(--navy);border:none;padding:7px 16px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer}",
-    ".ct{flex:1;padding:28px 32px;padding-bottom:80px}",
-    ".bc{background:#fff;border-radius:12px;padding:24px 28px;margin-bottom:20px;border-left:4px solid var(--gold);box-shadow:0 2px 8px rgba(0,0,0,0.06)}",
-    ".bl{font-size:10px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;color:var(--gold);margin-bottom:10px}",
-    ".bt{font-family:Cormorant Garamond,serif;font-size:18px;line-height:1.6;color:var(--navy);font-weight:500}",
-    ".bm{margin-top:10px;font-size:11px;color:var(--muted)}",
-    ".ps{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px}",
-    ".pb{background:#fff;border-radius:10px;padding:16px;box-shadow:0 2px 6px rgba(0,0,0,0.05);border-top:3px solid var(--gold)}",
-    ".pbl{font-size:10px;font-weight:600;text-transform:uppercase;color:var(--muted)} .pbv{font-size:22px;font-weight:600;color:var(--navy);margin-top:4px} .pbs{font-size:11px;color:var(--muted);margin-top:2px}",
-    ".two{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px}",
-    ".card{background:#fff;border-radius:10px;padding:18px;box-shadow:0 2px 6px rgba(0,0,0,0.05)}",
-    ".oc{background:#fff;border-radius:10px;padding:14px 18px;margin-bottom:9px;box-shadow:0 1px 4px rgba(0,0,0,0.06);cursor:pointer;border-left:3px solid transparent;transition:all 0.15s}",
-    ".oc:hover{border-left-color:var(--gold)} .ot{font-size:13px;font-weight:600;color:var(--navy);margin-bottom:4px}",
-    ".om{display:flex;gap:7px;align-items:center;flex-wrap:wrap} .ob{display:inline-flex;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600}",
-    ".oh{background:#E8F5EE;color:var(--green)} .om2{background:#FFF8E7;color:#B8860B} .olw{background:#FDEAEA;color:#C0392B}",
-    ".sbdg{font-size:10px;color:var(--muted);background:var(--warm);padding:2px 7px;border-radius:10px} .db{font-size:10px;color:var(--muted)}",
-    ".mi{padding:11px 0;border-bottom:1px solid var(--warm)} .mi:last-child{border-bottom:none}",
-    ".ma{font-size:10px;font-weight:600;color:var(--gold);text-transform:uppercase} .mt{font-size:12px;color:var(--text);line-height:1.5;margin-top:2px} .md{font-size:10px;color:var(--muted);margin-top:2px}",
-    ".dp{background:#fff;border-radius:10px;padding:20px;box-shadow:0 2px 6px rgba(0,0,0,0.05);display:none;margin-top:20px} .dp.vis{display:block}",
-    ".dtt{font-family:Cormorant Garamond,serif;font-size:20px;font-weight:600;color:var(--navy);margin-bottom:14px}",
-    ".dsl{font-size:10px;font-weight:600;text-transform:uppercase;color:var(--gold);margin-bottom:6px;margin-top:14px} .dtx{font-size:12px;line-height:1.6;color:var(--text)}",
-    ".ib{background:#fff;border-top:1px solid var(--warm);padding:12px 32px;display:flex;gap:10px;align-items:center;position:fixed;bottom:0;left:240px;right:0;z-index:99}",
-    ".inp{flex:1;border:1px solid var(--warm);border-radius:8px;padding:9px 15px;font-size:13px;outline:none} .inp:focus{border-color:var(--gold)}",
-    ".sbtn{background:var(--navy);color:#fff;border:none;padding:9px 18px;border-radius:8px;font-size:13px;cursor:pointer}",
-    ".ra{display:none;background:var(--navy);color:rgba(255,255,255,0.9);border-radius:10px;padding:14px 18px;margin-bottom:14px;font-size:13px;line-height:1.6}",
-    ".sh{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px} .st{font-size:10px;font-weight:600;text-transform:uppercase;color:var(--muted)}",
-    ".ld{color:var(--muted);font-size:12px;font-style:italic}",
-    ".coming{text-align:center;padding:80px 40px;color:var(--muted)} .coming h2{font-family:Cormorant Garamond,serif;font-size:28px;color:var(--navy);margin-bottom:10px}",
-    "</style></head><body>",
-    "<nav class=\"sb\"><div class=\"lg\"><h1>HGI Organism</h1><p>V2 &bull; 47 Agents Active</p></div><div class=\"nav\">",
-    "<div class=\"ns\">Command</div>",
-    "<div class=\"ni act\" onclick=\"sv(this,'dash')\"><span class=\"dot\"></span>Dashboard</div>",
-    "<div class=\"ni\" onclick=\"sv(this,'pipe')\"><span class=\"dot\"></span>Pipeline Tracker</div>",
-    "<div class=\"ns\">Intelligence</div>",
-    "<div class=\"ni\" onclick=\"sv(this,'disc')\"><span class=\"dot\"></span>Opportunity Discovery</div>",
-    "<div class=\"ni\" onclick=\"sv(this,'res')\"><span class=\"dot\"></span>Research &amp; Analysis</div>",
-    "<div class=\"ni\" onclick=\"sv(this,'win')\"><span class=\"dot\"></span>Winnability Scoring</div>",
-    "<div class=\"ns\">Proposal</div>",
-    "<div class=\"ni\" onclick=\"sv(this,'prop')\"><span class=\"dot\"></span>Proposal Engine</div>",
-    "<div class=\"ni\" onclick=\"sv(this,'fin')\"><span class=\"dot\"></span>Financial &amp; Pricing</div>",
-    "<div class=\"ni\" onclick=\"sv(this,'staff')\"><span class=\"dot\"></span>Recruiting &amp; Bench</div>",
-    "<div class=\"ns\">Operations</div>",
-    "<div class=\"ni\" onclick=\"sv(this,'crm')\"><span class=\"dot\"></span>Relationship Intelligence</div>",
-    "<div class=\"ni\" onclick=\"sv(this,'cont')\"><span class=\"dot\"></span>Content Engine</div>",
-    "<div class=\"ni\" onclick=\"sv(this,'kb')\"><span class=\"dot\"></span>Knowledge Base</div>",
-    "<div class=\"ns\">Leadership</div>",
-    "<div class=\"ni\" onclick=\"sv(this,'dig')\"><span class=\"dot\"></span>Weekly Digest</div>",
-    "<div class=\"ni\" onclick=\"sv(this,'exec')\"><span class=\"dot\"></span>Executive Brief</div>",
-    "<div class=\"ns\">System</div>",
-    "<div class=\"ni\" onclick=\"sv(this,'scan')\"><span class=\"dot\"></span>Pipeline Scanner</div>",
-    "<div class=\"ni\" onclick=\"sv(this,'scr')\"><span class=\"dot\"></span>Scraper Insights</div>",
-    "<div class=\"ni\" onclick=\"sv(this,'chat')\"><span class=\"dot\"></span>System Chat</div>",
-    "</div><div class=\"sf\"><div class=\"sd\"></div>Organism Active &bull; 47 Agents</div></nav>",
-    "<div class=\"main\">",
-    "<div class=\"tb\"><div class=\"tv\" id=\"vt\">Morning Briefing</div><div class=\"tm\"><span class=\"tt\" id=\"lc\"></span><button class=\"rb\" onclick=\"rs()\">Run Session Now</button></div></div>",
-    "<div class=\"ct\" id=\"mv\"><div class=\"ld\">Loading organism intelligence...</div></div></div>",
-    "<div class=\"ib\"><input class=\"inp\" id=\"ci\" placeholder=\"Ask the organism anything...\" onkeydown=\"if(event.key==='Enter')sc()\"><button class=\"sbtn\" onclick=\"sc()\">Send</button></div>"
-  ].join("");
-  d += "<script>var B=window.location.origin,pp=[],mm=[],dc=[],so=null;";
-  d += "function ut(){var n=new Date(),el=document.getElementById('lc');if(el)el.textContent=n.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})+' '+n.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});}setInterval(ut,1000);ut();";
-  d += "function opc(o){var pi=o.opi_score||0,pc=pi>=90?'oh':pi>=75?'oh':pi>=65?'om2':'olw',st=o.stage||'identified',now=new Date(),dd=o.due_date?new Date(o.due_date):null,ddStr=dd?dd.toLocaleDateString('en-US',{month:'short',day:'numeric'}):'',isPast=dd&&dd<now,badge=st==='submitted'?'<span class=\"db\">Submitted</span>':st==='watching'?'<span class=\"db\">Watching</span>':!isPast&&ddStr?'<span class=\"db\">Due '+ddStr+'</span>':'';return'<div class=\"oc\" onclick=\"selO('+JSON.stringify(o.id)+')\">'+'<div class=\"ot\">'+( o.title||'')+'</div>'+'<div class=\"om\"><span class=\"ob '+pc+'\">OPI '+pi+'</span><span class=\"sbdg\">'+st+'</span>'+badge+'</div></div>';}";
-  d += "function selO(id){var o=pp.find(function(p){return p.id===id;});if(!o)return;so=o;var dp=document.getElementById('det');if(!dp)return;dp.className='dp vis';dp.innerHTML='<div class=\"dtt\">'+o.title+'</div>';dp.scrollIntoView({behavior:'smooth',block:'nearest'});}";
-  d += "function rd(brief){var t1=pp.filter(function(o){return o.opi_score>=75;}).length,pur=pp.filter(function(o){return o.stage==='pursuing'||o.stage==='proposal';}).length,bt=brief||'The organism is working across '+pp.length+' active opportunities. '+t1+' are Tier 1 (OPI 75+). '+pur+' in pursuit or proposal stage.',mv=document.getElementById('mv');if(!mv)return;mv.innerHTML='<div class=\"bc\"><div class=\"bl\">Morning Briefing</div><div class=\"bt\">'+(function(s){var r=(s||'');if(r.indexOf('DASHBOARD:')===0)r=r.slice(10).trim();var lines=r.split(String.fromCharCode(10));var out=[];var inTable=false;for(var i=0;i<lines.length;i++){var l=lines[i].trim();if(!l){if(inTable){out.push('</table>');inTable=false;}out.push('');continue;}if(l.indexOf('|')===0&&l.lastIndexOf('|')===l.length-1){if(!inTable){out.push('<table style="width:100%;border-collapse:collapse;font-size:12px;margin:8px 0">');inTable=true;}if(l.replace(/[|:\-\s]/g,'').length===0)continue;var cells=l.split('|').filter(function(c){return c.trim().length>0;});var isHead=i>0&&lines[i-1]&&lines[i-1].indexOf('|')===0;var tag=isHead?'td':'td';out.push('<tr>'+cells.map(function(c){return'<'+tag+' style="padding:4px 8px;border:1px solid var(--warm);">'+(c.trim().replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>'))+'</'+tag+'>';}).join('')+'</tr>');continue;}if(inTable){out.push('</table>');inTable=false;}if(l==='---'||l.replace(/-/g,'').length===0&&l.length>=3){out.push('<hr style="border:none;border-top:1px solid var(--warm);margin:8px 0">');continue;}if(l.slice(0,4)==='### ')l='<b style="font-size:13px">'+l.slice(4)+'</b>';else if(l.slice(0,3)==='## ')l='<b style="font-size:14px">'+l.slice(3)+'</b>';else if(l.slice(0,2)==='# ')l='<b style="font-size:15px">'+l.slice(2)+'</b>';else if(l.slice(0,4)==='#### ')l='<b>'+l.slice(5)+'</b>';else if(l.slice(0,2)==='- ')l='• '+l.slice(2);l=l.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');l=l.replace(/\*([^*]+)\*/g,'<em>$1</em>');out.push(l);}if(inTable)out.push('</table>');return out.join('<br>').slice(0,4000);})(bt)+'</div><div class=\"bm\">47 agents active</div></div>'+'<div class=\"ps\"><div class=\"pb\"><div class=\"pbl\">Active Opps</div><div class=\"pbv\">'+pp.length+'</div></div><div class=\"pb\"><div class=\"pbl\">Tier 1 OPI 75+</div><div class=\"pbv\">'+t1+'</div></div><div class=\"pb\"><div class=\"pbl\">In Pursuit</div><div class=\"pbv\">'+pur+'</div></div></div>'+'<div class=\"two\"><div><div class=\"sh\"><div class=\"st\">Active Pipeline</div></div>'+pp.map(opc).join('')+'</div><div><div class=\"sh\"><div class=\"st\">Organism Activity</div></div><div class=\"card\" style=\"max-height:480px;overflow-y:auto\">'+mm.slice(0,15).map(function(m){return'<div class=\"mi\"><div class=\"ma\">'+m.agent+'</div><div class=\"mt\">'+m.observation.slice(0,160)+'</div></div>';}).join('')+'</div></div></div>'+'<div style=\"margin-top:24px\"><div class=\"sh\"><div class=\"st\">Organism Decisions</div></div><div id=\"dc-list\" style=\"margin-top:12px\">'+(dc&&dc.length?dc.slice(0,20).map(function(x){var obs=x.observation||'';var pri=(obs.match(/PRIORITY:\s*(\S+)/)||['','medium'])[1].toLowerCase();var typ=(obs.match(/TYPE:\s*(\S+)/)||['',''])[1].replace(/_/g,' ');var ttl=(obs.match(/TITLE:\s*([^\n]+)/)||['',''])[1].trim();var det=(obs.match(/DETAIL:\s*([^\n]+)/)||['',''])[1].trim();var priColor=pri==='critical'?'#C0392B':pri==='high'?'var(--gold)':pri==='medium'?'var(--navy)':'var(--muted)';var typeIcon=typ.indexOf('OWNER')>-1?'\u{1F464}':typ.indexOf('BUILD')>-1?'\u{1F527}':'\u2713';return'<div class=\"card\" style=\"margin-bottom:10px;padding:16px 20px;border-left:3px solid '+priColor+';\"><div style=\"display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px\"><div style=\"font-size:13px;font-weight:600;color:var(--navy);line-height:1.4;flex:1\">'+typeIcon+' '+(ttl||obs.slice(0,80))+'</div><div style=\"display:flex;gap:6px;flex-shrink:0;margin-left:10px\"><span style=\"font-size:10px;padding:2px 8px;border-radius:10px;background:'+priColor+';color:#fff;font-weight:600;text-transform:uppercase\">'+pri+'</span><span style=\"font-size:10px;padding:2px 8px;border-radius:10px;background:var(--warm);color:var(--muted);font-weight:600\">'+typ+'</span></div></div>'+(det?'<div style=\"font-size:12px;line-height:1.5;color:var(--muted);margin-bottom:6px\">'+det.slice(0,180)+(det.length>180?'...':'')+'</div>':'')+'<div style=\"font-size:11px;color:var(--muted)\">'+x.agent+' · '+new Date(x.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'})+'</div></div>';}).join(''):'<div style=\"padding:20px;color:var(--muted);font-size:13px\">No decisions yet. Run a session to generate organism decisions.</div>')+'</div>'+'<div id=\"det\" class=\"dp\"></div><div id=\"ra\" class=\"ra\"></div>'}";
-  d += "function la(){Promise.all([fetch(B+'/api/pipeline').then(function(r){return r.json();}),fetch(B+'/api/memories').then(function(r){return r.json();}),fetch(B+'/api/briefing').then(function(r){return r.json();}),fetch(B+'/api/decisions').then(function(r){return r.json();})]).then(function(res){pp=res[0]||[];mm=res[1]||[];dc=res[3]||[];rd((res[2]||{}).briefing);}).catch(function(e){var mv=document.getElementById('mv');if(mv)mv.innerHTML='<div class=\"ld\">Error: '+e.message+'</div>';});}";
-  d += "function sv(el,v){document.querySelectorAll('.ni').forEach(function(n){n.classList.remove('act');});el.classList.add('act');var vt=document.getElementById('vt');if(vt)vt.textContent={dash:'Morning Briefing',pipe:'Pipeline Tracker',disc:'Opportunity Discovery',res:'Research & Analysis',win:'Winnability Scoring',prop:'Proposal Engine',fin:'Financial & Pricing',staff:'Recruiting & Bench',crm:'Relationship Intelligence',cont:'Content Engine',kb:'Knowledge Base',dig:'Weekly Digest',exec:'Executive Brief',scan:'Pipeline Scanner',scr:'Scraper Insights',chat:'System Chat'}[v]||v;if(v==='dash'){la();return;}var mv=document.getElementById('mv');if(v==='pipe'){if(mv)mv.innerHTML=pp.map(opc).join('')+'<div id=\"det\" class=\"dp\" style=\"margin-top:20px\"></div>';return;}if(mv)mv.innerHTML='<div class=\"coming\"><h2>Coming in Phase 2</h2><p>This module is being built in the next sprint.</p></div>';}";
-  d += "function rs(){var btn=document.querySelector('.rb');if(btn){btn.textContent='Running...';btn.disabled=true;}fetch(B+'/run-session',{method:'POST'}).then(function(){if(btn){btn.textContent='Done!';setTimeout(function(){btn.textContent='Run Session Now';btn.disabled=false;},3000);}}).catch(function(){if(btn){btn.textContent='Error';btn.disabled=false;}});}";
-  d += "function sc(){var inp=document.getElementById('ci'),msg=inp?inp.value.trim():'';if(!msg)return;if(inp)inp.value='';var ra=document.getElementById('ra');if(!ra)return;ra.style.display='block';ra.textContent='Thinking...';fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:800,system:'You are the HGI Organism, 47 agents as one brain for HGI Global. Be direct and strategic.',messages:[{role:'user',content:msg}]})}).then(function(r){return r.json();}).then(function(d){var t=(d.content||[]).filter(function(b){return b.type==='text';}).map(function(b){return b.text;}).join('');if(ra)ra.textContent=t||'No response.';}).catch(function(e){if(ra)ra.textContent='Error: '+e.message;});}";
-  d += "la();<\/script></body></html>";
-  return d;
+  return fs.readFileSync(path.join(process.cwd(), 'organism', 'interface.html'), 'utf8');
 }
 
 
-var HGI = 'HGI Global (Hammerman and Gainer LLC). ~95 years. 100pct minority-owned. 67 FT + 43 contract professionals. SAM UEI: DL4SJEVKZ6H4. ' +
-  'Insurance: $5M fidelity bond, $5M E+O, $2M GL. ' +
-  'Verticals: Disaster Recovery, TPA/Claims, Property Tax Appeals, Workforce/WIOA, Construction Management, Program Administration, Housing/HUD, Grant Management. ' +
-  'Past perf (use exact figures, never inflate): Road Home $67M direct/$13B+ program (2006-2015), HAP $950M, Restore Louisiana $42.3M, Rebuild NJ $67.7M, TPSD $2.96M COMPLETED 2022-2025 (PAST TENSE ONLY - never call active or current), St. John Sheriff $788K, BP GCCF $1.65M (2010-2013). ' +
-  'NO current FEMA PA contract. NO current direct federal contract. All work through state/local/housing agencies. ' +
-  'Named staff: Louis Resweber (Program Director), Berron (PA SME), April Gloston (HM Specialist), Klunk (Financial/Grant Specialist), Wiltz (Documentation Manager), Julie Lawson (PM). ' +
-  'Rates (fully burdened/hr): Principal $220, Program Director $210, SME $200, Sr Grant Mgr $180, Grant Mgr $175, Sr PM $180, PM $155, Grant Writer $145, Architect/Engineer $135, Cost Estimator $125, Appeals Specialist $145, Sr Damage Assessor $115, Damage Assessor $105, Admin Support $65. ' +
-  'CRITICAL: Never fabricate staff counts beyond what is confirmed. Never state TPSD is active or current. Never claim a federal contract exists.';
-
-// ── AGENT 1: INTELLIGENCE ENGINE ──────────────────────────────────
 async function agentIntelligence(opp, ctx) {
   log('INTEL: ' + (opp.title||'?').slice(0,50));
   var prompt = HGI + '\n\n' + oppBase(opp) +
