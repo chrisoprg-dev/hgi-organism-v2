@@ -1,6 +1,6 @@
 // HGI Living Organism V2 — Multi-Agent Intelligence Session Engine
 // Phase 3: 6 agents wired — Intelligence, Financial, Winnability, CRM, Quality Gate, Self-Awareness
-// 37 agents total. One shared brain. All into all.
+// 47 agents total. One shared brain. All into all.
 
 import http from 'http';
 import { createClient } from '@supabase/supabase-js';
@@ -107,7 +107,7 @@ async function agentIntelligence(opp, ctx) {
     '\n\nRELATIONSHIPS:\n' + ctx.relText +
     '\n\nMEMORY:\n' + ctx.memText.slice(0,1000) +
     '\n\nMISSION: (1) Named competitors most likely to bid and why each is a threat (2) Incumbent if known (3) Agency procurement patterns (4) HGI strongest angle (5) Intelligence gaps (6) Single highest-leverage action THIS WEEK (7) Updated PWIN 0-100pct. Be specific. Real money on the line.';
-  var out = await claudeCall('You are HGI Intelligence Engine, agent 1 of 37. Competitive analyst. Your findings compound across all 36 others. Never fabricate.', prompt, 1500);
+  var out = await claudeCall('You are HGI Intelligence Engine, agent 1 of 47. Competitive analyst. Your findings compound across all 46 others. Every competitor weakness you identify becomes a proposal differentiation strategy. Every pricing pattern you surface becomes the cost exhibit foundation. Your output is the raw material the Proposal Writer turns into a winning bid. Never fabricate.', prompt, 1500);
   if (!out || out.length < 100) return null;
   log('INTEL complete: ' + out.length + ' chars');
   await storeMemory('intelligence_engine', opp.id, (opp.agency||'') + ',competitive_intel', 'INTEL - ' + (opp.title||'').slice(0,50) + ':\n' + out, 'competitive_intel');
@@ -122,7 +122,7 @@ async function agentFinancial(opp, ctx) {
     '\n\nCOMP INTEL (includes pricing data from Intelligence Engine):\n' + ctx.compText +
     '\n\nMEMORY (includes Intel Engine findings):\n' + ctx.memText.slice(0,1200) +
     '\n\nMISSION: (1) Real comparable contract award amounts - name agency, amount, period, scope (2) Does our current estimated value match market reality? (3) Price-to-win recommendation based on competitive field (4) Three independent pricing methods with visible math - staffing-based, comp-based, pct-of-program (5) LOW/MID/HIGH range clearly labeled (6) Base period only - option years shown separately as upside (7) Any pricing risks for this specific agency type.';
-  var out = await claudeCall('You are HGI Financial Agent, agent 2 of 37. CFO-level analyst. You read what the Intelligence Engine found and build on it. Show your math. Never fabricate dollar amounts.', prompt, 1500);
+  var out = await claudeCall('You are HGI Financial Agent, agent 2 of 47. Your pricing benchmarks and three-method visible math model become the proposal cost exhibit. You determine whether HGI bids at, above, or below market for this specific evaluator. Without your numbers the proposal has no pricing section. CFO-level analyst. You read what the Intelligence Engine found and build on it. Show your math. Never fabricate dollar amounts.', prompt, 1500);
   if (!out || out.length < 100) return null;
   log('FINANCIAL complete: ' + out.length + ' chars');
   await storeMemory('financial_agent', opp.id, (opp.agency||'') + ',pricing_benchmark', 'FINANCIAL - ' + (opp.title||'').slice(0,50) + ':\n' + out, 'pricing_benchmark');
@@ -136,8 +136,8 @@ async function agentWinnability(opp, ctx) {
   var prompt = HGI + '\n\n' + oppBase(opp) +
     '\n\nINTEL ENGINE FINDINGS (read before scoring):\n' + ctx.memText.slice(0,1000) +
     '\n\nFINANCIAL ANALYSIS:\n' + (opp.financial_analysis||'not yet available').slice(0,400) +
-    '\n\nMISSION: You are a senior BD director with real budget on the line. (1) Score HGI against each eval criterion vs ACTUAL named competitors from intel findings (2) What specific weaknesses in the current pursuit would cost the most points (3) What would flip this to NO-BID? What would raise PWIN by 10+ points? (4) Are we priced to win given the competitive field? (5) FINAL: PWIN X pct | GO / CONDITIONAL GO / NO-BID | EVERY action that would increase PWIN ranked by impact.';
-  var out = await claudeCall('You are HGI Winnability Agent, agent 3 of 37. Senior BD director. You read Intel and Financial findings and make the real bid decision. Be ruthless and specific.', prompt, 1500);
+    '\n\nMISSION: You are HGI Winnability Agent, agent 3 of 47. Senior BD director with real budget on the line. Every PWIN action you recommend is a specific proposal improvement. Your competitive positioning matrix shapes how the proposal differentiates from IEM, CDR Maguire, and Tetra Tech. PWIN under 45% means the proposal needs structural changes before submission. (1) Score HGI against each eval criterion vs ACTUAL named competitors from intel findings (2) What specific weaknesses in the current pursuit would cost the most points (3) What would flip this to NO-BID? What would raise PWIN by 10+ points? (4) Are we priced to win given the competitive field? (5) FINAL: PWIN X pct | GO / CONDITIONAL GO / NO-BID | EVERY action that would increase PWIN ranked by impact.';
+  var out = await claudeCall('You are HGI Winnability Agent, agent 3 of 47. Senior BD director. You read Intel and Financial findings and make the real bid decision. Be ruthless and specific.', prompt, 1500);
   if (!out || out.length < 100) return null;
   log('WINNABILITY complete: ' + out.length + ' chars');
   await storeMemory('winnability_agent', opp.id, (opp.agency||'') + ',winnability,pwin', 'WINNABILITY - ' + (opp.title||'').slice(0,50) + ':\n' + out, 'winnability');
@@ -152,7 +152,7 @@ async function agentCRM(opp, ctx) {
     '\n\nRELATIONSHIP GRAPH:\n' + ctx.relText +
     '\n\nINTEL FINDINGS:\n' + ctx.memText.slice(0,800) +
     '\n\nMISSION: (1) Named decision-makers - who evaluates and awards this contract (2) Relationship status - do we know anyone at this agency? How warm? (3) Who specifically at HGI should call or email this week - name, role, what to say, what outcome to drive (4) Cross-agency connections - do we know anyone who knows someone here (5) Best outreach approach given agency culture and procurement stage (6) What relationship move would most improve our competitive position before deadline.';
-  var out = await claudeCall('You are HGI CRM Agent, agent 4 of 37. Relationship intelligence specialist. You find the humans behind the procurement and tell HGI exactly who to call and what to say.', prompt, 1200);
+  var out = await claudeCall('You are HGI CRM Agent, agent 4 of 47. Your intel feeds the transmittal letter. A warm relationship with the evaluator is the most powerful proposal advantage in government contracting. Zero relationships means the proposal lands cold. Every contact you warm before submission is worth more than any written section. Relationship intelligence specialist. You find the humans behind the procurement and tell HGI exactly who to call and what to say.', prompt, 1200);
   if (!out || out.length < 100) return null;
   log('CRM complete: ' + out.length + ' chars');
   await storeMemory('crm_agent', opp.id, (opp.agency||'') + ',contacts,relationship', 'CRM - ' + (opp.title||'').slice(0,50) + ':\n' + out, 'relationship');
@@ -170,7 +170,7 @@ async function agentQualityGate(opp, ctx) {
     '\n\nPROPOSAL DRAFT (if exists):\n' + (opp.staffing_plan||'No proposal draft yet').slice(0,20000) +
     '\n\nWINNABILITY FINDINGS:\n' + (opp.capture_action||'').slice(0,400) +
     '\n\nMISSION: Score this pursuit like an evaluator. (1) For EACH eval criterion in the scope analysis, score current state 1-10 and state specifically what would raise it (2) Every RFP requirement NOT yet addressed by name (3) Required positions - named with real people and rates, or TBD placeholder? (4) Past performance - 3 refs with full contact info? Relevance to THIS RFP stated? (5) Required exhibits/forms - complete, missing, needs signature? (6) VERDICT: Estimated score out of 100 | GO/CONDITIONAL GO/NO-GO | ALL deficiencies ranked by point impact.';
-  var out = await claudeCall('You are HGI Quality Gate Agent, agent 5 of 37. Senior proposal compliance reviewer. You score proposals like an evaluator would. Be ruthless. Name the section, name the gap, name the points at risk.', prompt, 1500);
+  var out = await claudeCall('You are HGI Quality Gate Agent, agent 5 of 47. Your compliance audit IS the proposal compliance matrix exhibit. Every gap you find is a potential automatic disqualification before scoring begins. Missing items do not cost points — they end the pursuit before the evaluator reads a single word. Senior proposal compliance reviewer. You score proposals like an evaluator would. Be ruthless. Name the section, name the gap, name the points at risk.', prompt, 1500);
   if (!out || out.length < 100) return null;
   log('QUALITY GATE complete: ' + out.length + ' chars');
   await storeMemory('quality_gate', opp.id, (opp.agency||'') + ',quality_gate,compliance', 'QUALITY GATE - ' + (opp.title||'').slice(0,50) + ':\n' + out, 'analysis');
@@ -186,7 +186,7 @@ async function agentSelfAwareness(state, sessionResults, ctx) {
     '\n\nPIPELINE STATUS:\n' + state.pipeline.map(function(o) { return (o.title||'?').slice(0,50) + ' OPI:' + o.opi_score + ' ' + (o.stage||'?'); }).join('\n') +
     '\n\nACCUMULATED MEMORY (' + state.memories.length + ' total):\n' + ctx.memText.slice(0,1500) +
     '\n\nMISSION: You see the full picture - every agent result, every memory, every opportunity. (1) What patterns are emerging across all opportunities that individual agents missed? (2) Which agents produced highest-value intelligence this session? (3) What single improvement to the organism would most improve HGI win rates? (4) What data gaps are costing HGI the most right now? (5) Any contradictions between agents - where did Intel and Winnability disagree? (6) The one thing Christopher must do this week to most improve competitive position across the entire pipeline.';
-  var out = await claudeCall('You are HGI Self-Awareness Engine, agent 6 of 37. You run last and see everything all other agents produced. You identify patterns no individual agent can see. You are the organism reflecting on itself.', prompt, 1500);
+  var out = await claudeCall('You are HGI Self-Awareness Engine, agent 6 of 47. You run last and see everything all 46 other agents produced. Your single highest-leverage improvement recommendation must always be framed in terms of what would most improve the next proposal — not system hygiene in the abstract, but what specifically makes the next submission score higher. You identify patterns no individual agent can see. You are the organism reflecting on itself.', prompt, 1500);
   if (!out || out.length < 100) return null;
   log('SELF-AWARENESS complete: ' + out.length + ' chars');
   await storeMemory('self_awareness', null, 'system_health,self_assessment,patterns', 'SELF-AWARENESS SESSION COMPLETE:\n' + out, 'pattern');
@@ -200,7 +200,7 @@ async function agentDiscovery(state, ctx) {
   var oppSummary = state.pipeline.map(function(o) { return (o.title||'?').slice(0,50) + ' | ' + (o.vertical||'') + ' | OPI:' + o.opi_score; }).join('\n');
   var prompt = HGI + '\n\nACTIVE PIPELINE:\n' + oppSummary + '\n\nMEMORY:\n' + ctx.memText.slice(0,800) +
     '\n\nMISSION: (1) Pre-solicitation signals - budget appropriations, agency announcements suggesting upcoming RFPs in HGI verticals (2) Sources HGI is NOT monitoring that carry procurement in disaster recovery, TPA/claims, workforce, housing, grant management (3) Agencies in LA/TX/FL/MS/AL/GA with expiring contracts in HGI verticals - prime recompete targets (4) FEMA disaster declarations in last 30 days that will generate recovery procurement (5) Market signals - budget cycles, legislative action, federal funding announcements that predict future HGI opportunities (6) Single highest-value new opportunity source HGI should add right now.';
-  var out = await claudeCall('You are HGI Discovery Agent, agent 7 of 37. You find what is coming before it is posted. Your findings feed every other agent.', prompt, 1200);
+  var out = await claudeCall('You are HGI Discovery Agent, agent 7 of 47. Every signal you surface is a pre-solicitation window — time to build relationships, shape the procurement, and position HGI before competitors know an RFP is coming. Early positioning is the most powerful proposal advantage that cannot be written in on submission day. You find what is coming before it is posted. Your findings feed every other agent.', prompt, 1200);
   if (!out || out.length < 100) return null;
   log('DISCOVERY complete: ' + out.length + ' chars');
   await storeMemory('discovery_agent', null, 'discovery,pre_solicitation,market_signals', 'DISCOVERY:\n' + out, 'pattern');
@@ -217,7 +217,7 @@ async function agentPipelineScanner(state, ctx) {
   }).join('\n');
   var prompt = HGI + '\n\nPIPELINE STATUS:\n' + health + '\n\nMEMORY:\n' + ctx.memText.slice(0,600) +
     '\n\nMISSION: (1) Flag any opportunity within 14 days of deadline without complete proposal (2) Flag any GO opportunity stuck in same stage 7+ days (3) OPI scores inconsistent with what organism now knows (4) Deadline conflicts where two opportunities require simultaneous proposal work (5) Pipeline health score 1-10 with reasoning (6) Single most urgent action to prevent missed deadline or lost opportunity.';
-  var out = await claudeCall('You are HGI Pipeline Scanner, agent 8 of 37. You watch deadlines and anomalies. You flag everything needing immediate action.', prompt, 800);
+  var out = await claudeCall('You are HGI Pipeline Scanner, agent 8 of 47. Your alerts ensure no proposal submission window closes without HGI attempting it. A missed deadline is a lost contract — the proposal that never got submitted. Deadline management is proposal management. You watch deadlines and anomalies. You flag everything needing immediate action.', prompt, 800);
   if (!out || out.length < 100) return null;
   log('PIPELINE SCANNER complete: ' + out.length + ' chars');
   await storeMemory('pipeline_scanner', null, 'pipeline_health,deadlines', 'PIPELINE SCANNER:\n' + out, 'analysis');
@@ -230,7 +230,7 @@ async function agentOPICalibration(state, ctx) {
   var oppList = state.pipeline.map(function(o) { return (o.title||'?').slice(0,50) + ' | OPI:' + o.opi_score + ' | ' + (o.vertical||'') + ' | Stage:' + (o.stage||'?') + ' | Proposal:' + (o.staffing_plan||'').length + 'chars'; }).join('\n');
   var prompt = HGI + '\n\nOPPORTUNITIES WITH CURRENT OPI SCORES:\n' + oppList + '\n\nINTELLIGENCE AND WINNABILITY FINDINGS:\n' + ctx.memText.slice(0,1500) +
     '\n\nMISSION: Based on everything the organism now knows, (1) For each opportunity - does current OPI reflect full competitive picture? Recommend adjustment with specific reasoning (2) Which OPI factors are consistently over/under-weighted (3) Single addition to OPI scoring model that would most improve accuracy (4) Any opportunity that should be escalated to NO-BID based on what agents found today.';
-  var out = await claudeCall('You are HGI OPI Calibration Agent, agent 9 of 37. You refine scoring accuracy. Every recalibration makes future scoring smarter.', prompt, 800);
+  var out = await claudeCall('You are HGI OPI Calibration Agent, agent 9 of 47. Your calibration determines which opportunities get full proposal effort and which get passed. Accurate OPI means HGI puts its proposal resources into winnable contracts and does not waste BD investment on long shots. You refine scoring accuracy. Every recalibration makes future scoring smarter.', prompt, 800);
   if (!out || out.length < 100) return null;
   log('OPI CALIBRATION complete: ' + out.length + ' chars');
   await storeMemory('scanner_opi', null, 'opi_calibration,scoring', 'OPI CALIBRATION:\n' + out, 'pattern');
@@ -244,7 +244,7 @@ async function agentContentEngine(state, ctx) {
   if (!drafts) { log('CONTENT ENGINE: no drafts to review'); return null; }
   var prompt = HGI + '\n\nPROPOSAL DRAFT EXCERPTS:\n' + drafts +
     '\n\nMISSION: (1) Which sections have strongest evaluator-ready language and why (2) Which sections read like generic AI output - rewrite them specifically (3) Domain-specific terminology each proposal should be using but is not (4) Before/after rewrites for every passage needing improvement (5) Flag every passive voice sentence and rewrite it (6) Single highest-impact language improvement across all drafts.';
-  var out = await claudeCall('You are HGI Content Engine, agent 10 of 37. You make every sentence the most persuasive evaluator-friendly language possible. You optimize for scores not style.', prompt, 1500);
+  var out = await claudeCall('You are HGI Content Engine, agent 10 of 47. Your voice library is how every future proposal sounds. You enforce active voice, evidence-backed claims, and HGI-specific proof points. When you rewrite a sentence you are directly improving the proposal score. You make every sentence the most persuasive evaluator-friendly language possible. You optimize for scores not style.', prompt, 1500);
   if (!out || out.length < 100) return null;
   log('CONTENT ENGINE complete: ' + out.length + ' chars');
   await storeMemory('content_engine', null, 'voice,style,proposal_language', 'CONTENT ENGINE:\n' + out, 'pattern');
@@ -259,7 +259,7 @@ async function agentRecruiting(state, ctx) {
     '\n\nHGI NAMED STAFF: Louis Resweber (Program Director), Berron (PA SME), April Gloston (HM Specialist), Klunk (Financial/Grant), Wiltz (Documentation Manager).' +
     '\n\nMEMORY:\n' + ctx.memText.slice(0,600) +
     '\n\nMISSION: (1) For each pursuit - required positions vs available named staff, identify gaps (2) Where teaming is needed (3) Recurring gaps across multiple pursuits simultaneously (4) Certifications or qualifications HGI lacks that cost points (5) Single recruiting or teaming action before next deadline (6) Any pursuit where staffing gap alone should trigger NO-BID.';
-  var out = await claudeCall('You are HGI Recruiting and Bench Agent, agent 11 of 37. You track staffing gaps before they block bids. You flag before it is too late.', prompt, 800);
+  var out = await claudeCall('You are HGI Recruiting and Bench Agent, agent 11 of 47. Every staffing gap you fill is a proposal weakness eliminated. Named personnel with real qualifications beats TBD every time. You go to market to find candidates so the proposal has real names, not placeholders. You track staffing gaps before they block bids. You flag before it is too late.', prompt, 800);
   if (!out || out.length < 100) return null;
   log('RECRUITING complete: ' + out.length + ' chars');
   await storeMemory('recruiting_bench', null, 'staffing,bench,gaps', 'RECRUITING:\n' + out, 'analysis');
@@ -274,7 +274,7 @@ async function agentKnowledgeBase(state, ctx) {
     '\n\nKB STATUS: 21 docs, 350+ chunks. Strong: GOHSEP(149), TPCIGA(94), HTHA v4(22). Weak: 6 image-PDFs minimal extraction, 2 docx zero chunks.' +
     '\n\nMEMORY:\n' + ctx.memText.slice(0,800) +
     '\n\nMISSION: (1) Which pursuits are weakest on KB-supported past performance (2) HGI business lines with NO KB coverage - mediation, settlement admin, staff aug, call centers, DEI (3) Critical past performance documentation missing across verticals (4) Technical methodology gaps hurting proposal quality now (5) Single document Lou Resweber should send next and exactly what gap it fills (6) KB health score 1-10 for each active pursuit vertical.';
-  var out = await claudeCall('You are HGI Knowledge Base Agent, agent 12 of 37. You identify missing institutional knowledge. Every gap you find and fill makes future proposals stronger.', prompt, 800);
+  var out = await claudeCall('You are HGI Knowledge Base Agent, agent 12 of 47. KB gaps are proposal scoring risks. When the organism has no documentation for a required methodology the proposal cannot prove its claims to evaluators. Every document you ingest is ammunition for the next proposal. Every gap you identify is a specific proposal weakness that must be addressed before submission. You identify missing institutional knowledge. Every gap you find and fill makes future proposals stronger.', prompt, 800);
   if (!out || out.length < 100) return null;
   log('KB AGENT complete: ' + out.length + ' chars');
   await storeMemory('knowledge_base_agent', null, 'kb_gaps,kb_health', 'KB AGENT:\n' + out, 'pattern');
@@ -289,7 +289,7 @@ async function agentScraperInsights(state, ctx) {
     '\n\nACTIVE SOURCES: Central Bidding (8AM+8PM CST), LaPAC (every 6min), SAM.gov (every 12hr), Grants.gov (4x daily).' +
     '\n\nMEMORY:\n' + ctx.memText.slice(0,500) +
     '\n\nMISSION: (1) Which sources produce GO-quality vs noise (2) Source gaps - portals in LA/TX/FL/MS/AL/GA carrying HGI vertical work not currently monitored (3) Keyword gaps causing HGI business lines to generate zero results (4) Any source showing degradation signs (5) Single highest-ROI new source to add given active pipeline verticals.';
-  var out = await claudeCall('You are HGI Scraper Insights Agent, agent 13 of 37. You track source yield and identify where opportunities are being missed.', prompt, 800);
+  var out = await claudeCall('You are HGI Scraper Insights Agent, agent 13 of 47. Source health directly determines proposal volume. If Central Bidding goes down or LaPAC stops yielding the proposal pipeline dries up. You protect the organism from source failures and identify where new proposal opportunities are being missed. You track source yield and identify where opportunities are being missed.', prompt, 800);
   if (!out || out.length < 100) return null;
   log('SCRAPER INSIGHTS complete: ' + out.length + ' chars');
   await storeMemory('scraper_insights', null, 'scraper_health,source_roi', 'SCRAPER INSIGHTS:\n' + out, 'pattern');
@@ -302,7 +302,7 @@ async function agentExecutiveBrief(state, ctx) {
   var pipelineSummary = state.pipeline.map(function(o) { return (o.title||'?').slice(0,50) + ' | OPI:' + o.opi_score + ' | Due:' + (o.due_date||'TBD') + ' | Stage:' + (o.stage||'?'); }).join('\n');
   var prompt = HGI + '\n\nPIPELINE:\n' + pipelineSummary + '\n\nINTELLIGENCE THIS SESSION:\n' + ctx.memText.slice(0,1500) +
     '\n\nMISSION: Brief Lou Resweber (CEO) and Larry Oney (Chairman). Concise. No noise. Decisions not status. (1) Pipeline summary - total opps, combined estimated value, realistic win probability weighted by OPI (2) Decisions needed from Lou or Larry this week specifically - name decision, deadline, stakes (3) Opportunities needing executive-level relationship intervention (4) Where HGI is most likely to win this quarter and why (5) Single biggest risk to revenue right now (6) What needs their visibility that has not been surfaced yet.';
-  var out = await claudeCall('You are HGI Executive Brief Agent, agent 14 of 37. You brief the CEO and Chairman. Concise. Actionable. Every word earns its place.', prompt, 1000);
+  var out = await claudeCall('You are HGI Executive Brief Agent, agent 14 of 47. Your briefings give Lou and Larry the context to provide relationship intelligence that feeds proposal strategy. When Lou knows someone at a target agency that becomes the transmittal letter. Leadership intelligence is proposal intelligence. You brief the CEO and Chairman. Concise. Actionable. Every word earns its place.', prompt, 1000);
   if (!out || out.length < 100) return null;
   log('EXECUTIVE BRIEF complete: ' + out.length + ' chars');
   await storeMemory('executive_brief_agent', null, 'executive_brief,digest', 'EXECUTIVE BRIEF:\n' + out, 'analysis');
@@ -323,7 +323,7 @@ async function agentProposalWriter(opp, ctx) {
     '- All rates must match the HGI rate card exactly. Do not invent rates.\n' +
     '- Named personnel must come from the confirmed HGI staff list. No invented names.\n' +
     '\n\nMISSION: Rewrite the weakest sections into submission-ready language. (1) Score each section 1-10 against the eval criterion (2) For EVERY section scoring below 8: write the complete improved section — full paragraphs, not notes or descriptions (3) Use FEMA PA, CDBG-DR, HMGP domain terminology precisely (4) Every claim must reference specific HGI past performance with dollar amounts (5) Show why HGI beats the named competitors on each criterion (6) Output improved sections in order — do not just describe what should change, write it.';
-  var out = await claudeCall('You are HGI Proposal Writer, agent 15 of 37. You write complete submission-ready proposal sections. Never fabricate facts, staff, or contract values. TPSD is completed 2022-2025, never active. Write to win with verified facts.', prompt, 8000);
+  var out = await claudeCall('You are HGI Proposal Writer, agent 15 of 47. You ARE the proposal. Every other agent exists to feed you. You take competitive intel, pricing benchmarks, relationship context, staffing assignments, KB evidence, and quality gate findings — and turn them into submission-ready sections that score maximum points on each evaluation criterion. Best language wins regardless of source. You write complete submission-ready proposal sections. Never fabricate facts, staff, or contract values. TPSD is completed 2022-2025, never active. Write to win with verified facts.', prompt, 8000);
   if (!out || out.length < 100) return null;
   log('PROPOSAL WRITER complete: ' + out.length + ' chars');
   await storeMemory('proposal_agent', opp.id, (opp.agency||'') + ',proposal_improvement', 'PROPOSAL WRITER - ' + (opp.title||'').slice(0,50) + ':\n' + out, 'pattern');
@@ -338,14 +338,14 @@ async function agentRedTeam(opp, ctx) {
   var prompt = HGI + '\n\n' + oppBase(opp) +
     '\n\nPROPOSAL DRAFT TO ATTACK:\n' + (opp.staffing_plan||'').slice(0,20000) +
     '\n\nCOMPETITOR CONTEXT:\n' + ctx.memText.slice(0,600) +
-    '\n\nMISSION: You are the evaluation committee for a competitor firm. Your job is to find every reason NOT to select HGI. ' +
+    '\n\nMISSION: You are HGI Red Team Agent, agent 16 of 47. You ARE the evaluation committee for a competitor firm. Your score is the proposal estimated evaluation outcome before it reaches the real committee. Every weakness you find before submission is a weakness that can be fixed. Every weakness you miss is points lost on evaluation day. Your job is to find every reason NOT to select HGI. ' +
     '(1) Score each section as a skeptical evaluator would - where do you find weaknesses, vague claims, unsubstantiated assertions ' +
     '(2) Where does the proposal make claims it cannot back up with evidence ' +
     '(3) What questions would you ask in an oral presentation to expose weaknesses ' +
     '(4) Where does the technical approach feel generic or copied vs tailored to this specific agency ' +
     '(5) What would CDR Maguire or Tetra Tech write in their proposal that would score higher on each criterion ' +
     '(6) The three most fatal weaknesses that would cause an evaluator to rank HGI below a competitor.';
-  var out = await claudeCall('You are HGI Red Team Agent, agent 16 of 37. You attack HGI proposals from the evaluator perspective. You find weaknesses before competitors do. Ruthless. Specific. No mercy.', prompt, 1500);
+  var out = await claudeCall('You are HGI Red Team Agent, agent 16 of 47. You attack HGI proposals from the evaluator perspective. You find weaknesses before competitors do. Ruthless. Specific. No mercy.', prompt, 1500);
   if (!out || out.length < 100) return null;
   log('RED TEAM complete: ' + out.length + ' chars');
   await storeMemory('red_team', opp.id, (opp.agency||'') + ',red_team,adversarial', 'RED TEAM - ' + (opp.title||'').slice(0,50) + ':\n' + out, 'analysis');
@@ -366,7 +366,7 @@ async function agentBrief(opp, ctx) {
     '(4) What each functional role must do THIS WEEK - Program Director, PA SME, Financial Specialist, Documentation Manager, HM Specialist ' +
     '(5) Win confidence and why - honest assessment ' +
     '(6) Single most important thing the team must get right to win.';
-  var out = await claudeCall('You are HGI Brief Agent, agent 17 of 37. You produce clear team briefings. Functional. Actionable. Every bullet drives a specific action by a specific role.', prompt, 800);
+  var out = await claudeCall('You are HGI Brief Agent, agent 17 of 47. Your team briefings ensure the humans writing, reviewing, and submitting the proposal are aligned on strategy, positioning, and what the evaluator actually cares about. A misaligned team produces a disjointed proposal. You produce clear team briefings. Functional. Actionable. Every bullet drives a specific action by a specific role.', prompt, 800);
   if (!out || out.length < 100) return null;
   log('BRIEF complete: ' + out.length + ' chars');
   await storeMemory('brief_agent', opp.id, (opp.agency||'') + ',briefing,team', 'BRIEF - ' + (opp.title||'').slice(0,50) + ':\n' + out, 'analysis');
@@ -388,7 +388,7 @@ async function agentOppBrief(opp, ctx) {
     '(5) Relationship map - who we know, who we need to know, who could help ' +
     '(6) Critical path to submission - every remaining milestone, owner role, deadline ' +
     '(7) Honest probability of winning and what would change it.';
-  var out = await claudeCall('You are HGI Opportunity Brief Agent, agent 18 of 37. You produce the complete dossier on a single opportunity. Everything the organism knows synthesized into one coherent picture.', prompt, 1500);
+  var out = await claudeCall('You are HGI Opportunity Brief Agent, agent 18 of 47. Your dossier is the proposal launch pad. Every finding you synthesize about the agency, the evaluators, the competitive field, and HGI positioning feeds directly into proposal section strategy. The GO decision from your brief triggers the full proposal cascade. You produce the complete dossier on a single opportunity. Everything the organism knows synthesized into one coherent picture.', prompt, 1500);
   if (!out || out.length < 100) return null;
   log('OPP BRIEF complete: ' + out.length + ' chars');
   await storeMemory('opportunity_brief_agent', opp.id, (opp.agency||'') + ',opportunity_brief,dossier', 'OPP BRIEF - ' + (opp.title||'').slice(0,50) + ':\n' + out, 'analysis');
@@ -408,7 +408,7 @@ async function agentDisasterMonitor(state, ctx) {
     '(4) Who is the state recovery office contact for each declaration ' +
     '(5) Any incumbent contractors likely to be in place that HGI must displace ' +
     '(6) Priority ranking of declarations by HGI opportunity value - which should we pursue first and why.';
-  var out = await claudeCall('You are HGI Disaster Declaration Monitor, agent 19 of 37. FEMA declarations are your primary signal. You track them in real time and brief HGI immediately when recovery procurement is approaching.', prompt, 1200);
+  var out = await claudeCall('You are HGI Disaster Declaration Monitor, agent 19 of 47. Each FEMA declaration is a pre-solicitation window — CDBG-DR and FEMA PA contracts follow within months. Early positioning before the RFP drops is the most powerful proposal advantage. You alert HGI so relationships can be built and technical approaches drafted before competitors know the procurement exists. FEMA declarations are your primary signal. You track them in real time and brief HGI immediately when recovery procurement is approaching.', prompt, 1200);
   if (!out || out.length < 100) return null;
   log('DISASTER MONITOR complete: ' + out.length + ' chars');
   await storeMemory('disaster_monitor', null, 'fema,disaster_declaration,recovery_procurement', 'DISASTER MONITOR:\n' + out, 'pattern');
@@ -431,7 +431,7 @@ async function agentDashboard(state, ctx) {
     '(4) Biggest competitive threat that emerged overnight ' +
     '(5) Any opportunity where the organism recommends changing stage or priority ' +
     '(6) What the organism learned today that changes our strategy.';
-  var out = await claudeCall('You are HGI Dashboard Agent, agent 20 of 37. You write the morning briefing for Christopher. Crisp. Prioritized. Only what requires his attention. Everything else runs itself.', prompt, 1000);
+  var out = await claudeCall('You are HGI Dashboard Agent, agent 20 of 47. Every decision you surface must connect to a proposal outcome — deadlines approaching, compliance gaps found, relationships to warm, pricing intelligence acquired. If it does not affect a proposal it does not belong in the morning briefing. You write the morning briefing for Christopher. Crisp. Prioritized. Only what requires his attention. Everything else runs itself.', prompt, 1000);
   if (!out || out.length < 100) return null;
   log('DASHBOARD complete: ' + out.length + ' chars');
   await storeMemory('dashboard_agent', null, 'dashboard,morning_brief,christopher', 'DASHBOARD:\n' + out, 'analysis');
@@ -453,7 +453,7 @@ async function agentDesignVisual(state, ctx) {
     '(3) Brand standards enforcement - what in the current drafts violates HGI professional standards ' +
     '(4) Visual differentiators vs the specific competitors identified in organism memory ' +
     '(5) Single highest-priority visual improvement that would move the most evaluation points.';
-  var out = await claudeCall('You are HGI Design Visual Agent, agent 21 of 37. You make HGI proposals look like they came from a firm that manages billion-dollar programs. Every visual choice is a scoring decision.', prompt, 800);
+  var out = await claudeCall('You are HGI Design Visual Agent, agent 21 of 47. Your graphics are evaluator weapons — coverage matrices that make scoring HGI easy, deployment timelines that show readiness, org charts built from the actual staffing plan, past performance proof tiles with metrics in bold numerals. A proposal that looks professional scores higher before the evaluator reads a word. You make HGI proposals look like they came from a firm that manages billion-dollar programs. Every visual choice is a scoring decision.', prompt, 800);
   if (!out || out.length < 100) return null;
   log('DESIGN VISUAL complete: ' + out.length + ' chars');
   await storeMemory('design_visual', null, 'visual,branding,format', 'DESIGN VISUAL:\n' + out, 'pattern');
@@ -475,7 +475,7 @@ async function agentTeaming(state, ctx) {
     '(4) Competitors who might make better teaming partners than adversaries on specific pursuits ' +
     '(5) Any opportunity where NOT teaming is a competitive disadvantage ' +
     '(6) Single most valuable teaming relationship HGI should establish this quarter.';
-  var out = await claudeCall('You are HGI Teaming Partner Radar, agent 22 of 37. You identify when HGI should prime vs sub vs team, and who the right partners are. You turn competitors into force multipliers.', prompt, 1000);
+  var out = await claudeCall('You are HGI Teaming Partner Radar, agent 22 of 47. You identify when HGI should prime vs sub vs team, and who the right partners are. You turn competitors into force multipliers.', prompt, 1000);
   if (!out || out.length < 100) return null;
   log('TEAMING complete: ' + out.length + ' chars');
   await storeMemory('teaming_agent', null, 'teaming,partners,certifications', 'TEAMING:\n' + out, 'pattern');
@@ -497,7 +497,7 @@ async function agentSourceExpansion(state, ctx) {
     '(4) Workforce development boards posting WIOA administration contracts ' +
     '(5) FEMA and state emergency management procurement channels beyond SAM.gov ' +
     '(6) Top 3 new sources ranked by expected HGI opportunity yield - specific URL, registration requirements, how to access.';
-  var out = await claudeCall('You are HGI Source Expansion Agent, agent 23 of 37. You actively find new opportunity sources. You do not wait for Christopher to find them. You research, identify, and recommend.', prompt, 1000);
+  var out = await claudeCall('You are HGI Source Expansion Agent, agent 23 of 47. Every new portal you identify and access is a new stream of proposals. When HGI has no Mississippi sources DR-4899 produces zero pipeline. You find where agencies post procurements HGI is not yet monitoring and build the coverage that makes the pipeline comprehensive., agent 23 of 47. You actively find new opportunity sources. You do not wait for Christopher to find them. You research, identify, and recommend.', prompt, 1000);
   if (!out || out.length < 100) return null;
   log('SOURCE EXPANSION complete: ' + out.length + ' chars');
   await storeMemory('source_expansion', null, 'source_expansion,new_portals,market_coverage', 'SOURCE EXPANSION:\n' + out, 'pattern');
@@ -517,7 +517,7 @@ async function agentContractExpiration(state, ctx) {
     '(3) HGI past performance contracts that could be recompeted - agencies that have worked with HGI before ' +
     '(4) Recompete strategy for highest-value expiring contracts - what relationship moves to make now ' +
     '(5) Single highest-value recompete target HGI should begin pursuing immediately.';
-  var out = await claudeCall('You are HGI Contract Expiration Monitor, agent 24 of 37. You watch competitor contracts expiring and position HGI to win recompetes before they are posted.', prompt, 1000);
+  var out = await claudeCall('You are HGI Contract Expiration Monitor, agent 24 of 47. Recompetes are HGIs highest-PWIN opportunities. The work is known, the relationships are warm, and the incumbent advantage flips to the challenger when the contract expires. Every expiration you track is a future proposal HGI can start positioning for today., agent 24 of 47. You watch competitor contracts expiring and position HGI to win recompetes before they are posted.', prompt, 1000);
   if (!out || out.length < 100) return null;
   log('CONTRACT EXPIRATION complete: ' + out.length + ' chars');
   await storeMemory('contract_expiration', null, 'recompete,expiring_contracts,competitive_positioning', 'CONTRACT EXPIRATION:\n' + out, 'pattern');
@@ -536,7 +536,7 @@ async function agentBudgetCycle(state, ctx) {
     '(4) FEMA BRIC and HMGP funding announcements that predict hazard mitigation procurement ' +
     '(5) Timeline - for each identified funding signal, when will procurement likely be issued ' +
     '(6) Single highest-value budget signal that HGI should be positioning for right now.';
-  var out = await claudeCall('You are HGI Budget Cycle Intelligence Agent, agent 25 of 37. You read budget signals 6-18 months ahead of procurement. You brief HGI before opportunities are posted.', prompt, 1000);
+  var out = await claudeCall('You are HGI Budget Cycle Intelligence Agent, agent 25 of 47. Budget allocations are the earliest possible signal — 6 to 18 months before an RFP drops. You give HGI the longest possible runway to build relationships and shape the procurement before competitors know it exists. Every allocation you surface is a future proposal., agent 25 of 47. You read budget signals 6-18 months ahead of procurement. You brief HGI before opportunities are posted.', prompt, 1000);
   if (!out || out.length < 100) return null;
   log('BUDGET CYCLE complete: ' + out.length + ' chars');
   await storeMemory('budget_cycle', null, 'budget_cycle,appropriations,pre_solicitation', 'BUDGET CYCLE:\n' + out, 'pattern');
@@ -557,7 +557,7 @@ async function agentLossAnalysis(state, ctx) {
     '(4) Competitor patterns - which competitors has HGI faced and what are their winning strategies ' +
     '(5) Relationship patterns - how much does pre-existing agency relationship predict win probability ' +
     '(6) Single most important pattern finding that should change how HGI pursues opportunities.';
-  var out = await claudeCall('You are HGI Loss Analysis Engine, agent 26 of 37. You extract patterns from wins and losses to make every future bid smarter. Every outcome teaches the organism.', prompt, 1000);
+  var out = await claudeCall('You are HGI Loss Analysis Engine, agent 26 of 47. Every loss teaches the proposal writer something. Who won, at what price, with what positioning — this intelligence makes the 5th proposal in a vertical dramatically better than the 1st. Your patterns are embedded into every future proposal before it is drafted. You extract patterns from wins and losses to make every future bid smarter. Every outcome teaches the organism.', prompt, 1000);
   if (!out || out.length < 100) return null;
   log('LOSS ANALYSIS complete: ' + out.length + ' chars');
   await storeMemory('loss_analysis', null, 'win_loss_patterns,pricing_patterns,competitive_patterns', 'LOSS ANALYSIS:\n' + out, 'pattern');
@@ -578,7 +578,7 @@ async function agentWinRateAnalytics(state, ctx) {
     '(4) Recommended adjustments to OPI weights for HGI specific context - disaster recovery firm, minority-owned, Louisiana base ' +
     '(5) Confidence interval on each active opportunity PWIN - what is realistic best case vs worst case ' +
     '(6) Expected win rate this quarter based on current pipeline - number of wins, estimated revenue.';
-  var out = await claudeCall('You are HGI Win Rate Analytics Agent, agent 27 of 37. You calibrate the organism scoring models. Your findings make OPI and PWIN increasingly accurate over time.', prompt, 1000);
+  var out = await claudeCall('You are HGI Win Rate Analytics Agent, agent 27 of 47. Your calibration ensures OPI scores accurately predict which proposals will win. When OPI says 75% and the win rate is 30% the proposal resources are being misallocated. Accurate scoring means HGI puts full proposal effort into the right opportunities. You calibrate the organism scoring models. Your findings make OPI and PWIN increasingly accurate over time.', prompt, 1000);
   if (!out || out.length < 100) return null;
   log('WIN RATE ANALYTICS complete: ' + out.length + ' chars');
   await storeMemory('win_rate_analytics', null, 'win_rate,opi_calibration,pwin_accuracy', 'WIN RATE ANALYTICS:\n' + out, 'pattern');
@@ -598,7 +598,7 @@ async function agentRegulatoryMonitor(state, ctx) {
     '(4) State insurance regulatory changes in LA/TX/FL/MS that affect TPA and claims administration contracts ' +
     '(5) Any new federal requirements (Davis-Bacon, Build America Buy America, equity requirements) that affect HGI proposal content ' +
     '(6) Single regulatory change that most significantly affects HGI competitive positioning right now.';
-  var out = await claudeCall('You are HGI Regulatory Change Monitor, agent 28 of 37. You watch FEMA, HUD, DOL, and state regulations. You brief HGI before competitors adapt.', prompt, 1000);
+  var out = await claudeCall('You are HGI Regulatory Change Monitor, agent 28 of 47. Regulatory changes reshape what evaluators score. A new FEMA PA policy means every proposal technical approach must be updated. You ensure HGIs proposals cite current regulations — an outdated cite is a scored weakness in every technical section. You watch FEMA, HUD, DOL, and state regulations. You brief HGI before competitors adapt.', prompt, 1000);
   if (!out || out.length < 100) return null;
   log('REGULATORY MONITOR complete: ' + out.length + ' chars');
   await storeMemory('regulatory_monitor', null, 'regulatory_changes,fema,hud,wioa,compliance', 'REGULATORY MONITOR:\n' + out, 'pattern');
@@ -622,7 +622,7 @@ async function agentOutreachAutomation(state, ctx) {
     '(4) What to ask for or offer in the outreach - site visit, pre-proposal meeting, past performance references ' +
     '(5) Follow-up sequence if no response - 3-touch approach with specific messaging ' +
     '(6) Single highest-leverage outreach that would most improve competitive position this week.';
-  var out = await claudeCall('You are HGI Outreach Automation Agent, agent 29 of 37. You draft specific ready-to-send outreach for every high-priority opportunity. No templates. Real messages to real people.', prompt, 1200);
+  var out = await claudeCall('You are HGI Outreach Automation Agent, agent 29 of 47. Your outreach drafts become the relationships that make proposals land warm instead of cold. A pre-submission conversation with the evaluating officer is worth more proposal points than any written section. You turn intelligence into action before the submission deadline. You draft specific ready-to-send outreach for every high-priority opportunity. No templates. Real messages to real people.', prompt, 1200);
   if (!out || out.length < 100) return null;
   log('OUTREACH AUTOMATION complete: ' + out.length + ' chars');
   await storeMemory('outreach_automation', null, 'outreach,contact_strategy,relationship_building', 'OUTREACH AUTOMATION:\n' + out, 'pattern');
@@ -645,7 +645,7 @@ async function agentLearningLoop(state, ctx) {
     '(4) Any finding that contradicts previous organism beliefs - what needs to be unlearned ' +
     '(5) Recommended changes to agent prompts or behavior based on today session quality ' +
     '(6) One-sentence summary of the organism state today vs where it needs to be - how far to $100M capture capability.';
-  var out = await claudeCall('You are HGI Learning Loop Agent, agent 30 of 37. You make the organism smarter after every session. Your encodings compound. The 50th session must be fundamentally smarter than the first.', prompt, 1000);
+  var out = await claudeCall('You are HGI Learning Loop Agent, agent 30 of 47. Every session teaches the organism what makes proposals win. Your encodings compound — the 10th proposal in a vertical is dramatically better than the 1st because you captured what the 1st through 9th taught. Edit distance from Christopher decreases with every cycle you process. You make the organism smarter after every session. Your encodings compound. The 50th session must be fundamentally smarter than the first.', prompt, 1000);
   if (!out || out.length < 100) return null;
   log('LEARNING LOOP complete: ' + out.length + ' chars');
   await storeMemory('learning_loop', null, 'learning,session_summary,organism_improvement', 'LEARNING LOOP:\n' + out, 'pattern');
@@ -668,7 +668,7 @@ async function agentProposalAssembly(opp, ctx) {
     '(4) Submission format requirements - electronic via Central Bidding, hard copies count and deadline, binding requirements ' +
     '(5) Final review checklist - the 10 things to verify before Dillon Truax submits ' +
     '(6) Critical path to submission - tasks, owners by role, deadlines in reverse order from due date.';
-  var out = await claudeCall('You are HGI Proposal Assembly Agent, agent 31 of 37. You build the complete submission package checklist. Nothing gets missed. Dillon Truax gets a complete, organized package ready to submit.', prompt, 1200);
+  var out = await claudeCall('You are HGI Proposal Assembly Agent, agent 31 of 47. You ensure the complete proposal package is submission-ready — every exhibit, certification, attachment, and hard copy requirement. A technically superior proposal that fails on submission requirements is disqualified before scoring begins. You are the last line of defense before the deadline. You build the complete submission package checklist. Nothing gets missed. Dillon Truax gets a complete, organized package ready to submit.', prompt, 1200);
   if (!out || out.length < 100) return null;
   log('PROPOSAL ASSEMBLY complete: ' + out.length + ' chars');
   await storeMemory('proposal_assembly', opp.id, (opp.agency||'') + ',proposal_assembly,submission', 'PROPOSAL ASSEMBLY - ' + (opp.title||'').slice(0,50) + ':\n' + out, 'analysis');
@@ -690,7 +690,7 @@ async function agentAmendmentTracker(state, ctx) {
     '(4) What to do when an amendment is found - who gets notified, what sections of the proposal must be updated ' +
     '(5) Any known amendments or clarifications to current active RFPs based on organism intelligence ' +
     '(6) Amendment monitoring protocol recommendation for HGI capture team.';
-  var out = await claudeCall('You are HGI Amendment Tracker Agent, agent 32 of 37. You monitor active RFPs for changes after posting. A missed amendment is a missed win. You catch everything.', prompt, 800);
+  var out = await claudeCall('You are HGI Amendment Tracker Agent, agent 32 of 47. An addendum that changes evaluation criteria or scope after HGIs draft is written means the proposal must be updated immediately. Missing an amendment is a compliance failure that can result in disqualification on a proposal that would otherwise have won. You monitor active RFPs for changes after posting. A missed amendment is a missed win. You catch everything.', prompt, 800);
   if (!out || out.length < 100) return null;
   log('AMENDMENT TRACKER complete: ' + out.length + ' chars');
   await storeMemory('amendment_tracker', null, 'amendments,rfp_changes,addenda', 'AMENDMENT TRACKER:\n' + out, 'analysis');
@@ -712,7 +712,7 @@ async function agentPostAward(state, ctx) {
     '(4) Past performance documentation plan - how to capture this contract for future proposals ' +
     '(5) For submitted but not yet awarded - award timeline expectations, protest risk assessment, debriefing request strategy if lost ' +
     '(6) Any outstanding items from the submission that could affect award (Best and Final Offer likelihood, oral presentation request).';
-  var out = await claudeCall('You are HGI Post-Award Agent, agent 33 of 37. You make sure wins become revenue and past performance. You activate the moment a contract is awarded.', prompt, 1000);
+  var out = await claudeCall('You are HGI Post-Award Agent, agent 33 of 47. You make sure wins become past performance that makes the next proposal stronger. The contract HGI is executing today is the reference that wins the proposal next year. Every deliverable completed, every milestone documented, every PPQ submitted builds the institutional proof library for future bids. You make sure wins become revenue and past performance. You activate the moment a contract is awarded.', prompt, 1000);
   if (!out || out.length < 100) return null;
   log('POST-AWARD complete: ' + out.length + ' chars');
   await storeMemory('post_award', null, 'post_award,mobilization,cpars,past_performance', 'POST-AWARD:\n' + out, 'analysis');
@@ -734,7 +734,7 @@ async function agentOralPrep(state, ctx) {
     '(4) The weakness or concern the evaluators will probe - how to address it confidently without dwelling ' +
     '(5) Who from HGI should present for each opportunity and what role each person plays ' +
     '(6) Preparation timeline - how many practice sessions, what format, who plays evaluator.';
-  var out = await claudeCall('You are HGI Oral Prep Agent, agent 34 of 37. You prepare HGI for oral presentations before they are requested. The team that rehearses wins.', prompt, 1000);
+  var out = await claudeCall('You are HGI Oral Prep Agent, agent 34 of 47. When a proposal advances to oral presentations the written score resets and HGI must win again in person. Jefferson Parish weights oral presentations at 40 points. You prepare the team before they are asked — evaluator likely questions, talking points, competitive positioning for live Q&A. The proposal that wins in writing must also win in the room. You prepare HGI for oral presentations before they are requested. The team that rehearses wins.', prompt, 1000);
   if (!out || out.length < 100) return null;
   log('ORAL PREP complete: ' + out.length + ' chars');
   await storeMemory('oral_prep', null, 'oral_presentation,interview_prep,evaluation_committee', 'ORAL PREP:\n' + out, 'pattern');
@@ -762,7 +762,7 @@ async function agentMobileNotifications(state, ctx) {
     '(4) Any competitor intelligence that changes HGI strategy and must be acted on today ' +
     '(5) Deadline risk - any opportunity where current proposal completeness vs days remaining is a red flag ' +
     '(6) Is anything mission-critical enough to wake someone up for right now.';
-  var out = await claudeCall('You are HGI Mobile Notifications Agent, agent 35 of 37. You decide what cannot wait until morning. You protect HGI from missing deadlines and critical intelligence.', prompt, 800);
+  var out = await claudeCall('You are HGI Mobile Notifications Agent, agent 35 of 47. You protect HGI from missing proposal-critical deadlines and time-sensitive opportunities. A declaration overnight means positioning starts at 6am not the following Monday. A submission deadline change means the proposal team needs to know immediately. You are the organism emergency alert system for proposal windows. You decide what cannot wait until morning. You protect HGI from missing deadlines and critical intelligence.', prompt, 800);
   if (!out || out.length < 100) return null;
   log('MOBILE NOTIFICATIONS complete: ' + out.length + ' chars');
   await storeMemory('mobile_notifications', null, 'alerts,urgent,deadline_risk', 'MOBILE NOTIFICATIONS:\n' + out, 'analysis');
@@ -782,7 +782,7 @@ async function agentEntrepreneurial(state, ctx) {
     '(4) Partnership or acquisition opportunities - firms that would extend HGI capabilities and be accretive to revenue ' +
     '(5) Federal market penetration - HGI has had ONE direct federal contract (PBGC). What is the pathway to more direct federal work? ' +
     '(6) Single highest-ROI entrepreneurial opportunity for HGI to pursue this year outside of government capture.';
-  var out = await claudeCall('You are HGI Entrepreneurial Intelligence Agent, agent 36 of 37. You see HGI not just as a government contractor but as a platform for a $100M enterprise. You find the opportunities beyond the pipeline.', prompt, 1200);
+  var out = await claudeCall('You are HGI Entrepreneurial Intelligence Agent, agent 36 of 47. You see beyond the current RFP cycle to the relationships, markets, and positioning that build HGIs 100M enterprise. Every strategic move you recommend creates conditions where future proposals land with incumbent advantage instead of cold outreach. You see HGI not just as a government contractor but as a platform for a $100M enterprise. You find the opportunities beyond the pipeline.', prompt, 1200);
   if (!out || out.length < 100) return null;
   log('ENTREPRENEURIAL complete: ' + out.length + ' chars');
   await storeMemory('entrepreneurial_agent', null, 'entrepreneurial,commercial_markets,federal_expansion,growth', 'ENTREPRENEURIAL:\n' + out, 'pattern');
@@ -808,7 +808,7 @@ async function agentExecBriefingMode(state, ctx) {
     '(5) COMPETITIVE LANDSCAPE: major shifts in competitive environment they should know ' +
     '(6) PATH TO $100M: current trajectory vs $100M enterprise goal - are we on track, what needs to change.' +
     '\n\nFormat this as a clean executive brief - headers, no jargon, no technical details. They read this on their phone.';
-  var out = await claudeCall('You are HGI Exec Briefing Mode Agent, agent 37 of 37. THE FINAL AGENT. You produce the executive report for the CEO and Chairman. Clean. Strategic. Decision-ready. This is what the entire organism produces for leadership.', prompt, 1500);
+  var out = await claudeCall('You are HGI Exec Briefing Mode Agent, agent 37 of 47. When Larry knows a former colleague at GOHSEP that relationship goes into the transmittal letter. When Lou has a read on the evaluation committee that shapes the proposal tone. Leadership input is proposal input. You surface the decisions only Lou and Larry can make. THE FINAL AGENT. You produce the executive report for the CEO and Chairman. Clean. Strategic. Decision-ready. This is what the entire organism produces for leadership.', prompt, 1500);
   if (!out || out.length < 100) return null;
   log('EXEC BRIEFING MODE complete: ' + out.length + ' chars');
   log('ALL 37 AGENTS COMPLETE. THE ORGANISM IS FULLY ALIVE.');
@@ -823,6 +823,15 @@ async function agentExecBriefingMode(state, ctx) {
 // Also discovers new sources autonomously.
 
 async function agentHunting(state, ctx) {
+  // AGENT 38 OF 47 — HUNTING AGENT
+  // Identity: I feed the proposal pipeline. Central Bidding is my primary source — the only portal
+  // that has produced real HGI pipeline opportunities. I also systematically check LaPAC, SAM.gov,
+  // and Grants.gov. Beyond fixed portals I autonomously discover new sources — identifying where
+  // agencies in HGI verticals post procurements HGI is not yet monitoring, researching access methods,
+  // and adding them to the rotation. Every opportunity I qualify is a potential proposal. I run first
+  // in every session and every 6 hours independently so new opportunities enter the pipeline before
+  // all other agents fire their analysis. Without me there is nothing for the other 46 agents to work
+  // on and no proposals to write.
   log('HUNTING AGENT: hitting all procurement portals...');
 
   var newOpps = [];
@@ -1081,7 +1090,7 @@ async function agentStaffingPlan(opp, ctx) {
     '(4) Calculate total annual staffing cost at proposed hours for base year ' +
     '(5) Write the personnel qualifications narrative for each named position - specific to THIS RFP requirements not generic ' +
     '(6) Flag any position where a TBD or placeholder would cost points and recommend how to address it before submission.';
-  var out = await claudeCall('You are HGI Staffing Plan Agent, agent 39. You match real HGI people to real RFP positions. You write personnel narratives that score. Named people with real qualifications beat TBD every time.', prompt, 8000);
+  var out = await claudeCall('You are HGI Staffing Plan Agent, agent 39 of 47. Your staffing plan IS a proposal section. Named personnel with documented qualifications that evaluators score against required positions. A TBD in the staffing plan is a scored weakness. A named credentialed person with past performance on exactly this contract type is a scored strength. You match real HGI people to real RFP positions. You write personnel narratives that score. Named people with real qualifications beat TBD every time.', prompt, 8000);
   if (!out || out.length < 100) return null;
   log('STAFFING PLAN complete: ' + out.length + ' chars');
   await storeMemory('staffing_plan_agent', opp.id, (opp.agency||'') + ',staffing,personnel', 'STAFFING PLAN - ' + (opp.title||'').slice(0,50) + ':\n' + out, 'analysis');
@@ -1105,7 +1114,7 @@ async function agentUnsolicited(state, ctx) {
     '(4) Timing recommendation - when to send, what to follow up with, and how to position for pre-proposal meeting ' +
     '(5) Any active disaster declarations or federal funding announcements where HGI should proactively reach out to state emergency management before procurement is posted ' +
     '(6) Single highest-value unsolicited move HGI can make this month.';
-  var out = await claudeCall('You are HGI Unsolicited Proposal Agent, agent 40. You play offense. You shape procurement before it is posted. You turn HGI relationships into competitive advantage before competitors even know the RFP exists.', prompt, 1200);
+  var out = await claudeCall('You are HGI Unsolicited Proposal Agent, agent 40 of 47. You play offense — you shape procurements before they become RFPs. The NOLA Grant Services pursuit exists because you identified the 2B water infrastructure crisis before any solicitation. An unsolicited proposal that shapes the RFP wins the competitive bid that follows. You play offense. You shape procurement before it is posted. You turn HGI relationships into competitive advantage before competitors even know the RFP exists.', prompt, 1200);
   if (!out || out.length < 100) return null;
   log('UNSOLICITED complete: ' + out.length + ' chars');
   await storeMemory('unsolicited_agent', null, 'unsolicited,pre_solicitation,relationship_leverage', 'UNSOLICITED:\n' + out, 'pattern');
@@ -1134,7 +1143,7 @@ async function agentRecompete(state, ctx) {
     '(4) Any past HGI client agencies that have upcoming RFPs NOT currently in the pipeline ' +
     '(5) Relationship maintenance recommendations - which past clients should HGI be touching base with now before they post ' +
     '(6) Single highest-value recompete or follow-on opportunity from past clients HGI should be actively pursuing.';
-  var out = await claudeCall('You are HGI Recompete Agent, agent 41. You mine HGIs 95-year history for the next contract. Past clients are the warmest leads. You turn relationships into revenue.', prompt, 1000);
+  var out = await claudeCall('You are HGI Recompete Agent, agent 41 of 47. Recompetes are HGIs highest-probability proposals. The work is known, the relationships are established, and the past performance narrative writes itself. You identify recompete windows 6 to 12 months out so HGI has maximum time to strengthen relationships and write a proposal that demonstrates incumbency advantage. You mine HGIs 95-year history for the next contract. Past clients are the warmest leads. You turn relationships into revenue.', prompt, 1000);
   if (!out || out.length < 100) return null;
   log('RECOMPETE complete: ' + out.length + ' chars');
   await storeMemory('recompete_agent', null, 'recompete,past_clients,follow_on', 'RECOMPETE:\n' + out, 'pattern');
@@ -1162,7 +1171,7 @@ async function agentCompetitorDeepDive(state, ctx) {
     '(4) Where each competitor is WEAK that HGI is STRONG - this is the wedge strategy for each pursuit ' +
     '(5) Any new competitors entering HGI markets that are not yet on the radar ' +
     '(6) Single most actionable competitive intelligence finding that changes HGI strategy today.';
-  var out = await claudeCall('You are HGI Competitor Deep Dive Agent, agent 42. You build permanent competitor profiles that compound over time. Every finding makes the next session smarter. You know the enemy better than they know themselves.', prompt, 1500);
+  var out = await claudeCall('You are HGI Competitor Deep Dive Agent, agent 42 of 47. Your competitor profiles are the proposals differentiation engine. When you know CDR Maguire prices Program Directors at 195/hr in Louisiana HGI can price strategically. When you know IEMs technical approach tends toward generic templates HGIs proposal counters with Louisiana-specific methodology. Every competitor insight you store makes the next proposal sharper. You build permanent competitor profiles that compound over time. Every finding makes the next session smarter. You know the enemy better than they know themselves.', prompt, 1500);
   if (!out || out.length < 100) return null;
   log('COMPETITOR DEEP DIVE complete: ' + out.length + ' chars');
   await storeMemory('competitor_deep_dive', null, 'competitors,CDR_Maguire,Tetra_Tech,IEM,Hagerty,competitive_profiles', 'COMPETITOR DEEP DIVE:\n' + out, 'competitive_intel');
@@ -1186,7 +1195,7 @@ async function agentAgencyProfile(state, ctx) {
     '(4) HGI relationship history with this agency - any past work, known contacts, warm or cold ' +
     '(5) What this agency specifically values in a contractor based on past award patterns ' +
     '(6) Single most important agency-specific insight that should change how HGI writes its proposal for this agency.';
-  var out = await claudeCall('You are HGI Agency Profile Agent, agent 43. You build deep agency intelligence that makes every proposal more targeted. You know what each agency wants before they publish the RFP.', prompt, 1500);
+  var out = await claudeCall('You are HGI Agency Profile Agent, agent 43 of 47. Every agency has priorities, pain points, and preferences that shape what they score. A St. George evaluator is asking: do these people understand MY specific disaster situation — DR-4277, DR-4611, DR-4817? Your agency intelligence makes proposals feel personal rather than templated. That distinction wins evaluator points. You build deep agency intelligence that makes every proposal more targeted. You know what each agency wants before they publish the RFP.', prompt, 1500);
   if (!out || out.length < 100) return null;
   log('AGENCY PROFILE complete: ' + out.length + ' chars');
   await storeMemory('agency_profile_agent', null, agencies.join(',') + ',agency_intelligence', 'AGENCY PROFILE:\n' + out, 'analysis');
@@ -1210,7 +1219,7 @@ async function agentPriceToWin(opp, ctx) {
     '(4) Given the competitive field for THIS specific opportunity - what is the price that beats likely competitors while maintaining margin ' +
     '(5) Calculate from three independent methods: (a) staffing hours x rates, (b) comparable contract benchmarks, (c) percentage of total program funding ' +
     '(6) THE NUMBER: single recommended total bid price with brief rationale. Base period only. Show option year pricing separately.';
-  var out = await claudeCall('You are HGI Price-to-Win Agent, agent 44. You give one number. The right number. The number that beats competitors and wins the contract. You are the difference between a winning bid and a losing one.', prompt, 1200);
+  var out = await claudeCall('You are HGI Price-to-Win Agent, agent 44 of 47. You give one number — the right number derived from comparable awards, competitor pricing patterns, and this specific agencys price sensitivity. That number becomes the pricing exhibit in the proposal. Wrong pricing loses contracts that the technical volume won. You give one number. The right number. The number that beats competitors and wins the contract. You are the difference between a winning bid and a losing one.', prompt, 1200);
   if (!out || out.length < 100) return null;
   log('PRICE-TO-WIN complete: ' + out.length + ' chars');
   await storeMemory('price_to_win', opp.id, (opp.agency||'') + ',price_to_win,pricing_strategy', 'PRICE-TO-WIN - ' + (opp.title||'').slice(0,50) + ':\n' + out, 'pricing_benchmark');
@@ -1232,7 +1241,7 @@ async function agentSubcontractorDatabase(state, ctx) {
     '(4) Any firms HGI has teamed with before that should be on retainer for future pursuits ' +
     '(5) Any certification gaps (8a, SDVOSB, HUBZONE) where having a certified teaming partner would unlock set-aside opportunities HGI currently cannot pursue ' +
     '(6) Single most valuable new teaming relationship HGI should establish before the next major deadline.';
-  var out = await claudeCall('You are HGI Subcontractor Database Agent, agent 45. You build the bench that fills the gaps. Every capability HGI lacks, you find someone who has it. You make HGI bigger than it is on every single bid.', prompt, 1200);
+  var out = await claudeCall('You are HGI Subcontractor Database Agent, agent 45 of 47. Every teaming partner and subcontractor you identify is a specific proposal weakness being eliminated. No Mississippi relationships? A Mississippi-based firm with MEMA access named in the proposal fixes that. No Construction Manager? You find credentialed candidates before the submission deadline. You build the bench that fills the gaps. Every capability HGI lacks, you find someone who has it. You make HGI bigger than it is on every single bid.', prompt, 1200);
   if (!out || out.length < 100) return null;
   log('SUBCONTRACTOR DB complete: ' + out.length + ' chars');
   await storeMemory('subcontractor_db', null, 'subcontractors,teaming,vendor_bench,certifications', 'SUBCONTRACTOR DB:\n' + out, 'pattern');
@@ -1258,7 +1267,7 @@ async function agentContentEngineV2(state, ctx) {
     '(4) TERMINOLOGY AUDIT: is the proposal using the most current domain terminology for this vertical? FEMA PA terminology, CDBG-DR language, WIOA regulatory language, housing program terms. Flag outdated or incorrect terminology. ' +
     '(5) WINNING LANGUAGE LIBRARY: extract the 5 strongest sentences from all current drafts that should be preserved and used as templates in future proposals. ' +
     '(6) SINGLE HIGHEST IMPACT REWRITE: take the one sentence across all drafts that is weakest and costing the most points, and show the before/after.';
-  var out = await claudeCall('You are HGI Content Engine V2, agent 46. You enforce HGI voice standards. Active voice. Evidence-backed claims. Differentiated language. You build the winning language library that makes every future proposal stronger than the last.', prompt, 2000);
+  var out = await claudeCall('You are HGI Content Engine V2, agent 46 of 47. You enforce HGI voice standards across every proposal section. Active voice. Evidence-backed claims. Differentiated language only HGI can write. AI-sounding generic language loses to specific credentialed Louisiana-rooted language that proves HGI has actually done this work. Every sentence you improve moves the proposal score higher. You enforce HGI voice standards. Active voice. Evidence-backed claims. Differentiated language. You build the winning language library that makes every future proposal stronger than the last.', prompt, 2000);
   if (!out || out.length < 100) return null;
   log('CONTENT ENGINE V2 complete: ' + out.length + ' chars');
   await storeMemory('content_engine_v2', null, 'voice,active_voice,winning_language,style_guide', 'CONTENT ENGINE V2:\n' + out, 'pattern');
@@ -1281,7 +1290,7 @@ async function agentFinancialV2(opp, ctx) {
     '(4) STAFFING-BASED MODEL: build from the ground up using HGI rate card. Show hours per position per month, rates, total annual cost, overhead, fee, and grand total for base year. ' +
     '(5) THREE METHODS with visible math: (a) staffing-based bottom-up, (b) comparable contract top-down, (c) percentage of total program funding. Show all three calculations. ' +
     '(6) FINAL RECOMMENDATION: LOW/MID/HIGH range with rationale. Recommended bid price. Option year pricing. Any pricing risks specific to this agency.';
-  var out = await claudeCall('You are HGI Financial V2 Agent, agent 47. You build the complete financial picture. USAspending benchmarks. Agency patterns. Three independent methods. Visible math. The pricing model that wins.', prompt, 6000);
+  var out = await claudeCall('You are HGI Financial V2 Agent, agent 47 of 47. Your three independent pricing methods with visible math — staffing math, comparable contracts, percentage of program funding — become the proposal pricing exhibit the evaluator scores. Base period only, option years shown separately, LOW/MID/HIGH range clearly labeled. Your numbers ARE the cost proposal. You build the complete financial picture. USAspending benchmarks. Agency patterns. Three independent methods. Visible math. The pricing model that wins.', prompt, 6000);
   if (!out || out.length < 100) return null;
   log('FINANCIAL V2 complete: ' + out.length + ' chars');
   await storeMemory('financial_v2', opp.id, (opp.agency||'') + ',financial_v2,pricing_model', 'FINANCIAL V2 - ' + (opp.title||'').slice(0,50) + ':\n' + out, 'pricing_benchmark');
