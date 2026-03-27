@@ -1,1 +1,430 @@
-<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>HGI Organism V2</title><link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"><style>*{margin:0;padding:0;box-sizing:border-box}:root{--navy:#1B2A4A;--gold:#C8A55A;--cream:#F8F6F1;--warm:#E8E4DC;--text:#2C2C2C;--muted:#6B6B6B;--green:#2D7A4F}body{font-family:Inter,sans-serif;background:var(--cream);color:var(--text);display:flex;flex-direction:column;min-height:100vh}.sb{width:240px;background:var(--navy);min-height:100vh;position:fixed;left:0;top:0;bottom:0;display:flex;flex-direction:column;z-index:100}.lg{padding:22px 20px;border-bottom:1px solid rgba(200,165,90,0.3)}.lg h1{font-family:Cormorant Garamond,serif;color:var(--gold);font-size:18px;font-weight:600}.lg p{color:rgba(255,255,255,0.45);font-size:11px;margin-top:3px}.nav{flex:1;padding:12px 0;overflow-y:auto}.ns{padding:8px 16px 4px;color:rgba(200,165,90,0.55);font-size:10px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase}.ni{display:flex;align-items:center;gap:10px;padding:9px 20px;color:rgba(255,255,255,0.6);font-size:13px;cursor:pointer;border-left:3px solid transparent;transition:all 0.15s}.ni:hover{color:#fff;background:rgba(255,255,255,0.06)} .ni.act{color:var(--gold);border-left-color:var(--gold);background:rgba(200,165,90,0.1)}.dot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:0.5;flex-shrink:0}.sf{padding:14px 20px;border-top:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;gap:8px;font-size:11px;color:rgba(255,255,255,0.35)}.sd{width:7px;height:7px;border-radius:50%;background:#2D7A4F;box-shadow:0 0 6px #2D7A4F}.main{margin-left:240px;flex:1;display:flex;flex-direction:column}.tb{background:#fff;border-bottom:1px solid var(--warm);padding:0 32px;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50}.tv{font-family:Cormorant Garamond,serif;font-size:20px;font-weight:600;color:var(--navy)} .tm{display:flex;align-items:center;gap:14px} .tt{font-size:12px;color:var(--muted)}.rb{background:var(--gold);color:var(--navy);border:none;padding:7px 16px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer}.ct{flex:1;padding:28px 32px;padding-bottom:80px}.bc{background:#fff;border-radius:12px;padding:24px 28px;margin-bottom:20px;border-left:4px solid var(--gold);box-shadow:0 2px 8px rgba(0,0,0,0.06)}.bl{font-size:10px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;color:var(--gold);margin-bottom:10px}.bt{font-family:Cormorant Garamond,serif;font-size:18px;line-height:1.6;color:var(--navy);font-weight:500}.bm{margin-top:10px;font-size:11px;color:var(--muted)}.ps{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px}.pb{background:#fff;border-radius:10px;padding:16px;box-shadow:0 2px 6px rgba(0,0,0,0.05);border-top:3px solid var(--gold)}.pbl{font-size:10px;font-weight:600;text-transform:uppercase;color:var(--muted)} .pbv{font-size:22px;font-weight:600;color:var(--navy);margin-top:4px} .pbs{font-size:11px;color:var(--muted);margin-top:2px}.two{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px}.card{background:#fff;border-radius:10px;padding:18px;box-shadow:0 2px 6px rgba(0,0,0,0.05)}.oc{background:#fff;border-radius:10px;padding:14px 18px;margin-bottom:9px;box-shadow:0 1px 4px rgba(0,0,0,0.06);cursor:pointer;border-left:3px solid transparent;transition:all 0.15s}.oc:hover{border-left-color:var(--gold)} .ot{font-size:13px;font-weight:600;color:var(--navy);margin-bottom:4px}.om{display:flex;gap:7px;align-items:center;flex-wrap:wrap} .ob{display:inline-flex;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600}.oh{background:#E8F5EE;color:var(--green)} .om2{background:#FFF8E7;color:#B8860B} .olw{background:#FDEAEA;color:#C0392B}.sbdg{font-size:10px;color:var(--muted);background:var(--warm);padding:2px 7px;border-radius:10px} .db{font-size:10px;color:var(--muted)}.mi{padding:11px 0;border-bottom:1px solid var(--warm)} .mi:last-child{border-bottom:none}.ma{font-size:10px;font-weight:600;color:var(--gold);text-transform:uppercase} .mt{font-size:12px;color:var(--text);line-height:1.5;margin-top:2px} .md{font-size:10px;color:var(--muted);margin-top:2px}.dp{background:#fff;border-radius:10px;padding:20px;box-shadow:0 2px 6px rgba(0,0,0,0.05);display:none;margin-top:20px} .dp.vis{display:block}.dtt{font-family:Cormorant Garamond,serif;font-size:20px;font-weight:600;color:var(--navy);margin-bottom:14px}.dsl{font-size:10px;font-weight:600;text-transform:uppercase;color:var(--gold);margin-bottom:6px;margin-top:14px} .dtx{font-size:12px;line-height:1.6;color:var(--text)}.ib{background:#fff;border-top:1px solid var(--warm);padding:12px 32px;display:flex;gap:10px;align-items:center;position:fixed;bottom:0;left:240px;right:0;z-index:99}.inp{flex:1;border:1px solid var(--warm);border-radius:8px;padding:9px 15px;font-size:13px;outline:none} .inp:focus{border-color:var(--gold)}.sbtn{background:var(--navy);color:#fff;border:none;padding:9px 18px;border-radius:8px;font-size:13px;cursor:pointer}.ra{display:none;background:var(--navy);color:rgba(255,255,255,0.9);border-radius:10px;padding:14px 18px;margin-bottom:14px;font-size:13px;line-height:1.6}.sh{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px} .st{font-size:10px;font-weight:600;text-transform:uppercase;color:var(--muted)}.ld{color:var(--muted);font-size:12px;font-style:italic}.coming{text-align:center;padding:80px 40px;color:var(--muted)} .coming h2{font-family:Cormorant Garamond,serif;font-size:28px;color:var(--navy);margin-bottom:10px}</style></head><body><nav class="sb"><div class="lg"><h1>HGI Organism</h1><p>V2 &bull; 47 Agents Active</p></div><div class="nav"><div class="ns">Command</div><div class="ni act" onclick="sv(this,'dash')"><span class="dot"></span>Dashboard</div><div class="ni" onclick="sv(this,'pipe')"><span class="dot"></span>Pipeline Tracker</div><div class="ns">Intelligence</div><div class="ni" onclick="sv(this,'disc')"><span class="dot"></span>Opportunity Discovery</div><div class="ni" onclick="sv(this,'res')"><span class="dot"></span>Research &amp; Analysis</div><div class="ni" onclick="sv(this,'win')"><span class="dot"></span>Winnability Scoring</div><div class="ns">Proposal</div><div class="ni" onclick="sv(this,'prop')"><span class="dot"></span>Proposal Engine</div><div class="ni" onclick="sv(this,'fin')"><span class="dot"></span>Financial &amp; Pricing</div><div class="ni" onclick="sv(this,'staff')"><span class="dot"></span>Recruiting &amp; Bench</div><div class="ns">Operations</div><div class="ni" onclick="sv(this,'crm')"><span class="dot"></span>Relationship Intelligence</div><div class="ni" onclick="sv(this,'cont')"><span class="dot"></span>Content Engine</div><div class="ni" onclick="sv(this,'kb')"><span class="dot"></span>Knowledge Base</div><div class="ns">Leadership</div><div class="ni" onclick="sv(this,'dig')"><span class="dot"></span>Weekly Digest</div><div class="ni" onclick="sv(this,'exec')"><span class="dot"></span>Executive Brief</div><div class="ns">System</div><div class="ni" onclick="sv(this,'scan')"><span class="dot"></span>Pipeline Scanner</div><div class="ni" onclick="sv(this,'scr')"><span class="dot"></span>Scraper Insights</div><div class="ni" onclick="sv(this,'chat')"><span class="dot"></span>System Chat</div></div><div class="sf"><div class="sd"></div>Organism Active &bull; 47 Agents</div></nav><div class="main"><div class="tb"><div class="tv" id="vt">Morning Briefing</div><div class="tm"><span class="tt" id="lc"></span><button class="rb" onclick="rs()">Run Session Now</button></div></div><div class="ct" id="mv"><div class="ld">Loading organism intelligence...</div></div></div><div class="ib"><input class="inp" id="ci" placeholder="Ask the organism anything..." onkeydown="if(event.key==='Enter')sc()"><button class="sbtn" onclick="sc()">Send</button></div><script>var B=window.location.origin,pp=[],mm=[],dc=[],so=null;function ut(){var n=new Date(),el=document.getElementById('lc');if(el)el.textContent=n.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})+' '+n.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});}setInterval(ut,1000);ut();function opc(o){var pi=o.opi_score||0,pc=pi>=80?'oh':pi>=65?'om2':'olw',dd=o.due_date?new Date(o.due_date).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'';return '<div class="oc" onclick="selO('+JSON.stringify(o.id)+')">'+'<div class="ot">'+( o.title||'')+'</div>'+'<div class="om"><span class="ob '+pc+'">OPI '+pi+'</span><span class="sbdg">'+( o.stage||'identified')+'</span>'+(dd&&o.stage!=='submitted'&&o.stage!=='watching'?'<span class="db">Due '+dd+'</span>':o.stage==='submitted'?'<span class="db">Submitted</span>':o.stage==='watching'?'<span class="db">Watching</span>':'')+'</div></div>';}function selO(id){var o=pp.find(function(p){return p.id===id;});if(!o)return;so=o;var dp=document.getElementById('det');if(!dp)return;dp.className='dp vis';dp.innerHTML='<div class="dtt">'+o.title+'</div>';dp.scrollIntoView({behavior:'smooth',block:'nearest'});}function rd(brief){var t1=pp.filter(function(o){return o.opi_score>=75;}).length,pur=pp.filter(function(o){return o.stage==='pursuing'||o.stage==='proposal';}).length,bt=brief||'The organism is working across '+pp.length+' active opportunities. '+t1+' are Tier 1 (OPI 75+). '+pur+' in pursuit or proposal stage.',mv=document.getElementById('mv');if(!mv)return;mv.innerHTML='<div class="bc"><div class="bl">Morning Briefing</div><div class="bt">'+(function(s){var r=(s||'');if(r.indexOf('DASHBOARD:')===0)r=r.slice(10).trim();var lines=r.split(String.fromCharCode(10));var out=[];for(var i=0;i<lines.length;i++){var l=lines[i];if(l.slice(0,4)==='### ')l='<b>'+l.slice(4)+'</b>';else if(l.slice(0,3)==='## ')l='<b>'+l.slice(3)+'</b>';else if(l.slice(0,2)==='# ')l='<b>'+l.slice(2)+'</b>';else if(l.slice(0,2)==='- ')l='â¢ '+l.slice(2);out.push(l);}return out.join('<br>').slice(0,2000);})(bt)+'</div><div class="bm">47 agents active</div></div>'+'<div class="ps"><div class="pb"><div class="pbl">Active Opps</div><div class="pbv">'+pp.length+'</div></div><div class="pb"><div class="pbl">Tier 1 OPI 75+</div><div class="pbv">'+t1+'</div></div><div class="pb"><div class="pbl">In Pursuit</div><div class="pbv">'+pur+'</div></div></div>'+'<div class="two"><div><div class="sh"><div class="st">Active Pipeline</div></div>'+pp.map(opc).join('')+'</div><div><div class="sh"><div class="st">Organism Activity</div></div><div class="card" style="max-height:480px;overflow-y:auto">'+mm.slice(0,15).map(function(m){return'<div class="mi"><div class="ma">'+m.agent+'</div><div class="mt">'+m.observation.slice(0,160)+'</div></div>';}).join('')+'</div></div></div>'+'<div style="margin-top:24px"><div class="sh"><div class="st">Organism Decisions</div></div><div id="dc-list" style="margin-top:12px">'+(dc&&dc.length?dc.slice(0,20).map(function(x){return'<div class="card" style="margin-bottom:10px;padding:14px 18px"><div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--gold);margin-bottom:4px">'+x.agent+'</div><div style="font-size:13px;line-height:1.5;color:var(--text)">'+x.observation.slice(0,220)+'</div><div style="font-size:11px;color:var(--muted);margin-top:6px">'+new Date(x.created_at).toLocaleDateString()+'</div></div>';}).join(''):'<div style="padding:20px;color:var(--muted);font-size:13px">No decisions yet. Run a session to generate organism decisions.</div>')+'</div>'+'<div id="det" class="dp"></div><div id="ra" class="ra"></div>'}function la(){Promise.all([fetch(B+'/api/pipeline').then(function(r){return r.json();}),fetch(B+'/api/memories').then(function(r){return r.json();}),fetch(B+'/api/briefing').then(function(r){return r.json();}),fetch(B+'/api/decisions').then(function(r){return r.json();})]).then(function(res){pp=res[0]||[];mm=res[1]||[];dc=res[3]||[];rd((res[2]||{}).briefing);}).catch(function(e){var mv=document.getElementById('mv');if(mv)mv.innerHTML='<div class="ld">Error: '+e.message+'</div>';});}function sv(el,v){document.querySelectorAll('.ni').forEach(function(n){n.classList.remove('act');});el.classList.add('act');var vt=document.getElementById('vt');if(vt)vt.textContent={dash:'Morning Briefing',pipe:'Pipeline Tracker',disc:'Opportunity Discovery',res:'Research & Analysis',win:'Winnability Scoring',prop:'Proposal Engine',fin:'Financial & Pricing',staff:'Recruiting & Bench',crm:'Relationship Intelligence',cont:'Content Engine',kb:'Knowledge Base',dig:'Weekly Digest',exec:'Executive Brief',scan:'Pipeline Scanner',scr:'Scraper Insights',chat:'System Chat'}[v]||v;if(v==='dash'){la();return;}var mv=document.getElementById('mv');if(v==='pipe'){if(mv)mv.innerHTML=pp.map(opc).join('')+'<div id="det" class="dp" style="margin-top:20px"></div>';return;}if(mv)mv.innerHTML='<div class="coming"><h2>Coming in Phase 2</h2><p>This module is being built in the next sprint.</p></div>';}function rs(){var btn=document.querySelector('.rb');if(btn){btn.textContent='Running...';btn.disabled=true;}fetch(B+'/run-session',{method:'POST'}).then(function(){if(btn){btn.textContent='Done!';setTimeout(function(){btn.textContent='Run Session Now';btn.disabled=false;},3000);}}).catch(function(){if(btn){btn.textContent='Error';btn.disabled=false;}});}function sc(){var inp=document.getElementById('ci'),msg=inp?inp.value.trim():'';if(!msg)return;if(inp)inp.value='';var ra=document.getElementById('ra');if(!ra)return;ra.style.display='block';ra.textContent='Thinking...';fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:800,system:'You are the HGI Organism, 47 agents as one brain for HGI Global. Be direct and strategic.',messages:[{role:'user',content:msg}]})}).then(function(r){return r.json();}).then(function(d){var t=(d.content||[]).filter(function(b){return b.type==='text';}).map(function(b){return b.text;}).join('');if(ra)ra.textContent=t||'No response.';}).catch(function(e){if(ra)ra.textContent='Error: '+e.message;});}la();</script></body></html>
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>HGI Organism V2</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--gold:#C9A84C;--navy:#0A1628;--navy2:#0F2240;--navy3:#1a3a6b;--text:#E8EDF5;--muted:#8899BB;--card:#132040;--border:#1E3A6A;--red:#E53E3E;--green:#38A169;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:Inter,sans-serif;background:var(--navy);color:var(--text);display:flex;height:100vh;overflow:hidden;}
+/* Sidebar */
+.sb{width:220px;min-width:220px;background:var(--navy2);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;}
+.sbl{padding:20px 16px 8px;font-size:11px;font-weight:700;color:var(--gold);letter-spacing:1.5px;text-transform:uppercase;}
+.ni{display:flex;align-items:center;padding:9px 16px;cursor:pointer;border-left:3px solid transparent;font-size:13px;color:var(--muted);transition:all .15s;}
+.ni:hover,.ni.act{background:rgba(201,168,76,.08);border-left-color:var(--gold);color:var(--text);}
+/* Main */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+.hdr{padding:14px 28px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px;background:var(--navy2);}
+.htit{font-size:15px;font-weight:600;flex:1;}
+.hbadge{background:rgba(201,168,76,.15);border:1px solid var(--gold);color:var(--gold);font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;}
+#lc{font-size:12px;color:var(--muted);}
+.mv{flex:1;overflow-y:auto;padding:24px 28px;}
+/* Cards */
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:18px 20px;margin-bottom:12px;}
+/* KPI grid */
+.ps{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;}
+.pb{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px 18px;flex:1;min-width:100px;}
+.pbl{font-size:11px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px;}
+.pbv{font-size:26px;font-weight:700;color:var(--gold);}
+/* Pipeline cards */
+.oc{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:8px;cursor:pointer;transition:border-color .15s;}
+.oc:hover,.oc.sel{border-color:var(--gold);}
+.ot{font-size:13px;font-weight:600;margin-bottom:8px;line-height:1.4;}
+.om{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+.ob{padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700;}
+.oh{background:rgba(56,161,105,.2);color:#68D391;}
+.om2{background:rgba(201,168,76,.2);color:var(--gold);}
+.olw{background:rgba(99,102,241,.2);color:#A5B4FC;}
+.sbdg{background:rgba(255,255,255,.07);color:var(--muted);padding:2px 8px;border-radius:12px;font-size:11px;text-transform:capitalize;}
+.db{font-size:11px;color:var(--muted);}
+/* Two-col layout */
+.two{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+.sh{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+.st{font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;}
+/* Activity */
+.mi{padding:10px 0;border-bottom:1px solid var(--border);}
+.mi:last-child{border-bottom:none;}
+.ma{font-size:11px;font-weight:700;color:var(--gold);margin-bottom:4px;text-transform:uppercase;}
+.mt{font-size:12px;color:var(--muted);line-height:1.5;}
+/* Decision cards */
+.dc-card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px 18px;margin-bottom:10px;}
+.dc-pri-c{border-left:3px solid var(--red);}
+.dc-pri-h{border-left:3px solid var(--gold);}
+.dc-pri-m{border-left:3px solid var(--navy3);}
+.dc-agent{font-size:11px;font-weight:600;color:var(--gold);text-transform:uppercase;margin-bottom:6px;}
+.dc-title{font-size:13px;font-weight:600;margin-bottom:6px;}
+.dc-detail{font-size:12px;color:var(--muted);line-height:1.5;margin-bottom:8px;}
+.dc-foot{display:flex;gap:8px;align-items:center;font-size:11px;color:var(--muted);}
+.dc-badge{padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;}
+.bpri-c{background:rgba(229,62,62,.2);color:#FC8181;}
+.bpri-h{background:rgba(201,168,76,.2);color:var(--gold);}
+.bpri-m{background:rgba(99,102,241,.2);color:#A5B4FC;}
+/* Briefing */
+.bc{margin-bottom:20px;}
+.bl{font-size:11px;font-weight:700;color:var(--gold);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;}
+.bt{font-size:13px;line-height:1.7;color:var(--text);}
+.bt b{color:var(--gold);}
+.bt hr{border:none;border-top:1px solid var(--border);margin:8px 0;}
+.bm{font-size:11px;color:var(--muted);margin-top:10px;}
+/* Detail drawer */
+.drawer{background:var(--navy2);border:1px solid var(--gold);border-radius:10px;margin-top:16px;overflow:hidden;display:none;}
+.drawer.open{display:block;}
+.dh{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;}
+.dtit{font-size:14px;font-weight:700;flex:1;}
+.dcl{cursor:pointer;color:var(--muted);font-size:18px;line-height:1;padding:2px 6px;}
+.dcl:hover{color:var(--text);}
+.dtabs{display:flex;border-bottom:1px solid var(--border);}
+.dtab{padding:10px 18px;font-size:12px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;}
+.dtab:hover,.dtab.act{color:var(--gold);border-bottom-color:var(--gold);}
+.dpanel{padding:20px;display:none;max-height:60vh;overflow-y:auto;}
+.dpanel.act{display:block;}
+.dfield{margin-bottom:16px;}
+.dlabel{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;margin-bottom:5px;}
+.dval{font-size:13px;line-height:1.6;color:var(--text);white-space:pre-wrap;word-break:break-word;}
+.dval-empty{font-size:12px;color:var(--muted);font-style:italic;}
+.dmem{padding:10px 0;border-bottom:1px solid var(--border);}
+.dmem:last-child{border-bottom:none;}
+.dmem-agent{font-size:11px;font-weight:700;color:var(--gold);text-transform:uppercase;margin-bottom:3px;}
+.dmem-type{font-size:10px;color:var(--muted);margin-bottom:5px;}
+.dmem-obs{font-size:12px;color:var(--text);line-height:1.5;}
+.dintel{padding:12px;background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.2);border-radius:6px;margin-bottom:10px;}
+.dintel-name{font-size:13px;font-weight:700;color:var(--gold);margin-bottom:6px;}
+.dintel-field{font-size:12px;color:var(--muted);margin-bottom:3px;}
+.dloading{font-size:13px;color:var(--muted);padding:20px;text-align:center;}
+.dstage-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;}
+.dstat{background:var(--card);border:1px solid var(--border);border-radius:6px;padding:10px 14px;flex:1;min-width:120px;}
+.dstat-lbl{font-size:10px;color:var(--muted);text-transform:uppercase;margin-bottom:4px;}
+.dstat-val{font-size:16px;font-weight:700;}
+/* Briefing table */
+.bt table{width:100%;border-collapse:collapse;margin:8px 0;font-size:12px;}
+.bt th{background:rgba(201,168,76,.15);color:var(--gold);padding:6px 8px;text-align:left;font-weight:600;}
+.bt td{padding:5px 8px;border-bottom:1px solid var(--border);color:var(--text);}
+/* Coming soon */
+.coming{display:flex;flex-direction:column;align-items:center;justify-content:center;height:200px;color:var(--muted);}
+.coming h2{font-size:18px;margin-bottom:8px;color:var(--text);}
+.coming p{font-size:13px;}
+/* Run btn */
+.rb{background:var(--gold);color:var(--navy);border:none;padding:8px 18px;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;}
+.rb:hover{opacity:.9;}
+/* Chat */
+.ra{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;margin-top:12px;font-size:13px;line-height:1.6;white-space:pre-wrap;display:none;}
+#ci{width:100%;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:10px 14px;color:var(--text);font-size:13px;font-family:Inter,sans-serif;resize:none;}
+#ci:focus{outline:none;border-color:var(--gold);}
+</style>
+</head>
+<body>
+<div class="sb">
+  <div style="padding:20px 16px 12px;border-bottom:1px solid var(--border)">
+    <div style="font-size:16px;font-weight:700;color:var(--gold)">HGI Organism</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:2px">V2 &bull; 47 Agents Active</div>
+  </div>
+  <div class="sbl">Command</div>
+  <div class="ni act" onclick="sv(this,'dash')">&#9632; Dashboard</div>
+  <div class="sbl">Pipeline</div>
+  <div class="ni" onclick="sv(this,'pipe')">&#9632; Pipeline Tracker</div>
+  <div class="sbl">Intelligence</div>
+  <div class="ni" onclick="sv(this,'disc')">&#9632; Opportunity Discovery</div>
+  <div class="ni" onclick="sv(this,'res')">&#9632; Research &amp; Analysis</div>
+  <div class="ni" onclick="sv(this,'win')">&#9632; Winnability Scoring</div>
+  <div class="sbl">Proposal</div>
+  <div class="ni" onclick="sv(this,'prop')">&#9632; Proposal Engine</div>
+  <div class="ni" onclick="sv(this,'fin')">&#9632; Financial &amp; Pricing</div>
+  <div class="ni" onclick="sv(this,'staff')">&#9632; Recruiting &amp; Bench</div>
+  <div class="sbl">Operations</div>
+  <div class="ni" onclick="sv(this,'crm')">&#9632; Relationship Intelligence</div>
+  <div class="ni" onclick="sv(this,'cont')">&#9632; Content Engine</div>
+  <div class="ni" onclick="sv(this,'kb')">&#9632; Knowledge Base</div>
+  <div class="sbl">Leadership</div>
+  <div class="ni" onclick="sv(this,'dig')">&#9632; Weekly Digest</div>
+  <div class="ni" onclick="sv(this,'exec')">&#9632; Executive Brief</div>
+  <div class="sbl">System</div>
+  <div class="ni" onclick="sv(this,'scan')">&#9632; Pipeline Scanner</div>
+  <div class="ni" onclick="sv(this,'scr')">&#9632; Scraper Insights</div>
+  <div class="ni" onclick="sv(this,'chat')">&#9632; System Chat</div>
+</div>
+<div class="main">
+  <div class="hdr">
+    <div class="htit" id="vt">Morning Briefing</div>
+    <div id="lc"></div>
+    <div class="hbadge">47 agents active</div>
+    <button class="rb" onclick="rs()">Run Session Now</button>
+  </div>
+  <div class="mv" id="mv"><div style="padding:40px;text-align:center;color:var(--muted)">Loading organism intelligence...</div></div>
+</div>
+<script>
+var B=window.location.origin,pp=[],mm=[],dc=[];
+function ut(){var n=new Date(),el=document.getElementById('lc');if(el)el.textContent=n.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})+' '+n.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});}
+setInterval(ut,1000);ut();
+
+// ── Opportunity card renderer ──
+function opc(o){
+  var pi=o.opi_score||0;
+  var pc=pi>=80?'oh':pi>=65?'om2':'olw';
+  var dd=o.due_date?new Date(o.due_date).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'';
+  var showDate=dd&&o.stage!=='submitted'&&o.stage!=='watching'&&o.stage!=='won'&&o.stage!=='lost'&&new Date(o.due_date)>new Date();
+  return '<div class="oc" id="oc-'+o.id.replace(/[^a-z0-9]/gi,'-')+'" onclick="selO('+JSON.stringify(JSON.stringify(o.id))+')">'
+    +'<div class="ot">'+( o.title||'')+'</div>'
+    +'<div class="om">'
+    +'<span class="ob '+pc+'">OPI '+pi+'</span>'
+    +'<span class="sbdg">'+( o.stage||'identified')+'</span>'
+    +(showDate?'<span class="db">Due '+dd+'</span>':o.stage==='submitted'?'<span class="db">Submitted</span>':o.stage==='watching'?'<span class="db">Watching</span>':'')
+    +'</div></div>';
+}
+
+// ── Full detail drawer — fetches all 4 endpoints ──
+function selO(idJson){
+  var id=JSON.parse(idJson);
+  // Mark selected
+  document.querySelectorAll('.oc').forEach(function(c){c.classList.remove('sel');});
+  var el=document.getElementById('oc-'+id.replace(/[^a-z0-9]/gi,'-'));
+  if(el)el.classList.add('sel');
+  // Open or create drawer
+  var drawer=document.getElementById('detail-drawer');
+  if(!drawer){
+    var mv=document.getElementById('mv');
+    drawer=document.createElement('div');
+    drawer.id='detail-drawer';
+    drawer.className='drawer open';
+    mv.appendChild(drawer);
+  }
+  drawer.className='drawer open';
+  drawer.innerHTML='<div class="dloading">Loading intelligence for this opportunity...</div>';
+  drawer.scrollIntoView({behavior:'smooth',block:'nearest'});
+  // Fetch all 4 endpoints in parallel
+  Promise.all([
+    fetch(B+'/api/opportunity-detail?id='+encodeURIComponent(id)).then(function(r){return r.json();}),
+    fetch(B+'/api/opportunity-memories?id='+encodeURIComponent(id)).then(function(r){return r.json();}),
+    fetch(B+'/api/opportunity-intel?id='+encodeURIComponent(id)).then(function(r){return r.json();})
+  ]).then(function(res){
+    var opp=res[0]||{};
+    var mems=res[1]||[];
+    var intel=res[2]||[];
+    renderDrawer(drawer,opp,mems,intel);
+  }).catch(function(e){
+    drawer.innerHTML='<div class="dloading">Error loading: '+e.message+'</div>';
+  });
+}
+
+function renderDrawer(drawer,opp,mems,intel){
+  var pi=opp.opi_score||0;
+  var pc=pi>=80?'oh':pi>=65?'om2':'olw';
+  // Count memory types
+  var memTypes={};
+  mems.forEach(function(m){memTypes[m.memory_type]=(memTypes[m.memory_type]||0)+1;});
+  var memSummary=Object.keys(memTypes).map(function(k){return memTypes[k]+' '+k;}).join(', ')||'none';
+  drawer.innerHTML=
+    '<div class="dh">'
+      +'<div><div class="dtit">'+( opp.title||'')+'</div>'
+      +'<div style="font-size:12px;color:var(--muted);margin-top:3px">'+( opp.agency||'')+' &bull; '+( opp.vertical||'')+'</div></div>'
+      +'<span class="ob '+pc+'" style="margin-left:auto">OPI '+pi+'</span>'
+      +'<span class="dcl" onclick="closeDrawer()">&times;</span>'
+    +'</div>'
+    +'<div class="dtabs">'
+      +'<div class="dtab act" onclick="dTab(this,\'ov\')">Overview</div>'
+      +'<div class="dtab" onclick="dTab(this,\'scope\')">Scope &amp; Research</div>'
+      +'<div class="dtab" onclick="dTab(this,\'prop\')">Proposal Draft</div>'
+      +'<div class="dtab" onclick="dTab(this,\'mems\')">Memories ('+mems.length+')</div>'
+      +'<div class="dtab" onclick="dTab(this,\'intel\')">Competitive ('+intel.length+')</div>'
+    +'</div>'
+    // Overview tab
+    +'<div class="dpanel act" id="dp-ov">'
+      +'<div class="dstage-row">'
+        +dStat('Stage',opp.stage||'identified')
+        +dStat('Est. Value',opp.estimated_value?'$'+(Number(opp.estimated_value)/1e6).toFixed(1)+'M':'TBD')
+        +dStat('Memories',mems.length)
+        +dStat('Competitors',intel.length)
+      +'</div>'
+      +dField('Capture Action',opp.capture_action)
+      +dField('Source',opp.source_url?'<a href="'+opp.source_url+'" target="_blank" style="color:var(--gold)">View Original RFP</a>':null)
+      +dField('Outcome',opp.outcome)
+    +'</div>'
+    // Scope & Research tab
+    +'<div class="dpanel" id="dp-scope">'
+      +dField('Scope Analysis',opp.scope_analysis)
+      +dField('Research Brief',opp.research_brief)
+      +dField('Financial Analysis',opp.financial_analysis)
+    +'</div>'
+    // Proposal tab
+    +'<div class="dpanel" id="dp-prop">'
+      +dField('Proposal Draft',opp.staffing_plan)
+    +'</div>'
+    // Memories tab
+    +'<div class="dpanel" id="dp-mems">'
+      +(mems.length===0?'<div class="dloading">No organism memories for this opportunity yet. Memories are written when the organism analyzes this opportunity.</div>':'')
+      +mems.map(function(m){
+        return '<div class="dmem">'
+          +'<div class="dmem-agent">'+m.agent+'</div>'
+          +'<div class="dmem-type">'+m.memory_type+' &bull; '+new Date(m.created_at).toLocaleDateString()+'</div>'
+          +'<div class="dmem-obs">'+esc(m.observation.slice(0,500))+(m.observation.length>500?'...':'')+'</div>'
+          +'</div>';
+      }).join('')
+    +'</div>'
+    // Competitive intel tab
+    +'<div class="dpanel" id="dp-intel">'
+      +(intel.length===0?'<div class="dloading">No competitive intelligence recorded for this opportunity yet. The intelligence_engine agent writes here when it researches competitors.</div>':'')
+      +intel.map(function(c){
+        return '<div class="dintel">'
+          +'<div class="dintel-name">'+esc(c.competitor_name||'Unknown')+'</div>'
+          +(c.strengths?'<div class="dintel-field"><b>Strengths:</b> '+esc(c.strengths)+'</div>':'')
+          +(c.weaknesses?'<div class="dintel-field"><b>Weaknesses:</b> '+esc(c.weaknesses)+'</div>':'')
+          +(c.strategic_notes?'<div class="dintel-field"><b>Strategy:</b> '+esc(c.strategic_notes)+'</div>':'')
+          +(c.contract_value?'<div class="dintel-field"><b>Contract Value:</b> $'+Number(c.contract_value).toLocaleString()+'</div>':'')
+          +'</div>';
+      }).join('')
+    +'</div>';
+}
+
+function dStat(lbl,val){return '<div class="dstat"><div class="dstat-lbl">'+lbl+'</div><div class="dstat-val">'+esc(String(val||'—'))+'</div></div>';}
+function dField(lbl,val){
+  if(!val)return '<div class="dfield"><div class="dlabel">'+lbl+'</div><div class="dval-empty">Not yet generated by the organism</div></div>';
+  // Check if val is already HTML (contains <a>)
+  var isHtml=val.indexOf('<')=== 0;
+  return '<div class="dfield"><div class="dlabel">'+lbl+'</div><div class="dval">'+( isHtml?val:esc(val.slice(0,2000))+(val.length>2000?'\n\n[truncated — '+val.length+' chars total]':'')+'</div></div>');
+}
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function dTab(el,id){
+  var drawer=document.getElementById('detail-drawer');
+  if(!drawer)return;
+  drawer.querySelectorAll('.dtab').forEach(function(t){t.classList.remove('act');});
+  drawer.querySelectorAll('.dpanel').forEach(function(p){p.classList.remove('act');});
+  el.classList.add('act');
+  var panel=document.getElementById('dp-'+id);
+  if(panel)panel.classList.add('act');
+}
+function closeDrawer(){
+  var d=document.getElementById('detail-drawer');
+  if(d){d.className='drawer';document.querySelectorAll('.oc').forEach(function(c){c.classList.remove('sel');});}
+}
+
+// ── Briefing markdown renderer ──
+function renderBriefing(s){
+  var r=(s||'');
+  if(r.indexOf('DASHBOARD:')===0)r=r.slice(10).trim();
+  var lines=r.split(String.fromCharCode(10));
+  var out=[];
+  var inTable=false;
+  for(var i=0;i<lines.length;i++){
+    var l=lines[i];
+    if(l.indexOf('|')=== 0&&l.lastIndexOf('|')>0){
+      if(!inTable){out.push('<table><thead>');inTable=true;out.push('<tr>'+l.slice(1,-1).split('|').map(function(c){return'<th>'+c.trim()+'</th>';}).join('')+'</tr></thead><tbody>');}
+      else if(l.replace(/[\s|\-]/g,'').length===0){out.push('</tbody></table>');inTable=false;}
+      else{out.push('<tr>'+l.slice(1,-1).split('|').map(function(c){return'<td>'+c.trim()+'</td>';}).join('')+'</tr>');}
+    } else {
+      if(inTable){out.push('</tbody></table>');inTable=false;}
+      if(l.slice(0,4)==='### ')l='<b style="font-size:14px">'+l.slice(4)+'</b>';
+      else if(l.slice(0,3)==='## ')l='<b style="font-size:15px">'+l.slice(3)+'</b>';
+      else if(l.slice(0,2)==='# ')l='<b style="font-size:16px">'+l.slice(2)+'</b>';
+      else if(l==='---'||l==='***')l='<hr>';
+      else if(l.slice(0,2)==='- ')l='&bull; '+l.slice(2);
+      else l=l.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');
+      out.push(l);
+    }
+  }
+  if(inTable)out.push('</tbody></table>');
+  return out.join('<br>').slice(0,5000);
+}
+
+// ── Decision card renderer ──
+function renderDecision(x){
+  var obs=x.observation||x.content||'';
+  var priMatch=obs.match(/PRIORITY:\s*(\w+)/);
+  var typeMatch=obs.match(/TYPE:\s*([\w_]+)/);
+  var titleMatch=obs.match(/TITLE:\s*([^\n]+)/);
+  var detailMatch=obs.match(/DETAIL:\s*([\s\S]+?)(?=\n[A-Z]+:|$)/);
+  var pri=priMatch?priMatch[1].toLowerCase():'medium';
+  var type=typeMatch?typeMatch[1]:'';
+  var title=titleMatch?titleMatch[1].trim():(obs.slice(0,80));
+  var detail=detailMatch?detailMatch[1].trim().slice(0,220):obs.slice(0,220);
+  var priClass=pri==='critical'?'dc-pri-c':pri==='high'?'dc-pri-h':'dc-pri-m';
+  var badgeClass=pri==='critical'?'bpri-c':pri==='high'?'bpri-h':'bpri-m';
+  return '<div class="dc-card '+priClass+'">'
+    +'<div class="dc-agent">'+x.agent+'</div>'
+    +'<div class="dc-title">'+esc(title)+'</div>'
+    +'<div class="dc-detail">'+esc(detail)+'</div>'
+    +'<div class="dc-foot">'
+      +'<span class="dc-badge '+badgeClass+'">'+pri.toUpperCase()+'</span>'
+      +(type?'<span class="dc-badge" style="background:rgba(255,255,255,.07);color:var(--muted)">'+type.replace(/_/g,' ')+'</span>':'')
+      +'<span style="margin-left:auto">'+new Date(x.created_at).toLocaleDateString()+'</span>'
+    +'</div>'
+  +'</div>';
+}
+
+// ── Dashboard renderer ──
+function rd(brief){
+  var t1=pp.filter(function(o){return o.opi_score>=75;}).length;
+  var pur=pp.filter(function(o){return o.stage==='pursuing'||o.stage==='proposal';}).length;
+  var bt=brief||'The organism is working across '+pp.length+' active opportunities. '+t1+' are Tier 1 (OPI 75+).';
+  var mv=document.getElementById('mv');
+  if(!mv)return;
+  mv.innerHTML=
+    '<div class="bc"><div class="bl">Morning Briefing</div>'
+    +'<div class="bt">'+renderBriefing(bt)+'</div>'
+    +'<div class="bm">47 agents active</div></div>'
+    +'<div class="ps">'
+    +'<div class="pb"><div class="pbl">Active Opps</div><div class="pbv">'+pp.length+'</div></div>'
+    +'<div class="pb"><div class="pbl">Tier 1 OPI 75+</div><div class="pbv">'+t1+'</div></div>'
+    +'<div class="pb"><div class="pbl">In Pursuit</div><div class="pbv">'+pur+'</div></div>'
+    +'</div>'
+    +'<div class="two">'
+      +'<div><div class="sh"><div class="st">Active Pipeline</div></div>'
+      +pp.map(opc).join('')
+      +'<div id="detail-drawer" class="drawer"></div>'
+      +'</div>'
+      +'<div><div class="sh"><div class="st">Organism Activity</div></div>'
+      +'<div class="card" style="max-height:480px;overflow-y:auto">'
+      +mm.slice(0,15).map(function(m){return'<div class="mi"><div class="ma">'+m.agent+'</div><div class="mt">'+esc(m.observation.slice(0,160))+'</div></div>';}).join('')
+      +'</div></div>'
+    +'</div>'
+    +'<div style="margin-top:24px"><div class="sh"><div class="st">Organism Decisions</div></div>'
+    +'<div id="dc-list" style="margin-top:12px">'
+    +(dc&&dc.length?dc.slice(0,20).map(renderDecision).join(''):'<div style="padding:20px;color:var(--muted);font-size:13px">No decisions yet.</div>')
+    +'</div></div>';
+}
+
+// ── Module navigation ──
+function sv(el,v){
+  document.querySelectorAll('.ni').forEach(function(n){n.classList.remove('act');});
+  el.classList.add('act');
+  var vt=document.getElementById('vt');
+  if(vt)vt.textContent={dash:'Morning Briefing',pipe:'Pipeline Tracker',disc:'Opportunity Discovery',res:'Research & Analysis',win:'Winnability Scoring',prop:'Proposal Engine',fin:'Financial & Pricing',staff:'Recruiting & Bench',crm:'Relationship Intelligence',cont:'Content Engine',kb:'Knowledge Base',dig:'Weekly Digest',exec:'Executive Brief',scan:'Pipeline Scanner',scr:'Scraper Insights',chat:'System Chat'}[v]||v;
+  var mv=document.getElementById('mv');
+  if(v==='dash'){la();return;}
+  if(v==='pipe'){
+    if(mv)mv.innerHTML='<div class="sh" style="margin-bottom:16px"><div class="st">All Active Opportunities</div></div>'+pp.map(opc).join('')+'<div id="detail-drawer" class="drawer" style="margin-top:16px"></div>';
+    return;
+  }
+  if(mv)mv.innerHTML='<div class="coming"><h2>'+({disc:'Opportunity Discovery',res:'Research & Analysis',win:'Winnability Scoring',prop:'Proposal Engine',fin:'Financial & Pricing',staff:'Recruiting & Bench',crm:'Relationship Intelligence',cont:'Content Engine',kb:'Knowledge Base',dig:'Weekly Digest',exec:'Executive Brief',scan:'Pipeline Scanner',scr:'Scraper Insights',chat:'System Chat'}[v]||v)+'</h2><p>Coming in Phase 2 — being wired to organism data now.</p></div>';
+}
+
+// ── Run session ──
+function rs(){
+  var btn=document.querySelector('.rb');
+  if(btn){btn.textContent='Running...';btn.disabled=true;}
+  fetch(B+'/run-session',{method:'POST'}).then(function(){
+    if(btn){btn.textContent='Done!';setTimeout(function(){btn.textContent='Run Session Now';btn.disabled=false;},3000);}
+  }).catch(function(){if(btn){btn.textContent='Error';btn.disabled=false;}});
+}
+
+// ── Load all data ──
+function la(){
+  Promise.all([
+    fetch(B+'/api/pipeline').then(function(r){return r.json();}),
+    fetch(B+'/api/memories').then(function(r){return r.json();}),
+    fetch(B+'/api/briefing').then(function(r){return r.json();}),
+    fetch(B+'/api/decisions').then(function(r){return r.json();})
+  ]).then(function(res){
+    pp=res[0]||[];
+    mm=res[1]||[];
+    dc=res[3]||[];
+    rd((res[2]||{}).briefing);
+  }).catch(function(e){
+    var mv=document.getElementById('mv');
+    if(mv)mv.innerHTML='<div style="padding:40px;text-align:center;color:var(--red)">Error loading: '+e.message+'</div>';
+  });
+}
+la();
+</script>
+</body>
+</html>
