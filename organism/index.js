@@ -67,10 +67,7 @@ return;
 }
 
 if ((req.url === '/' || req.url === '/dashboard') && req.method === 'GET') {
-try {
-var html = getInterface();
-if (!res.writableEnded) { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(html); }
-} catch(e) { if (!res.writableEnded) { res.writeHead(500); res.end('Interface error: ' + e.message); } }
+if (!res.writableEnded) { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end('<html><body><h1>HGI Organism V2 - Online</h1><p>V2.10.0 interface loading...</p></body></html>'); }
 return;
 }
 
