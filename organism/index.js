@@ -102,13 +102,21 @@ if (url.startsWith('/api/opportunity-memories')) {
 }
 
 if (url.startsWith('/api/opportunity-intel')) {
+
   var oId = (req.url.split('?id=')[1]||'').split('&')[0];
+
   if (!oId) { res.writeHead(400); res.end(JSON.stringify({error:'id required'})); return; }
+
   var ir = await supabase.from('organism_memory').select('agent,observation,memory_type,created_at').eq('opportunity_id',oId).eq('memory_type','competitive_intel').order('created_at',{ascending:false}).limit(20);
+
   res.writeHead(200, {'Content-Type':'application/json'});
+
   res.end(JSON.stringify(ir.data || []));
+
   return;
+
 }
+
 
 if (url === '/api/hunt-stats') {
   var hr = await supabase.from('hunt_runs').select('run_at,source,status,opportunities_found,opportunities_new').order('run_at',{ascending:false}).limit(50);
@@ -116,6 +124,32 @@ if (url === '/api/hunt-stats') {
   res.end(JSON.stringify(hr.data || []));
   return;
 }
+
+if (url === '/api/chat' && req.method === 'POST') {
+
+  let chatBody = '';
+  for await (const chunk of req) chatBody += chunk;
+  const { message: chatMsg } = JSON.parse(chatBody || '{}');
+  if (!chatMsg) { res.writeHead(400); res.end(JSON.stringify({error:'message required'})); return; }
+
+  const ctxR = await supabase.from('organism_memory').select('agent,observation,memory_type,created_at').order('created_at',{ascending:false}).limit(30);
+  const ctxText = (ctxR.data||[]).map(m => m.agent+': '+m.observation.slice(0,200)).join('\n');
+
+  const chatResp = await anthropic.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 1024,
+    system: 'You are the HGI Business Development Organism. Answer questions about the HGI pipeline, opportunities, competitive intel, and BD strategy. Be concise and direct.\nRecent organism memories:\n'+ctxText,
+    messages: [{role:'user',content:chatMsg}]
+  });
+
+  const chatReply = chatResp.content[0].text;
+  res.writeHead(200, {'Content-Type':'application/json'});
+  res.end(JSON.stringify({response:chatReply}));
+  return;
+
+}
+
+
 
 res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'alive', uptime: Math.floor(process.uptime()) }));
