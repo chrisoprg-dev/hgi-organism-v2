@@ -104,7 +104,7 @@ if (url.startsWith('/api/opportunity-memories')) {
 if (url.startsWith('/api/opportunity-intel')) {
   var oId = (req.url.split('?id=')[1]||'').split('&')[0];
   if (!oId) { res.writeHead(400); res.end(JSON.stringify({error:'id required'})); return; }
-  var ir = await supabase.from('competitive_intelligence').select('competitor_name,strengths,weaknesses,strategic_notes,contract_value,outcome,bid_price,created_at').eq('opportunity_id',oId).order('created_at',{ascending:false}).limit(20);
+  var ir = await supabase.from('organism_memory').select('agent,observation,memory_type,created_at').eq('opportunity_id',oId).eq('memory_type','competitive_intel').order('created_at',{ascending:false}).limit(20);
   res.writeHead(200, {'Content-Type':'application/json'});
   res.end(JSON.stringify(ir.data || []));
   return;
@@ -119,6 +119,32 @@ if (url === '/api/hunt-stats') {
 
 res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'alive', uptime: Math.floor(process.uptime()) }));
+
+if (url === '/api/chat' && req.method === 'POST') {
+  var chatBody = '';
+  await new Promise(function(resolve) {
+    req.on('data', function(chunk) { chatBody += chunk; });
+    req.on('end', resolve);
+  });
+  try {
+    var chatParsed = JSON.parse(chatBody || '{}');
+    var userMsg = chatParsed.message || '';
+    if (!userMsg) { res.writeHead(400); res.end(JSON.stringify({error:'message required'})); return; }
+    var memR = await supabase.from('organism_memory').select('agent,observation,memory_type,created_at').neq('memory_type','decision_point').order('created_at',{ascending:false}).limit(25);
+    var mems = memR.data || [];
+    var memCtx = mems.map(function(m){return '['+m.agent+'] '+m.observation.slice(0,200);}).join('\n');
+    var chatSys = 'You are the HGI Organism - living intelligence for HGI Global, a 95-year-old minority-owned program management firm specializing in disaster recovery, TPA/claims, housing, grant management, and workforce services. Answer questions about the pipeline, opportunities, and strategy based on the organism memory below. Be direct and specific.\n\nRECENT ORGANISM MEMORIES:\n' + memCtx;
+    var aiR = await anthropic.messages.create({model:'claude-haiku-4-5-20251001',max_tokens:600,system:chatSys,messages:[{role:'user',content:userMsg}]});
+    var chatResp = aiR.content[0] && aiR.content[0].type === 'text' ? aiR.content[0].text : 'No response';
+    res.writeHead(200, {'Content-Type':'application/json'});
+    res.end(JSON.stringify({response: chatResp}));
+  } catch(chatErr) {
+    res.writeHead(500);
+    res.end(JSON.stringify({error: chatErr.message}));
+  }
+  return;
+}
+
 
   } catch (err) {
     log('REQUEST_ERROR: ' + err.message + ' url=' + (req.url || '?'));
