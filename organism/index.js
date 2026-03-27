@@ -15,6 +15,7 @@ const supabase = createClient(SB_URL, SB_KEY);
 const anthropic = new Anthropic({ apiKey: AK });
 
 const server = http.createServer(async (req, res) => {
+try {
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -74,6 +75,7 @@ return;
 if (!res.writableEnded) {
 res.end(JSON.stringify({ status: 'alive', uptime: Math.floor(process.uptime()) }));
 }
+} catch(e) { log('REQUEST ERROR: ' + e.message + ' | URL: ' + req.url); if (!res.writableEnded) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); } }
 });
 
 server.listen(PORT, () => log('Health server listening on port ' + PORT));
