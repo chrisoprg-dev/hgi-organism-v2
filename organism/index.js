@@ -34,41 +34,49 @@ const server = http.createServer(async (req, res) => {
   // ── API ROUTES ──────────────────────────────────────────────────────
 
 if (req.url === '/api/pipeline' && req.method === 'GET') {
+try {
 var pRes = await supabase.from('opportunities').select('id,title,agency,vertical,opi_score,stage,status,due_date,estimated_value,capture_action,scope_analysis,research_brief,staffing_plan').eq('status','active').order('opi_score', { ascending: false }).limit(20);
-res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-res.end(JSON.stringify(pRes.data || []));
+if (!res.writableEnded) { res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }); res.end(JSON.stringify(pRes.data || [])); }
+} catch(e) { if (!res.writableEnded) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); } }
 return;
 }
 
 if (req.url === '/api/decisions' && req.method === 'GET') {
+try {
 var dRes = await supabase.from('organism_memory').select('id,agent,observation,memory_type,created_at,opportunity_id').eq('memory_type','decision_point').order('created_at', { ascending: false }).limit(20);
-res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-res.end(JSON.stringify(dRes.data || []));
+if (!res.writableEnded) { res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }); res.end(JSON.stringify(dRes.data || [])); }
+} catch(e) { if (!res.writableEnded) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); } }
 return;
 }
 
 if (req.url === '/api/briefing' && req.method === 'GET') {
+try {
 var bRes = await supabase.from('organism_memory').select('observation,agent,created_at').eq('agent','dashboard_agent').order('created_at', { ascending: false }).limit(1);
 var brief = (bRes.data && bRes.data[0]) ? bRes.data[0].observation : null;
-res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-res.end(JSON.stringify({ briefing: brief }));
+if (!res.writableEnded) { res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }); res.end(JSON.stringify({ briefing: brief })); }
+} catch(e) { if (!res.writableEnded) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); } }
 return;
 }
 
 if (req.url === '/api/memories' && req.method === 'GET') {
+try {
 var mRes = await supabase.from('organism_memory').select('agent,observation,memory_type,created_at,opportunity_id').neq('memory_type','decision_point').order('created_at', { ascending: false }).limit(30);
-res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-res.end(JSON.stringify(mRes.data || []));
+if (!res.writableEnded) { res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }); res.end(JSON.stringify(mRes.data || [])); }
+} catch(e) { if (!res.writableEnded) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); } }
 return;
 }
 
-if (req.url === '/' || req.url === '/dashboard') {
-res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-res.end(getInterface());
+if ((req.url === '/' || req.url === '/dashboard') && req.method === 'GET') {
+try {
+var html = getInterface();
+if (!res.writableEnded) { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(html); }
+} catch(e) { if (!res.writableEnded) { res.writeHead(500); res.end('Interface error: ' + e.message); } }
 return;
 }
 
+if (!res.writableEnded) {
 res.end(JSON.stringify({ status: 'alive', uptime: Math.floor(process.uptime()) }));
+}
 });
 
 server.listen(PORT, () => log('Health server listening on port ' + PORT));
