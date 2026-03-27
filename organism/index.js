@@ -4,6 +4,16 @@
 
 import http from 'http';
 import { createClient } from '@supabase/supabase-js';
+
+// ── CRASH PROTECTION ──────────────────────────────────────────────
+process.on('unhandledRejection', (reason, promise) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  console.log('[ORGANISM] UNHANDLED REJECTION (caught): ' + msg.slice(0, 200));
+});
+process.on('uncaughtException', (err) => {
+  console.log('[ORGANISM] UNCAUGHT EXCEPTION (caught): ' + err.message.slice(0, 200));
+});
+
 import Anthropic from '@anthropic-ai/sdk';
 
 const SB_URL = process.env.SUPABASE_URL;
