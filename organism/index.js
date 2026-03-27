@@ -21,7 +21,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
   if (req.url === '/health') {
     res.writeHead(200);
-    res.end(JSON.stringify({ status: 'alive', uptime_seconds: Math.floor(process.uptime()), timestamp: new Date().toISOString(), version: 'V2.9.0-fortyseven-agents', agents_active: 47 }));
+    res.end(JSON.stringify({ status: 'alive', uptime_seconds: Math.floor(process.uptime()), timestamp: new Date().toISOString(), version: 'V2.10.0-phase1-interface', agents_active: 47 }));
     return;
   }
   if (req.url === '/run-session' && req.method === 'POST') {
@@ -31,7 +31,44 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   res.writeHead(200);
-  res.end(JSON.stringify({ status: 'alive', uptime: Math.floor(process.uptime()) }));
+  // ── API ROUTES ──────────────────────────────────────────────────────
+
+if (req.url === '/api/pipeline' && req.method === 'GET') {
+var pRes = await supabase.from('opportunities').select('id,title,agency,vertical,opi_score,stage,status,due_date,estimated_value,capture_action,scope_analysis,research_brief,staffing_plan').eq('status','active').order('opi_score', { ascending: false }).limit(20);
+res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+res.end(JSON.stringify(pRes.data || []));
+return;
+}
+
+if (req.url === '/api/decisions' && req.method === 'GET') {
+var dRes = await supabase.from('organism_memory').select('id,agent,observation,memory_type,created_at,opportunity_id').eq('memory_type','decision_point').order('created_at', { ascending: false }).limit(20);
+res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+res.end(JSON.stringify(dRes.data || []));
+return;
+}
+
+if (req.url === '/api/briefing' && req.method === 'GET') {
+var bRes = await supabase.from('organism_memory').select('observation,agent,created_at').eq('agent','dashboard_agent').order('created_at', { ascending: false }).limit(1);
+var brief = (bRes.data && bRes.data[0]) ? bRes.data[0].observation : null;
+res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+res.end(JSON.stringify({ briefing: brief }));
+return;
+}
+
+if (req.url === '/api/memories' && req.method === 'GET') {
+var mRes = await supabase.from('organism_memory').select('agent,observation,memory_type,created_at,opportunity_id').neq('memory_type','decision_point').order('created_at', { ascending: false }).limit(30);
+res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+res.end(JSON.stringify(mRes.data || []));
+return;
+}
+
+if (req.url === '/' || req.url === '/dashboard') {
+res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+res.end(getInterface());
+return;
+}
+
+res.end(JSON.stringify({ status: 'alive', uptime: Math.floor(process.uptime()) }));
 });
 
 server.listen(PORT, () => log('Health server listening on port ' + PORT));
@@ -88,6 +125,138 @@ function oppBase(opp) {
     '\nDue: ' + (opp.due_date||'TBD') + ' | Est Value: ' + (opp.estimated_value||'unknown') +
     '\nScope: ' + (opp.scope_analysis||'').slice(0,500) +
     '\nResearch Brief: ' + (opp.research_brief||'').slice(0,600);
+}
+
+function getInterface() {
+var html = '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>HGI Organism V2</title>' +
+'<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">' +
+'<style>' +
+'*{margin:0;padding:0;box-sizing:border-box}' +
+':root{--navy:#1B2A4A;--gold:#C8A55A;--cream:#F8F6F1;--warm-gray:#E8E4DC;--text:#2C2C2C;--muted:#6B6B6B;--green:#2D7A4F;--red:#C0392B;--white:#FFFFFF}' +
+'body{font-family:Inter,sans-serif;background:var(--cream);color:var(--text);min-height:100vh;display:flex;flex-direction:column}' +
+'.sidebar{width:240px;background:var(--navy);min-height:100vh;display:flex;flex-direction:column;position:fixed;left:0;top:0;bottom:0;z-index:100}' +
+'.logo{padding:24px 20px;border-bottom:1px solid rgba(200,165,90,0.3)}' +
+'.logo h1{font-family:"Cormorant Garamond",serif;color:var(--gold);font-size:18px;font-weight:600}' +
+'.logo p{color:rgba(255,255,255,0.45);font-size:11px;margin-top:3px}' +
+'.nav{flex:1;padding:12px 0;overflow-y:auto}' +
+'.ns{padding:8px 16px 4px;color:rgba(200,165,90,0.55);font-size:10px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase}' +
+'.ni{display:flex;align-items:center;gap:10px;padding:9px 20px;color:rgba(255,255,255,0.6);font-size:13px;cursor:pointer;border-left:3px solid transparent;text-decoration:none;transition:all 0.15s}' +
+'.ni:hover{color:#fff;background:rgba(255,255,255,0.06)}' +
+'.ni.a{color:var(--gold);border-left-color:var(--gold);background:rgba(200,165,90,0.1)}' +
+'.dot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:0.5;flex-shrink:0}' +
+'.sf{padding:14px 20px;border-top:1px solid rgba(255,255,255,0.08)}' +
+'.sr{display:flex;align-items:center;gap:8px;font-size:11px;color:rgba(255,255,255,0.35)}' +
+'.sd{width:7px;height:7px;border-radius:50%;background:#2D7A4F;box-shadow:0 0 6px #2D7A4F}' +
+'.main{margin-left:240px;flex:1;display:flex;flex-direction:column;min-height:100vh}' +
+'.topbar{background:#fff;border-bottom:1px solid var(--warm-gray);padding:0 32px;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50}' +
+'.tv{font-family:"Cormorant Garamond",serif;font-size:20px;font-weight:600;color:var(--navy)}' +
+'.tm{display:flex;align-items:center;gap:14px}' +
+'.tt{font-size:12px;color:var(--muted)}' +
+'.rb{background:var(--gold);color:var(--navy);border:none;padding:7px 16px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer}' +
+'.rb:hover{opacity:0.85}' +
+'.content{flex:1;padding:28px 32px}' +
+'.bc{background:#fff;border-radius:12px;padding:24px 28px;margin-bottom:20px;border-left:4px solid var(--gold);box-shadow:0 2px 8px rgba(0,0,0,0.06)}' +
+'.bl{font-size:10px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;color:var(--gold);margin-bottom:10px}' +
+'.bt{font-family:"Cormorant Garamond",serif;font-size:18px;line-height:1.6;color:var(--navy);font-weight:500}' +
+'.bm{margin-top:10px;font-size:11px;color:var(--muted)}' +
+'.ps{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px}' +
+'.pb{background:#fff;border-radius:10px;padding:16px;box-shadow:0 2px 6px rgba(0,0,0,0.05);border-top:3px solid var(--gold)}' +
+'.pbl{font-size:10px;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;color:var(--muted)}' +
+'.pbv{font-size:22px;font-weight:600;color:var(--navy);margin-top:4px;font-family:"Cormorant Garamond",serif}' +
+'.pbs{font-size:11px;color:var(--muted);margin-top:2px}' +
+'.two{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px}' +
+'.sh{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}' +
+'.st{font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--muted)}' +
+'.sa{font-size:11px;color:var(--gold);cursor:pointer}' +
+'.card{background:#fff;border-radius:10px;padding:18px;box-shadow:0 2px 6px rgba(0,0,0,0.05)}' +
+'.oc{background:#fff;border-radius:10px;padding:14px 18px;margin-bottom:9px;box-shadow:0 1px 4px rgba(0,0,0,0.06);cursor:pointer;border-left:3px solid transparent;transition:all 0.15s}' +
+'.oc:hover{border-left-color:var(--gold);box-shadow:0 3px 10px rgba(0,0,0,0.09)}' +
+'.ot{font-size:13px;font-weight:600;color:var(--navy);margin-bottom:4px}' +
+'.om{display:flex;gap:7px;align-items:center;flex-wrap:wrap}' +
+'.ob{display:inline-flex;align-items:center;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600}' +
+'.oh{background:#E8F5EE;color:var(--green)}.om2{background:#FFF8E7;color:#B8860B}.ol{background:#FDEAEA;color:var(--red)}' +
+'.sb{font-size:10px;color:var(--muted);background:var(--warm-gray);padding:2px 7px;border-radius:10px;text-transform:uppercase;letter-spacing:0.5px}' +
+'.db{font-size:10px;color:var(--muted)}' +
+'.mi{padding:11px 0;border-bottom:1px solid var(--warm-gray)}' +
+'.mi:last-child{border-bottom:none}' +
+'.ma{font-size:10px;font-weight:600;color:var(--gold);text-transform:uppercase;letter-spacing:0.5px}' +
+'.mt{font-size:12px;color:var(--text);line-height:1.5;margin-top:2px}' +
+'.md{font-size:10px;color:var(--muted);margin-top:2px}' +
+'.wp{display:flex;align-items:center;overflow-x:auto;padding:4px 0;gap:0}' +
+'.ws{font-size:10px;padding:6px 12px;background:var(--warm-gray);color:var(--muted);font-weight:500;white-space:nowrap}' +
+'.ws.wd{background:#E8F5EE;color:var(--green)}.ws.wc{background:var(--gold);color:var(--navy);font-weight:600}' +
+'.wa{font-size:10px;color:var(--muted);padding:0 2px;flex-shrink:0}' +
+'.dp{background:#fff;border-radius:10px;padding:20px;box-shadow:0 2px 6px rgba(0,0,0,0.05);display:none;margin-top:20px}' +
+'.dp.v{display:block}' +
+'.dtt{font-family:"Cormorant Garamond",serif;font-size:20px;font-weight:600;color:var(--navy);margin-bottom:14px}' +
+'.dsl{font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--gold);margin-bottom:6px;margin-top:14px}' +
+'.dtx{font-size:12px;line-height:1.6;color:var(--text)}' +
+'.ib{background:#fff;border-top:1px solid var(--warm-gray);padding:12px 32px;display:flex;gap:10px;align-items:center;position:fixed;bottom:0;left:240px;right:0;z-index:99}' +
+'.if{flex:1;border:1px solid var(--warm-gray);border-radius:8px;padding:9px 15px;font-size:13px;font-family:Inter,sans-serif;color:var(--text);outline:none;transition:border-color 0.15s;background:#fff}' +
+'.if:focus{border-color:var(--gold)}' +
+'.sb2{background:var(--navy);color:#fff;border:none;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;white-space:nowrap}' +
+'.sb2:hover{background:#253960}' +
+'.ra{display:none;background:var(--navy);color:rgba(255,255,255,0.9);border-radius:10px;padding:14px 18px;margin-bottom:14px;font-size:13px;line-height:1.6}' +
+'.ld{color:var(--muted);font-size:12px;font-style:italic}' +
+'.coming{text-align:center;padding:80px 40px;color:var(--muted)}' +
+'.coming h2{font-family:"Cormorant Garamond",serif;font-size:28px;color:var(--navy);margin-bottom:10px}' +
+'</style></head><body>' +
+'<nav class="sidebar"><div class="logo"><h1>HGI Organism</h1><p>V2 &bull; 47 Agents Active</p></div>' +
+'<div class="nav">' +
+'<div class="ns">Command</div>' +
+'<a class="ni a" onclick="sv(this,\x27dash\x27)"><span class="dot"></span>Dashboard</a>' +
+'<a class="ni" onclick="sv(this,\x27pipe\x27)"><span class="dot"></span>Pipeline Tracker</a>' +
+'<div class="ns">Intelligence</div>' +
+'<a class="ni" onclick="sv(this,\x27disc\x27)"><span class="dot"></span>Opportunity Discovery</a>' +
+'<a class="ni" onclick="sv(this,\x27res\x27)"><span class="dot"></span>Research &amp; Analysis</a>' +
+'<a class="ni" onclick="sv(this,\x27win\x27)"><span class="dot"></span>Winnability Scoring</a>' +
+'<div class="ns">Proposal</div>' +
+'<a class="ni" onclick="sv(this,\x27prop\x27)"><span class="dot"></span>Proposal Engine</a>' +
+'<a class="ni" onclick="sv(this,\x27fin\x27)"><span class="dot"></span>Financial &amp; Pricing</a>' +
+'<a class="ni" onclick="sv(this,\x27staff\x27)"><span class="dot"></span>Recruiting &amp; Bench</a>' +
+'<div class="ns">Operations</div>' +
+'<a class="ni" onclick="sv(this,\x27crm\x27)"><span class="dot"></span>Relationship Intelligence</a>' +
+'<a class="ni" onclick="sv(this,\x27cont\x27)"><span class="dot"></span>Content Engine</a>' +
+'<a class="ni" onclick="sv(this,\x27kb\x27)"><span class="dot"></span>Knowledge Base</a>' +
+'<div class="ns">Leadership</div>' +
+'<a class="ni" onclick="sv(this,\x27dig\x27)"><span class="dot"></span>Weekly Digest</a>' +
+'<a class="ni" onclick="sv(this,\x27exec\x27)"><span class="dot"></span>Executive Brief</a>' +
+'<div class="ns">System</div>' +
+'<a class="ni" onclick="sv(this,\x27scan\x27)"><span class="dot"></span>Pipeline Scanner</a>' +
+'<a class="ni" onclick="sv(this,\x27scr\x27)"><span class="dot"></span>Scraper Insights</a>' +
+'<a class="ni" onclick="sv(this,\x27chat\x27)"><span class="dot"></span>System Chat</a>' +
+'</div><div class="sf"><div class="sr"><div class="sd"></div>Organism Active &bull; 47 Agents</div></div></nav>' +
+'<div class="main"><div class="topbar"><div class="tv" id="vt">Morning Briefing</div><div class="tm"><span class="tt" id="lc"></span><button class="rb" onclick="rs()">Run Session Now</button></div></div>' +
+'<div class="content" id="mv"><div class="ld">Loading organism intelligence...</div></div></div>' +
+'<div class="ib"><input class="if" id="ci" placeholder="Ask the organism anything or give it a direction..." onkeydown="if(event.key===\x27Enter\x27)sc()"><button class="sb2" onclick="sc()">Send</button></div>' +
+'<script>' +
+'var B=window.location.origin,pp=[],mm=[],so=null;' +
+'function ut(){var n=new Date();document.getElementById(\x27lc\x27).textContent=n.toLocaleDateString(\x27en-US\x27,{weekday:\x27short\x27,month:\x27short\x27,day:\x27numeric\x27})+" "+n.toLocaleTimeString(\x27en-US\x27,{hour:\x27numeric\x27,minute:\x272-digit\x27});}' +
+'setInterval(ut,1000);ut();' +
+'function opc(o){var pi=o.opi_score||0,pc=pi>=80?\x27oh\x27:pi>=65?\x27om2\x27:\x27ol\x27,dd=o.due_date?new Date(o.due_date).toLocaleDateString(\x27en-US\x27,{month:\x27short\x27,day:\x27numeric\x27}):\x27\x27;' +
+'return\x27<div class="oc" onclick="selO(\x27\x27+JSON.stringify(o.id).replace(/"/g,\x27&quot;\x27)+\x27\x27)><div class="ot">\x27+(o.title.length>65?o.title.slice(0,65)+\x27...\x27:o.title)+\x27</div><div class="om"><span class="ob \x27+pc+\x27">OPI \x27+pi+\x27</span><span class="sb">\x27+(o.stage||\x27identified\x27)+\x27</span>\x27+(dd?\x27<span class="db">Due \x27+dd+\x27</span>\x27:\x27\x27)+\x27</div></div>\x27;}' +
+'function selO(id){var o=pp.find(function(p){return p.id===id;});if(!o)return;so=o;var dp=document.getElementById(\x27det\x27);if(!dp)return;dp.className=\x27dp v\x27;var om=mm.filter(function(m){return m.opportunity_id===id;}).slice(0,4);dp.innerHTML=\x27<div class="dtt">\x27+o.title+\x27</div>\x27+\x27<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">\x27+(o.scope_analysis?\x27<div><div class="dsl">Scope Analysis</div><div class="dtx">\x27+o.scope_analysis.slice(0,400)+\x27...</div></div>\x27:\x27<div></div>\x27)+(o.research_brief?\x27<div><div class="dsl">Research Brief</div><div class="dtx">\x27+o.research_brief.slice(0,400)+\x27...</div>\x27+(om.length>0?\x27<div class="dsl" style="margin-top:12px">Agent Intel</div>\x27+om.map(function(m){return\x27<div class="mi"><div class="ma">\x27+m.agent+\x27</div><div class="mt">\x27+m.observation.slice(0,140)+\x27...</div></div>\x27;}).join(\x27\x27):\x27\x27)+\x27</div>\x27:\x27<div></div>\x27)+\x27</div>\x27;dp.scrollIntoView({behavior:\x27smooth\x27,block:\x27nearest\x27});}' +
+'function rd(b){' +
+'var tv=pp.reduce(function(s,o){return s+(parseFloat((o.estimated_value||\x27\x27).replace(/[^0-9.]/g,\x27\x27))||0);},0);' +
+'var wv=pp.reduce(function(s,o){return s+(parseFloat((o.estimated_value||\x27\x27).replace(/[^0-9.]/g,\x27\x27))||0)*((o.opi_score||50)/100);},0);' +
+'var pur=pp.filter(function(o){return o.stage===\x27pursuing\x27||o.stage===\x27proposal\x27;}).length;' +
+'var t1=pp.filter(function(o){return o.opi_score>=75;}).length;' +
+'var bt=b||\x27The organism has been working overnight across \x27+pp.length+\x27 active opportunities. \x27+t1+\x27 are Tier 1 (OPI 75+). \x27+pur+\x27 in active pursuit or proposal stage. Run a session to generate a fresh morning briefing.\x27;' +
+'var wp=["Discover","Score","Research","Workflow","Proposal","Red Team","Export","Submit","WIN"].map(function(s,i){return\x27<span class="ws \x27+(i<3?\x27wd\x27:i===3?\x27wc\x27:\x27\x27)+\x27">\x27+s+\x27</span>\x27+(i<8?\x27<span class="wa">›</span>\x27:\x27\x27);}).join(\x27\x27);' +
+'document.getElementById(\x27mv\x27).innerHTML=' +
+'\x27<div class="bc"><div class="bl">Morning Briefing — Organism Intelligence</div><div class="bt">\x27+bt.slice(0,500)+\x27</div><div class="bm">dashboard_agent &bull; 47 agents active</div></div>\x27+' +
+'\x27<div class="ps"><div class="pb"><div class="pbl">Active Opps</div><div class="pbv">\x27+pp.length+\x27</div><div class="pbs">in pipeline</div></div><div class="pb"><div class="pbl">Tier 1 OPI 75+</div><div class="pbv">\x27+t1+\x27</div><div class="pbs">high priority</div></div><div class="pb"><div class="pbl">In Pursuit</div><div class="pbv">\x27+pur+\x27</div><div class="pbs">active proposals</div></div><div class="pb"><div class="pbl">Pipeline Value</div><div class="pbv">$\x27+(tv>1?tv.toFixed(1):\x27—\x27)+\x27M</div><div class="pbs">total estimated</div></div><div class="pb"><div class="pbl">Weighted Revenue</div><div class="pbv">$\x27+(wv>0.1?wv.toFixed(1):\x27—\x27)+\x27M</div><div class="pbs">probability-adj</div></div></div>\x27+' +
+'\x27<div class="card" style="margin-bottom:20px"><div class="sh"><div class="st">Win Path</div></div><div class="wp">\x27+wp+\x27</div></div>\x27+' +
+'\x27<div class="two"><div><div class="sh"><div class="st">Active Pipeline</div></div>\x27+pp.map(opc).join(\x27\x27)+\x27</div><div><div class="sh"><div class="st">Organism Activity</div></div><div class="card" style="max-height:480px;overflow-y:auto">\x27+mm.slice(0,15).map(function(m){return\x27<div class="mi"><div class="ma">\x27+m.agent+\x27</div><div class="mt">\x27+m.observation.slice(0,160)+(m.observation.length>160?\x27...\x27:\x27\x27)+\x27</div><div class="md">\x27+new Date(m.created_at).toLocaleString(\x27en-US\x27,{month:\x27short\x27,day:\x27numeric\x27,hour:\x27numeric\x27,minute:\x272-digit\x27})+\x27</div></div>\x27;}).join(\x27\x27)+\x27</div></div></div>\x27+' +
+'\x27<div id="det" class="dp"></div>\x27+\x27<div id="ra" class="ra"></div>\x27+\x27<div style="height:60px"></div>\x27;' +
+'}' +
+'function la(){Promise.all([fetch(B+\x27/api/pipeline\x27).then(function(r){return r.json();}),fetch(B+\x27/api/memories\x27).then(function(r){return r.json();}),fetch(B+\x27/api/briefing\x27).then(function(r){return r.json();})]).then(function(res){pp=res[0]||[];mm=res[1]||[];rd((res[2]||{}).briefing);}).catch(function(e){document.getElementById(\x27mv\x27).innerHTML=\x27<div class="ld">Error: \x27+e.message+\x27</div>\x27;});}' +
+'function sv(el,v){document.querySelectorAll(\x27.ni\x27).forEach(function(n){n.classList.remove(\x27a\x27);});el.classList.add(\x27a\x27);var tmap={dash:\x27Morning Briefing\x27,pipe:\x27Pipeline Tracker\x27,disc:\x27Opportunity Discovery\x27,res:\x27Research & Analysis\x27,win:\x27Winnability Scoring\x27,prop:\x27Proposal Engine\x27,fin:\x27Financial & Pricing\x27,staff:\x27Recruiting & Bench\x27,crm:\x27Relationship Intelligence\x27,cont:\x27Content Engine\x27,kb:\x27Knowledge Base\x27,dig:\x27Weekly Digest\x27,exec:\x27Executive Brief\x27,scan:\x27Pipeline Scanner\x27,scr:\x27Scraper Insights\x27,chat:\x27System Chat\x27};document.getElementById(\x27vt\x27).textContent=tmap[v]||v;if(v===\x27dash\x27){la();return;}if(v===\x27pipe\x27){document.getElementById(\x27mv\x27).innerHTML=\x27<div class="sh"><div class="st">All Opportunities — \x27+pp.length+\x27 tracked</div></div>\x27+pp.map(opc).join(\x27\x27)+\x27<div id="det" class="dp" style="margin-top:20px"></div>\x27;return;}document.getElementById(\x27mv\x27).innerHTML=\x27<div class="coming"><h2>Coming in Phase 2</h2><p>This module is being built in the next sprint.</p></div>\x27;}' +
+'function rs(){var b=document.querySelector(\x27.rb\x27);b.textContent=\x27Running...\x27;b.disabled=true;fetch(B+\x27/run-session\x27,{method:\x27POST\x27}).then(function(){b.textContent=\x27Triggered ✓\x27;setTimeout(function(){b.textContent=\x27Run Session Now\x27;b.disabled=false;},3000);}).catch(function(e){b.textContent=\x27Error\x27;b.disabled=false;});}' +
+'function sc(){var inp=document.getElementById(\x27ci\x27),msg=inp.value.trim();if(!msg)return;inp.value=\x27\x27;var ra=document.getElementById(\x27ra\x27)||document.querySelector(\x27.ra\x27);if(!ra)return;ra.style.display=\x27block\x27;ra.textContent=\x27Organism is thinking...\x27;var ctx=so?\x27Current opportunity: \x27+so.title+\x27 (OPI \x27+so.opi_score+\x27, stage: \x27+so.stage+\x27). \x27:\x27\x27;var pc=pp.slice(0,5).map(function(o){return o.title.slice(0,40)+\x27 OPI:\x27+o.opi_score;}).join(\x27, \x27);fetch(\x27https://api.anthropic.com/v1/messages\x27,{method:\x27POST\x27,headers:{\x27Content-Type\x27:\x27application/json\x27},body:JSON.stringify({model:\x27claude-sonnet-4-6\x27,max_tokens:800,system:\x27You are the HGI Organism — 47 agents as one brain for HGI Global, a 95-year-old 100% minority-owned program management firm. Active pipeline: \x27+pc+\x27. \x27+ctx+\x27Be direct, specific, strategic. Every answer helps HGI win proposals.\x27,messages:[{role:\x27user\x27,content:msg}]})}).then(function(r){return r.json();}).then(function(d){var t=(d.content||[]).filter(function(b){return b.type===\x27text\x27;}).map(function(b){return b.text;}).join(\x27\x27);ra.textContent=t||\x27No response.\x27;}).catch(function(e){ra.textContent=\x27Error: \x27+e.message;});}' +
+'la();' +
+'<\/script></body></html>';
+return html;
 }
 
 var HGI = 'HGI Global (Hammerman and Gainer LLC). ~95 years. 100pct minority-owned. 67 FT + 43 contract professionals. SAM UEI: DL4SJEVKZ6H4. ' +
