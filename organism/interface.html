@@ -60,13 +60,13 @@ function switchTab(el){
 function md(s){
   if(!s)return "<em>No data available.</em>";
   s=s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-  s=s.replace(/\*\*(.+?)\*\*/g,"<strong>"+d+"1</strong>");
-  s=s.replace(/\*(.+?)\*/g,"<em>"+d+"1</em>");
-  s=s.replace(/^### (.+)/gm,"<h4 style=\"margin:12px 0 6px;color:#1a2332\">"+d+"1</h4>");
-  s=s.replace(/^## (.+)/gm,"<h3 style=\"margin:16px 0 8px;color:#1a2332\">"+d+"1</h3>");
-  s=s.replace(/^# (.+)/gm,"<h2 style=\"margin:20px 0 10px;color:#1a2332\">"+d+"1</h2>");
-  s=s.replace(/^[\-\*] (.+)/gm,"<div style=\"padding:2px 0 2px 16px\">&#8226; "+d+"1</div>");
-  s=s.replace(/^(\d+)\. (.+)/gm,"<div style=\"padding:2px 0 2px 16px\">"+d+"1. "+d+"2</div>");
+  s=s.replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>");
+  s=s.replace(/\*(.+?)\*/g,"<em>$1</em>");
+  s=s.replace(/^### (.+)/gm,"<h4 style=\"margin:12px 0 6px;color:#1a2332\">$1</h4>");
+  s=s.replace(/^## (.+)/gm,"<h3 style=\"margin:16px 0 8px;color:#1a2332\">$1</h3>");
+  s=s.replace(/^# (.+)/gm,"<h2 style=\"margin:20px 0 10px;color:#1a2332\">$1</h2>");
+  s=s.replace(/^[\-\*] (.+)/gm,"<div style=\"padding:2px 0 2px 16px\">&#8226; $1</div>");
+  s=s.replace(/^(\d+)\. (.+)/gm,"<div style=\"padding:2px 0 2px 16px\">$1. $2</div>");
   s=s.replace(/\n\n/g,"<br><br>");
   s=s.replace(/\n/g,"<br>");
   return s;
