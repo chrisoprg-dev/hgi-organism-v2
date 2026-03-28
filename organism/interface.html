@@ -32,7 +32,7 @@
 
 <script>
 var drwOpps=[];
-function fetchPipeline(){fetch("/api/pipeline").then(function(r){return r.json()}).then(function(j){drwOpps=j.opportunities||j.data||[];wireCards()}).catch(function(e){console.log("pipeline fetch error",e)})}
+function fetchPipeline(){fetch("/api/pipeline").then(function(r){return r.json()}).then(function(j){drwOpps=Array.isArray(j)?j:(j.opportunities||j.data||[]);wireCards()}).catch(function(e){console.log("pipeline fetch error",e)})}
 function wireCards(){var mv=document.getElementById("mv");if(!mv)return;var cards=mv.querySelectorAll(".oc");cards.forEach(function(c,i){if(i<drwOpps.length){c.style.cursor="pointer";c.setAttribute("data-idx",i);c.removeAttribute("onclick")}})}
 function openDrawer(idx){
   var o=drwOpps[idx];if(!o)return;
