@@ -158,7 +158,7 @@ var B=window.location.origin,pp=[],mm=[],dc=[];
 function ut(){var n=new Date(),el=document.getElementById('lc');if(el)el.textContent=n.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})+' '+n.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});}
 setInterval(ut,1000);ut();
 
-// ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ Opportunity card renderer ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
+// ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ Opportunity card renderer ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
 function opc(o){
   var pi=o.opi_score||0;
   var pc=pi>=80?'oh':pi>=65?'om2':'olw';
@@ -173,7 +173,7 @@ function opc(o){
     +'</div></div>';
 }
 
-// ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ Full detail drawer ÃÂ¢ÃÂÃÂ fetches all 4 endpoints ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
+// ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ Full detail drawer ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ fetches all 4 endpoints ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
 function selO(id){
   // Mark selected
   document.querySelectorAll('.oc').forEach(function(c){c.classList.remove('sel');});
@@ -263,7 +263,6 @@ function renderDrawer(drawer,opp,mems,intel){
     // Competitive intel tab
     +'<div class="dpanel" id="dp-intel">'
       +(intel.length===0?'<div class="dloading">No competitive intel yet. The intelligence_engine writes competitive_intel memories when it analyzes this opportunity.</div>':'')+intel.map(function(c){return '<div class="dintel"><div class="dintel-name">'+esc(c.agent||'intelligence_engine')+'</div><div class="dintel-field" style="white-space:normal">'+renderBriefing((c.observation||'').slice(0,600))+'</div><div style="font-size:10px;color:var(--muted);margin-top:6px">'+new Date(c.created_at).toLocaleDateString()+'</div></div>';}).join('')
-    +'</div>';
 }
 
 function dStat(lbl,val){var v=(val===null||val===undefined)?'-':String(val);return '<div class="dstat"><div class="dstat-lbl">'+lbl+'</div><div class="dstat-val">'+esc(v)+'</div></div>';}
@@ -283,7 +282,7 @@ function closeDrawer(){
   if(d){d.className='drawer';document.querySelectorAll('.oc').forEach(function(c){c.classList.remove('sel');});}
 }
 
-// ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ Briefing markdown renderer ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
+// ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ Briefing markdown renderer ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
 function renderBriefing(s){
   var r=(s||'');
   if(r.indexOf('DASHBOARD:')===0)r=r.slice(10).trim();
@@ -311,7 +310,7 @@ function renderBriefing(s){
   return out.join('<br>').slice(0,5000);
 }
 
-// ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ Decision card renderer ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
+// ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ Decision card renderer ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
 function renderDecision(x){
   var obs=x.observation||x.content||'';
   var priMatch=obs.match(/PRIORITY:\s*(\w+)/);
@@ -336,7 +335,7 @@ function renderDecision(x){
   +'</div>';
 }
 
-// ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ Dashboard renderer ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
+// ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ Dashboard renderer ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
 function rd(brief){
   var t1=pp.filter(function(o){return o.opi_score>=75;}).length;
   var pur=pp.filter(function(o){return o.stage==='pursuing'||o.stage==='proposal';}).length;
@@ -368,7 +367,7 @@ function rd(brief){
     +'</div></div>';
 }
 
-// ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ Module navigation ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
+// ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ Module navigation ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
 function sv(el,v){
   document.querySelectorAll('.ni').forEach(function(n){n.classList.remove('act');});
   el.classList.add('act');
@@ -380,10 +379,10 @@ function sv(el,v){
     if(mv)mv.innerHTML='<div class="sh" style="margin-bottom:16px"><div class="st">All Active Opportunities</div></div>'+'<div id="detail-drawer" class="drawer" style="margin-bottom:12px"></div>'+pp.map(opc).join('');
     return;
   }
-  if(v==='scr'){fetch(B+'/api/hunt-stats').then(function(r){return r.json();}).then(function(d){if(!mv)return;var runs=Array.isArray(d)?d:(d.runs||[]);if(!runs.length){mv.innerHTML='<div style="color:var(--muted);padding:20px;font-size:13px">No scraper runs recorded yet.</div>';return;}mv.innerHTML='<div class="sh" style="margin-bottom:16px"><div class="st">Scraper Run History</div></div><div class="card">'+runs.slice(0,30).map(function(r){var st=String(r.status||r.result||'unknown');var col=st==='success'?'var(--green)':st==='error'?'var(--red)':'var(--muted)';return '<div class="mi"><div class="ma" style="color:'+col+'">'+esc(st.toUpperCase())+' ÃÂ· '+esc(String(r.source||'hunt'))+'</div><div class="mt">'+(r.opportunities_found!==undefined?r.opportunities_found+' opps found ÃÂ· ':'')+new Date(r.created_at||r.run_at||r.started_at||Date.now()).toLocaleString()+'</div>'+(r.error?'<div style="color:var(--red);font-size:11px">'+esc(String(r.error).slice(0,100))+'</div>':'')+'</div>';}).join('')+'</div>';}).catch(function(e){if(mv)mv.innerHTML='<div style="color:var(--red);padding:20px">Error: '+e.message+'</div>';});return;}if(v==='chat'){if(mv)mv.innerHTML='<div class="card"><div class="st" style="margin-bottom:12px">System Chat</div><div id="chat-msgs" style="min-height:180px;max-height:380px;overflow-y:auto;margin-bottom:12px"><div style="color:var(--muted);font-size:13px;padding:8px 0">Ask the organism anything about the pipeline, opportunities, or strategy.</div></div><textarea id="ci" rows="3" placeholder="Ask the organism..." style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:10px 14px;color:var(--text);font-size:13px;font-family:Inter,sans-serif;resize:none;margin-bottom:8px"></textarea><button class="rb" onclick="sendChat()">Send</button></div>';return;}if(v==='chat'){if(mv)mv.innerHTML='<div class="card" style="max-width:800px"><div class="sh" style="margin-bottom:16px"><div class="st">System Chat</div><div style="font-size:12px;color:var(--muted)">Ask the organism about your pipeline</div></div><div id="chat-history" style="max-height:400px;overflow-y:auto;margin-bottom:16px;padding:8px 0"></div><div style="display:flex;gap:8px"><textarea id="ci" placeholder="Ask about opportunities, intel, next steps..." rows="3" style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:10px 14px;color:var(--text);font-size:13px;font-family:Inter,sans-serif;resize:none"></textarea><button class="rb" onclick="sendChat()" style="align-self:flex-end;padding:10px 18px">Send</button></div></div>';return;}if(v==='scr'){if(mv)mv.innerHTML='<div style="padding:20px;text-align:center;color:var(--muted)">Loading scraper history...</div>';fetch(B+'/api/hunt-stats').then(function(r){return r.json();}).then(function(runs){if(!runs||!runs.length){mv.innerHTML='<div class="coming"><h2>Scraper Insights</h2><p>No runs yet.</p></div>';return;}mv.innerHTML='<div class="sh" style="margin-bottom:16px"><div class="st">Scraper Run History ('+runs.length+')</div></div>'+runs.map(function(r){var ts=r.created_at||r.run_at||r.started_at;return'<div class="card" style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;align-items:center"><div style="font-size:13px;font-weight:600">'+esc(r.source||r.scraper||r.portal||'scraper')+'</div><div style="font-size:11px;color:var(--muted)">'+new Date(ts).toLocaleString()+'</div></div><div style="font-size:12px;color:var(--muted);margin-top:4px">'+(r.opportunities_found!==undefined?'Found: '+r.opportunities_found+' | ':'')+(r.status||r.result||'')+'</div></div>';}).join('');}).catch(function(e){mv.innerHTML='<div class="coming"><h2>Scraper Insights</h2><p>Error: '+e.message+'</p></div>';});return;}if(v==='scr'){if(mv){mv.innerHTML='<div style="padding:0"><div class="sh" style="margin-bottom:16px"><div class="st">Scraper Run History</div></div><div id="scr-data" class="card"><div style="color:var(--muted);font-size:13px;padding:12px">Loading...</div></div></div>';fetch(B+'/api/hunt-stats').then(function(r){return r.json();}).then(renderScraperInsights).catch(function(e){var el=document.getElementById('scr-data');if(el)el.innerHTML='<div style="padding:12px;color:var(--red);font-size:13px">Error: '+e.message+'</div>';});}return;} if(v==='chat'){if(mv)mv.innerHTML='<div class="card"><div class="sh" style="margin-bottom:12px"><div class="st">System Chat</div><div style="font-size:12px;color:var(--muted)">Powered by organism memory</div></div><div id="chat-msgs" style="min-height:300px;max-height:480px;overflow-y:auto;padding:8px 0;margin-bottom:16px;border-bottom:1px solid var(--border)"><div class="mt" style="padding:8px 0;color:var(--muted)">Hello Christopher. Ask me anything about your pipeline or opportunities.</div></div><div style="display:flex;gap:10px;align-items:flex-end"><textarea id="ci" rows="3" placeholder="e.g. Which opportunity should I prioritize this week?" style="flex:1"></textarea><button class="rb" onclick="sendChat()" style="height:52px;padding:0 20px;white-space:nowrap">Send</button></div></div>';return;} if(mv)mv.innerHTML='<div class="coming"><h2>'+({disc:'Opportunity Discovery',res:'Research & Analysis',win:'Winnability Scoring',prop:'Proposal Engine',fin:'Financial & Pricing',staff:'Recruiting & Bench',crm:'Relationship Intelligence',cont:'Content Engine',kb:'Knowledge Base',dig:'Weekly Digest',exec:'Executive Brief',scan:'Pipeline Scanner',scr:'Scraper Insights',chat:'System Chat'}[v]||v)+'</h2><p>Coming in Phase 2 - being wired to organism data now.</p></div>';
+  if(v==='scr'){fetch(B+'/api/hunt-stats').then(function(r){return r.json();}).then(function(d){if(!mv)return;var runs=Array.isArray(d)?d:(d.runs||[]);if(!runs.length){mv.innerHTML='<div style="color:var(--muted);padding:20px;font-size:13px">No scraper runs recorded yet.</div>';return;}mv.innerHTML='<div class="sh" style="margin-bottom:16px"><div class="st">Scraper Run History</div></div><div class="card">'+runs.slice(0,30).map(function(r){var st=String(r.status||r.result||'unknown');var col=st==='success'?'var(--green)':st==='error'?'var(--red)':'var(--muted)';return '<div class="mi"><div class="ma" style="color:'+col+'">'+esc(st.toUpperCase())+' ÃÂÃÂ· '+esc(String(r.source||'hunt'))+'</div><div class="mt">'+(r.opportunities_found!==undefined?r.opportunities_found+' opps found ÃÂÃÂ· ':'')+new Date(r.created_at||r.run_at||r.started_at||Date.now()).toLocaleString()+'</div>'+(r.error?'<div style="color:var(--red);font-size:11px">'+esc(String(r.error).slice(0,100))+'</div>':'')+'</div>';}).join('')+'</div>';}).catch(function(e){if(mv)mv.innerHTML='<div style="color:var(--red);padding:20px">Error: '+e.message+'</div>';});return;}if(v==='chat'){if(mv)mv.innerHTML='<div class="card"><div class="st" style="margin-bottom:12px">System Chat</div><div id="chat-msgs" style="min-height:180px;max-height:380px;overflow-y:auto;margin-bottom:12px"><div style="color:var(--muted);font-size:13px;padding:8px 0">Ask the organism anything about the pipeline, opportunities, or strategy.</div></div><textarea id="ci" rows="3" placeholder="Ask the organism..." style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:10px 14px;color:var(--text);font-size:13px;font-family:Inter,sans-serif;resize:none;margin-bottom:8px"></textarea><button class="rb" onclick="sendChat()">Send</button></div>';return;}if(v==='chat'){if(mv)mv.innerHTML='<div class="card" style="max-width:800px"><div class="sh" style="margin-bottom:16px"><div class="st">System Chat</div><div style="font-size:12px;color:var(--muted)">Ask the organism about your pipeline</div></div><div id="chat-history" style="max-height:400px;overflow-y:auto;margin-bottom:16px;padding:8px 0"></div><div style="display:flex;gap:8px"><textarea id="ci" placeholder="Ask about opportunities, intel, next steps..." rows="3" style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:10px 14px;color:var(--text);font-size:13px;font-family:Inter,sans-serif;resize:none"></textarea><button class="rb" onclick="sendChat()" style="align-self:flex-end;padding:10px 18px">Send</button></div></div>';return;}if(v==='scr'){if(mv)mv.innerHTML='<div style="padding:20px;text-align:center;color:var(--muted)">Loading scraper history...</div>';fetch(B+'/api/hunt-stats').then(function(r){return r.json();}).then(function(runs){if(!runs||!runs.length){mv.innerHTML='<div class="coming"><h2>Scraper Insights</h2><p>No runs yet.</p></div>';return;}mv.innerHTML='<div class="sh" style="margin-bottom:16px"><div class="st">Scraper Run History ('+runs.length+')</div></div>'+runs.map(function(r){var ts=r.created_at||r.run_at||r.started_at;return'<div class="card" style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;align-items:center"><div style="font-size:13px;font-weight:600">'+esc(r.source||r.scraper||r.portal||'scraper')+'</div><div style="font-size:11px;color:var(--muted)">'+new Date(ts).toLocaleString()+'</div></div><div style="font-size:12px;color:var(--muted);margin-top:4px">'+(r.opportunities_found!==undefined?'Found: '+r.opportunities_found+' | ':'')+(r.status||r.result||'')+'</div></div>';}).join('');}).catch(function(e){mv.innerHTML='<div class="coming"><h2>Scraper Insights</h2><p>Error: '+e.message+'</p></div>';});return;}if(v==='scr'){if(mv){mv.innerHTML='<div style="padding:0"><div class="sh" style="margin-bottom:16px"><div class="st">Scraper Run History</div></div><div id="scr-data" class="card"><div style="color:var(--muted);font-size:13px;padding:12px">Loading...</div></div></div>';fetch(B+'/api/hunt-stats').then(function(r){return r.json();}).then(renderScraperInsights).catch(function(e){var el=document.getElementById('scr-data');if(el)el.innerHTML='<div style="padding:12px;color:var(--red);font-size:13px">Error: '+e.message+'</div>';});}return;} if(v==='chat'){if(mv)mv.innerHTML='<div class="card"><div class="sh" style="margin-bottom:12px"><div class="st">System Chat</div><div style="font-size:12px;color:var(--muted)">Powered by organism memory</div></div><div id="chat-msgs" style="min-height:300px;max-height:480px;overflow-y:auto;padding:8px 0;margin-bottom:16px;border-bottom:1px solid var(--border)"><div class="mt" style="padding:8px 0;color:var(--muted)">Hello Christopher. Ask me anything about your pipeline or opportunities.</div></div><div style="display:flex;gap:10px;align-items:flex-end"><textarea id="ci" rows="3" placeholder="e.g. Which opportunity should I prioritize this week?" style="flex:1"></textarea><button class="rb" onclick="sendChat()" style="height:52px;padding:0 20px;white-space:nowrap">Send</button></div></div>';return;} if(mv)mv.innerHTML='<div class="coming"><h2>'+({disc:'Opportunity Discovery',res:'Research & Analysis',win:'Winnability Scoring',prop:'Proposal Engine',fin:'Financial & Pricing',staff:'Recruiting & Bench',crm:'Relationship Intelligence',cont:'Content Engine',kb:'Knowledge Base',dig:'Weekly Digest',exec:'Executive Brief',scan:'Pipeline Scanner',scr:'Scraper Insights',chat:'System Chat'}[v]||v)+'</h2><p>Coming in Phase 2 - being wired to organism data now.</p></div>';
 }
 
-// ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ Run session ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
+// ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ Run session ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
 function rs(){
   var btn=document.querySelector('.rb');
   if(btn){btn.textContent='Running...';btn.disabled=true;}
@@ -392,7 +391,7 @@ function rs(){
   }).catch(function(){if(btn){btn.textContent='Error';btn.disabled=false;}});
 }
 
-// ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ Load all data ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
+// ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ Load all data ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
 function sendChat(){var ci=document.getElementById('ci');var msgs=document.getElementById('chat-msgs');var msg=ci?ci.value.trim():'';if(!msg)return;if(msgs)msgs.innerHTML+='<div style="margin-bottom:10px;font-size:13px"><b style="color:var(--gold)">You:</b> '+esc(msg)+'</div>';ci.value='';if(msgs){var th=document.createElement('div');th.id='chat-thinking';th.style.cssText='color:var(--muted);font-style:italic;font-size:13px;padding:4px 0';th.textContent='Organism thinking...';msgs.appendChild(th);}fetch(B+'/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg})}).then(function(r){return r.json();}).then(function(d){var t=document.getElementById('chat-thinking');if(t)t.remove();if(msgs){msgs.innerHTML+='<div style="margin-bottom:16px;font-size:13px"><b style="color:var(--green)">Organism:</b><br>'+renderBriefing(d.response||'No response')+'</div>';msgs.scrollTop=msgs.scrollHeight;}}).catch(function(e){var t=document.getElementById('chat-thinking');if(t)t.textContent='Error: '+e.message;});} function sendChat(){var ci=document.getElementById('ci');var msg=ci?ci.value.trim():'';if(!msg)return;var hist=document.getElementById('chat-history');if(hist)hist.innerHTML+='<div style="margin-bottom:12px"><div style="font-size:11px;font-weight:700;color:var(--gold);margin-bottom:3px">YOU</div><div style="font-size:13px">'+esc(msg)+'</div></div>';if(ci)ci.value='';fetch(B+'/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg})}).then(function(r){return r.json();}).then(function(data){if(hist){hist.innerHTML+='<div style="margin-bottom:12px"><div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:3px">ORGANISM</div><div style="font-size:13px;line-height:1.6;white-space:normal">'+renderBriefing(data.response||'No response')+'</div></div>';hist.scrollTop=hist.scrollHeight;}}).catch(function(e){if(hist)hist.innerHTML+='<div style="color:var(--red);font-size:12px">Error: '+e.message+'</div>';});}function la(){
   Promise.all([
     fetch(B+'/api/pipeline').then(function(r){return r.json();}),
@@ -448,9 +447,7 @@ la();
           +(c.weaknesses?'<div class="dintel-field"><b>Weaknesses:</b> '+esc(c.weaknesses)+'</div>':'')
           +(c.strategic_notes?'<div class="dintel-field"><b>Strategy:</b> '+esc(c.strategic_notes)+'</div>':'')
           +(c.contract_value?'<div class="dintel-field"><b>Contract Value:</b> $'+Number(c.contract_value).toLocaleString()+'</div>':'')
-          +'</div>';
       }).join('')
-    +'</div>';
 }
 
 function dStat(lbl,val){return '<div class="dstat"><div class="dstat-lbl">'+lbl+'</div><div class="dstat-val">'+(val===null||val===undefined||val===''?'-':esc(String(val)))+'</div></div>';}
@@ -472,7 +469,7 @@ function closeDrawer(){
   if(d){d.className='drawer';document.querySelectorAll('.oc').forEach(function(c){c.classList.remove('sel');});}
 }
 
-// ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ Briefing markdown renderer ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
+// ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ Briefing markdown renderer ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
 function renderBriefing(s){
   var r=(s||'');
   if(r.indexOf('DASHBOARD:')===0)r=r.slice(10).trim();
@@ -500,7 +497,7 @@ function renderBriefing(s){
   return out.join('<br>').slice(0,5000);
 }
 
-// ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ Decision card renderer ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
+// ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ Decision card renderer ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
 function renderDecision(x){
   var obs=x.observation||x.content||'';
   var priMatch=obs.match(/PRIORITY:\s*(\w+)/);
@@ -525,7 +522,7 @@ function renderDecision(x){
   +'</div>';
 }
 
-// ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ Dashboard renderer ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
+// ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ Dashboard renderer ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
 function rd(brief){
   var t1=pp.filter(function(o){return o.opi_score>=75;}).length;
   var pur=pp.filter(function(o){return o.stage==='pursuing'||o.stage==='proposal';}).length;
@@ -557,7 +554,7 @@ function rd(brief){
     +'</div></div>';
 }
 
-// ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ Module navigation ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
+// ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ Module navigation ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
 function sv(el,v){
   document.querySelectorAll('.ni').forEach(function(n){n.classList.remove('act');});
   el.classList.add('act');
@@ -572,7 +569,7 @@ function sv(el,v){
   if(mv)mv.innerHTML='<div class="coming"><h2>'+({disc:'Opportunity Discovery',res:'Research & Analysis',win:'Winnability Scoring',prop:'Proposal Engine',fin:'Financial & Pricing',staff:'Recruiting & Bench',crm:'Relationship Intelligence',cont:'Content Engine',kb:'Knowledge Base',dig:'Weekly Digest',exec:'Executive Brief',scan:'Pipeline Scanner',scr:'Scraper Insights',chat:'System Chat'}[v]||v)+'</h2><p>Coming in Phase 2 - being wired to organism data now.</p></div>';
 }
 
-// ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ Run session ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
+// ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ Run session ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
 function rs(){
   var btn=document.querySelector('.rb');
   if(btn){btn.textContent='Running...';btn.disabled=true;}
@@ -581,7 +578,7 @@ function rs(){
   }).catch(function(){if(btn){btn.textContent='Error';btn.disabled=false;}});
 }
 
-// ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ Load all data ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
+// ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ Load all data ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
 function la(){
   Promise.all([
     fetch(B+'/api/pipeline').then(function(r){return r.json();}),
