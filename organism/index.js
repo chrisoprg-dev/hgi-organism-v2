@@ -226,38 +226,28 @@ server.listen(PORT, () => log('Health server listening on port ' + PORT));
 function log(msg) { console.log('[' + new Date().toISOString() + '] [ORGANISM] ' + msg); }
 
 // === MEMORY: DEDUP + CONFIDENCE + STATUS ===
+// In-memory cycle tracker — prevents duplicate writes within a session
+// Independent of V1 writes in shared Supabase
+var cycleWrites = new Set();
+
 async function storeMemory(agent, oppId, tags, observation, memType, sourceUrl, confidence) {
   try {
     sourceUrl = sourceUrl || null;
     confidence = confidence || 'inferred';
     var status = 'scratch'; // Always scratch. Only curator promotes.
 
-    // Dedup: time-based guard — one write per agent per opp per 12h
-    // Exception: new sourced URLs get through even within the window
-    var dedupQ = supabase.from('organism_memory')
-      .select('observation,source_url')
-      .eq('agent', agent)
-      .gte('created_at', new Date(Date.now() - 12*3600000).toISOString())
-      .order('created_at', { ascending: false })
-      .limit(1);
-    if (oppId) dedupQ = dedupQ.eq('opportunity_id', oppId);
-    else dedupQ = dedupQ.is('opportunity_id', null);
-    var existing = await dedupQ;
-
-    if (existing.data && existing.data.length > 0) {
-      // Agent already wrote for this opp in last 12h — check for new source exception
+    // Dedup: one write per agent per opp per cycle (in-memory, not Supabase)
+    var dedupKey = agent + '|' + (oppId || 'system');
+    if (cycleWrites.has(dedupKey)) {
+      // Exception: new specific source URL gets through
       if (sourceUrl && sourceUrl !== 'web_search_result' && sourceUrl !== 'web_search') {
-        var prevObs = existing.data[0].observation || '';
-        if (prevObs.indexOf(sourceUrl) >= 0) {
-          log('DEDUP: Skip ' + agent + ' (12h guard, same source) on ' + (oppId || 'system').slice(0, 30));
-          return;
-        }
-        log('DEDUP: Allow ' + agent + ' (new source: ' + sourceUrl.slice(0, 50) + ')');
+        log('DEDUP: Allow ' + agent + ' (new source within cycle)');
       } else {
-        log('DEDUP: Skip ' + agent + ' (12h guard) on ' + (oppId || 'system').slice(0, 30));
+        log('DEDUP: Skip ' + agent + ' (already wrote this cycle) on ' + (oppId || 'system').slice(0, 30));
         return;
       }
     }
+    cycleWrites.add(dedupKey);
 
     await supabase.from('organism_memory').insert({
       id: agent + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
@@ -497,15 +487,10 @@ async function agentFinancial(opp, state, cycleBrief) {
 async function agentWinnability(opp, state, cycleBrief) {
   log('WINNABILITY: ' + (opp.title || '?').slice(0, 50));
 
-  // Hard guard: skip entirely if we wrote for this opp in last 12h
-  var recentWin = await supabase.from('organism_memory')
-    .select('created_at')
-    .eq('agent', 'winnability_agent')
-    .eq('opportunity_id', opp.id)
-    .gte('created_at', new Date(Date.now() - 12*3600000).toISOString())
-    .limit(1);
-  if (recentWin.data && recentWin.data.length > 0) {
-    log('WINNABILITY: Skip (wrote within 12h)');
+  // Hard guard: skip if already wrote for this opp this cycle
+  var winKey = 'winnability_agent|' + opp.id;
+  if (cycleWrites.has(winKey)) {
+    log('WINNABILITY: Skip (already wrote this cycle)');
     return null;
   }
 
@@ -1279,7 +1264,8 @@ async function agentHunting(state) {
 // ============================================================
 async function runSession(trigger) {
   var id = 'v3-' + Date.now();
-  log('=== SESSION START: ' + id + ' | trigger: ' + trigger + ' | V3.0 43-agent organism ===');
+  log('=== SESSION START: ' + id + ' | trigger: ' + trigger + ' | V3.1 43-agent organism ===');
+  cycleWrites.clear(); // Reset dedup tracker for new cycle
 
   try {
     var state = await loadState();
