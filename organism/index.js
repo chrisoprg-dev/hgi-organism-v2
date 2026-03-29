@@ -125,6 +125,34 @@ if (url === '/api/hunt-stats') {
   return;
 }
 
+if (url === '/api/crash-log') {
+  var cr = await supabase.from('organism_memory').select('observation,created_at').eq('agent','v3_engine').order('created_at',{ascending:false}).limit(10);
+  res.writeHead(200, {'Content-Type':'application/json'});
+  res.end(JSON.stringify(cr.data || []));
+  return;
+}
+
+if (url === '/api/test-agent' && req.method === 'POST') {
+  res.writeHead(200, {'Content-Type':'application/json'});
+  try {
+    var tState = await loadState();
+    var tOpp = tState.pipeline[0];
+    if (!tOpp) { res.end(JSON.stringify({error:'no pipeline'})); return; }
+    var tBrief = await buildCycleBrief(tOpp, tState);
+    var tResult = await agentIntelligence(tOpp, tState, tBrief);
+    res.end(JSON.stringify({test:'intelligence_engine', opp: tOpp.title, result: tResult, memoryCheck: 'Query organism_memory for agent=intelligence_engine after this'}));
+  } catch (e) {
+    res.end(JSON.stringify({error: e.message, stack: (e.stack||'').slice(0,500)}));
+  }
+  return;
+}
+
+if (url === '/api/status') {
+  res.writeHead(200, {'Content-Type':'application/json'});
+  res.end(JSON.stringify({status:'alive', uptime: Math.floor(process.uptime())}));
+  return;
+}
+
 if (url === '/api/chat' && req.method === 'POST') {
 
   let chatBody = '';
@@ -1353,6 +1381,17 @@ async function runSession(trigger) {
 
   } catch (e) {
     log('SESSION ERROR: ' + e.message);
+    try {
+      await supabase.from('organism_memory').insert({
+        id: 'crash-' + Date.now(),
+        agent: 'v3_engine',
+        observation: 'SESSION CRASH: ' + e.message + '\nStack: ' + (e.stack || '').slice(0, 2000),
+        memory_type: 'analysis',
+        entity_tags: 'crash,error',
+        source_url: null, confidence: 'high', status: 'scratch',
+        created_at: new Date().toISOString()
+      });
+    } catch (e2) { log('Could not log crash: ' + e2.message); }
   }
 }
 
@@ -1360,10 +1399,39 @@ async function runSession(trigger) {
 // STARTUP
 // ============================================================
 log('==========================================================');
-log('HGI LIVING ORGANISM V3.0 - STARTING');
+log('HGI LIVING ORGANISM V3.1 - STARTING');
 log('43 researcher-agents. Task instructions. Sourced intelligence.');
-log('Confidence-tagged memory. Practitioner quality standard.');
+log('12h dedup guard. Crash logging. Test endpoints.');
 log('==========================================================');
+
+// Prevent crash loops — log and survive
+process.on('uncaughtException', function(err) {
+  log('UNCAUGHT: ' + err.message);
+  try {
+    supabase.from('organism_memory').insert({
+      id: 'crash-' + Date.now(),
+      agent: 'v3_engine',
+      observation: 'UNCAUGHT EXCEPTION: ' + err.message + '\nStack: ' + (err.stack || '').slice(0, 2000),
+      memory_type: 'analysis', entity_tags: 'crash,uncaught',
+      source_url: null, confidence: 'high', status: 'scratch',
+      created_at: new Date().toISOString()
+    }).then(function() {}).catch(function() {});
+  } catch (e2) {}
+});
+
+process.on('unhandledRejection', function(reason) {
+  log('UNHANDLED REJECTION: ' + (reason && reason.message ? reason.message : String(reason)));
+  try {
+    supabase.from('organism_memory').insert({
+      id: 'reject-' + Date.now(),
+      agent: 'v3_engine',
+      observation: 'UNHANDLED REJECTION: ' + (reason && reason.message ? reason.message : String(reason)) + '\nStack: ' + (reason && reason.stack ? reason.stack.slice(0, 2000) : ''),
+      memory_type: 'analysis', entity_tags: 'crash,rejection',
+      source_url: null, confidence: 'high', status: 'scratch',
+      created_at: new Date().toISOString()
+    }).then(function() {}).catch(function() {});
+  } catch (e2) {}
+});
 
 setTimeout(function() { runSession('startup').catch(console.error); }, 3000);
 
