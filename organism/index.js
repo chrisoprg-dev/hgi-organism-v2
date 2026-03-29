@@ -1073,7 +1073,7 @@ async function agentMemoryCurator(state, cycleMemories) {
     reviewed++;
     
     // Promotion criteria: has source_url AND confidence is high or medium
-    if (mem.source_url && (mem.confidence === 'high' || mem.confidence === 'medium')) {
+    if (mem.confidence === 'high' || (mem.source_url && mem.confidence === 'medium')) {
       // Check not duplicate of existing verified
       var existingVerified = await supabase.from('organism_memory')
         .select('observation')
@@ -1369,6 +1369,16 @@ async function runSession(trigger) {
     // Reload memories to get what was just written
     var freshMems = await supabase.from('organism_memory').select('*').eq('status', 'scratch').gte('created_at', new Date(Date.now() - 3600000).toISOString()).order('created_at', { ascending: false }).limit(100);
     var cycleMems = freshMems.data || [];
+
+    // 5b. EVAL SCORING - score every memory written this cycle
+    log('EVAL: Scoring ' + cycleMems.length + ' cycle memories...');
+    for (var ev = 0; ev < cycleMems.length; ev++) {
+      try {
+        var evalResult = await scoreAgentOutput(cycleMems[ev].agent, cycleMems[ev].opportunity_id, cycleMems[ev].observation || '', state);
+        if (evalResult) allEvalScores.push(evalResult);
+      } catch (e) { /* eval scoring non-fatal */ }
+    }
+    log('EVAL: Scored ' + allEvalScores.length + ' outputs');
 
     // 6. MEMORY CURATOR
     try { var rMC = await agentMemoryCurator(state, cycleMems); if (rMC) allResults.push(rMC); } catch (e) { log('Curator err: ' + e.message); }
