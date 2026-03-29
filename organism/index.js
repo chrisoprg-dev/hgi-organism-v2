@@ -204,29 +204,28 @@ async function storeMemory(agent, oppId, tags, observation, memType, sourceUrl, 
     confidence = confidence || 'inferred';
     var status = 'scratch'; // Always scratch. Only curator promotes.
 
-    // Dedup check: skip if similar observation exists for same agent + opp in last 48h
+    // TIME-BASED DEDUP: skip if this agent wrote for this opp in last 12 hours
+    // UNLESS the new output contains source URLs not in previous write
     var dedupQ = supabase.from('organism_memory')
-      .select('observation')
+      .select('observation,source_url,created_at')
       .eq('agent', agent)
-      .gte('created_at', new Date(Date.now() - 48*3600000).toISOString())
+      .gte('created_at', new Date(Date.now() - 12*3600000).toISOString())
       .order('created_at', { ascending: false })
-      .limit(3);
+      .limit(1);
     if (oppId) dedupQ = dedupQ.eq('opportunity_id', oppId);
     else dedupQ = dedupQ.is('opportunity_id', null);
     var existing = await dedupQ;
 
     if (existing.data && existing.data.length > 0) {
-      var newWords = (observation || '').slice(0, 300).toLowerCase().split(/\s+/).filter(function(w) { return w.length > 4; });
-      for (var i = 0; i < existing.data.length; i++) {
-        var exWords = (existing.data[i].observation || '').slice(0, 300).toLowerCase().split(/\s+/).filter(function(w) { return w.length > 4; });
-        if (newWords.length > 0 && exWords.length > 0) {
-          var matches = newWords.filter(function(w) { return exWords.indexOf(w) >= 0; }).length;
-          if (matches / newWords.length > 0.7) {
-            log('DEDUP: Skip ' + agent + ' on ' + (oppId || 'system').slice(0, 30));
-            return;
-          }
-        }
+      // Recent write exists. Allow through ONLY if new output has source URLs the old one lacks
+      var oldUrls = ((existing.data[0].observation || '').match(/https?:\/\/[^\s"<>)]+/g) || []);
+      var newUrls = ((observation || '').match(/https?:\/\/[^\s"<>)]+/g) || []);
+      var hasNewSource = newUrls.some(function(u) { return oldUrls.indexOf(u) < 0; });
+      if (!hasNewSource) {
+        log('DEDUP-TIME: Skip ' + agent + ' (wrote <12h ago, no new sources) on ' + (oppId || 'system').slice(0, 30));
+        return;
       }
+      log('DEDUP-TIME: Allow ' + agent + ' (has new source URLs)');
     }
 
     await supabase.from('organism_memory').insert({
@@ -239,6 +238,7 @@ async function storeMemory(agent, oppId, tags, observation, memType, sourceUrl, 
       status: status,
       created_at: new Date().toISOString()
     });
+    log('MEMORY: ' + agent + ' wrote to ' + (oppId || 'system').slice(0, 30) + ' (' + (observation || '').length + ' chars, conf:' + confidence + ')');
   } catch (e) { log('Memory error: ' + e.message); }
 }
 
@@ -496,7 +496,26 @@ async function agentWinnability(opp, state, cycleBrief) {
     return null;
   }
   log('WINNABILITY: ' + out.length + ' chars');
-  await storeMemory('winnability_agent', opp.id, (opp.agency || '') + ',winnability', out, 'winnability', null, 'medium');
+
+  // PWIN-CHANGE GUARD: Extract PWIN from output and compare to previous
+  var skipStore = false;
+  if (lastWin && lastWin.observation) {
+    var oldPwinMatch = (lastWin.observation || '').match(/PWIN[:\s]*~?(\d+)/i);
+    var newPwinMatch = (out || '').match(/PWIN[:\s]*~?(\d+)/i);
+    if (oldPwinMatch && newPwinMatch) {
+      var oldPwin = parseInt(oldPwinMatch[1]);
+      var newPwin = parseInt(newPwinMatch[1]);
+      if (Math.abs(newPwin - oldPwin) < 5) {
+        log('WINNABILITY: PWIN unchanged (' + oldPwin + ' -> ' + newPwin + '), skipping memory write');
+        skipStore = true;
+      }
+    }
+  }
+
+  if (!skipStore) {
+    await storeMemory('winnability_agent', opp.id, (opp.agency || '') + ',winnability', out, 'winnability', null, 'medium');
+  }
+  // Always update the opp record so capture_action stays current
   await supabase.from('opportunities').update({ capture_action: out.slice(0, 60000), last_updated: new Date().toISOString() }).eq('id', opp.id);
   return { agent: 'winnability_agent', opp: opp.title, chars: out.length };
 }
