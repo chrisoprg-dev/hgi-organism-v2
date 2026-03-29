@@ -20,6 +20,10 @@ const PORT = process.env.PORT || 3000;
 const supabase = createClient(SB_URL, SB_KEY);
 const anthropic = new Anthropic({ apiKey: AK });
 
+// Ring buffer for in-memory log access
+var logBuffer = [];
+var LOG_MAX = 500;
+
 const server = http.createServer(async (req, res) => {
   // Crash protection - never let a request handler kill the server
   try {
@@ -70,6 +74,20 @@ const server = http.createServer(async (req, res) => {
       const r = await supabase.from('organism_memory').select('id,agent,observation,memory_type,created_at,opportunity_id').eq('memory_type','decision_point').order('created_at', { ascending: false }).limit(20);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(r.data || []));
+      return;
+    }
+
+    if (url === '/api/logs') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ lines: logBuffer.length, logs: logBuffer }));
+      return;
+    }
+
+    if (url === '/api/trigger') {
+      log('MANUAL TRIGGER via /api/trigger');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ triggered: true, time: new Date().toISOString() }));
+      setImmediate(function() { runSession('manual_trigger').catch(function(e) { log('Trigger error: ' + e.message); }); });
       return;
     }
 
@@ -223,7 +241,7 @@ server.listen(PORT, () => log('Health server listening on port ' + PORT));
 // Confidence-tagged memory. Practitioner-quality output.
 // ============================================================
 
-function log(msg) { console.log('[' + new Date().toISOString() + '] [ORGANISM] ' + msg); }
+function log(msg) { var line = '[' + new Date().toISOString() + '] [ORGANISM] ' + msg; console.log(line); logBuffer.push(line); if (logBuffer.length > LOG_MAX) logBuffer.shift(); }
 
 // === MEMORY: DEDUP + CONFIDENCE + STATUS ===
 // In-memory cycle tracker — prevents duplicate writes within a session
