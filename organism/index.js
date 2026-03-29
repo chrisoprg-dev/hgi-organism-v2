@@ -204,10 +204,10 @@ async function storeMemory(agent, oppId, tags, observation, memType, sourceUrl, 
     confidence = confidence || 'inferred';
     var status = 'scratch'; // Always scratch. Only curator promotes.
 
-    // TIME-BASED DEDUP: skip if this agent wrote for this opp in last 12 hours
-    // UNLESS the new output contains source URLs not in previous write
+    // Dedup: time-based guard — one write per agent per opp per 12h
+    // Exception: new sourced URLs get through even within the window
     var dedupQ = supabase.from('organism_memory')
-      .select('observation,source_url,created_at')
+      .select('observation,source_url')
       .eq('agent', agent)
       .gte('created_at', new Date(Date.now() - 12*3600000).toISOString())
       .order('created_at', { ascending: false })
@@ -217,15 +217,18 @@ async function storeMemory(agent, oppId, tags, observation, memType, sourceUrl, 
     var existing = await dedupQ;
 
     if (existing.data && existing.data.length > 0) {
-      // Recent write exists. Allow through ONLY if new output has source URLs the old one lacks
-      var oldUrls = ((existing.data[0].observation || '').match(/https?:\/\/[^\s"<>)]+/g) || []);
-      var newUrls = ((observation || '').match(/https?:\/\/[^\s"<>)]+/g) || []);
-      var hasNewSource = newUrls.some(function(u) { return oldUrls.indexOf(u) < 0; });
-      if (!hasNewSource) {
-        log('DEDUP-TIME: Skip ' + agent + ' (wrote <12h ago, no new sources) on ' + (oppId || 'system').slice(0, 30));
+      // Agent already wrote for this opp in last 12h — check for new source exception
+      if (sourceUrl && sourceUrl !== 'web_search_result' && sourceUrl !== 'web_search') {
+        var prevObs = existing.data[0].observation || '';
+        if (prevObs.indexOf(sourceUrl) >= 0) {
+          log('DEDUP: Skip ' + agent + ' (12h guard, same source) on ' + (oppId || 'system').slice(0, 30));
+          return;
+        }
+        log('DEDUP: Allow ' + agent + ' (new source: ' + sourceUrl.slice(0, 50) + ')');
+      } else {
+        log('DEDUP: Skip ' + agent + ' (12h guard) on ' + (oppId || 'system').slice(0, 30));
         return;
       }
-      log('DEDUP-TIME: Allow ' + agent + ' (has new source URLs)');
     }
 
     await supabase.from('organism_memory').insert({
@@ -238,7 +241,6 @@ async function storeMemory(agent, oppId, tags, observation, memType, sourceUrl, 
       status: status,
       created_at: new Date().toISOString()
     });
-    log('MEMORY: ' + agent + ' wrote to ' + (oppId || 'system').slice(0, 30) + ' (' + (observation || '').length + ' chars, conf:' + confidence + ')');
   } catch (e) { log('Memory error: ' + e.message); }
 }
 
@@ -466,6 +468,19 @@ async function agentFinancial(opp, state, cycleBrief) {
 
 async function agentWinnability(opp, state, cycleBrief) {
   log('WINNABILITY: ' + (opp.title || '?').slice(0, 50));
+
+  // Hard guard: skip entirely if we wrote for this opp in last 12h
+  var recentWin = await supabase.from('organism_memory')
+    .select('created_at')
+    .eq('agent', 'winnability_agent')
+    .eq('opportunity_id', opp.id)
+    .gte('created_at', new Date(Date.now() - 12*3600000).toISOString())
+    .limit(1);
+  if (recentWin.data && recentWin.data.length > 0) {
+    log('WINNABILITY: Skip (wrote within 12h)');
+    return null;
+  }
+
   var ctx = buildAgentCtx(state, 'winnability_agent', opp.id);
 
   // Material change check
@@ -496,26 +511,7 @@ async function agentWinnability(opp, state, cycleBrief) {
     return null;
   }
   log('WINNABILITY: ' + out.length + ' chars');
-
-  // PWIN-CHANGE GUARD: Extract PWIN from output and compare to previous
-  var skipStore = false;
-  if (lastWin && lastWin.observation) {
-    var oldPwinMatch = (lastWin.observation || '').match(/PWIN[:\s]*~?(\d+)/i);
-    var newPwinMatch = (out || '').match(/PWIN[:\s]*~?(\d+)/i);
-    if (oldPwinMatch && newPwinMatch) {
-      var oldPwin = parseInt(oldPwinMatch[1]);
-      var newPwin = parseInt(newPwinMatch[1]);
-      if (Math.abs(newPwin - oldPwin) < 5) {
-        log('WINNABILITY: PWIN unchanged (' + oldPwin + ' -> ' + newPwin + '), skipping memory write');
-        skipStore = true;
-      }
-    }
-  }
-
-  if (!skipStore) {
-    await storeMemory('winnability_agent', opp.id, (opp.agency || '') + ',winnability', out, 'winnability', null, 'medium');
-  }
-  // Always update the opp record so capture_action stays current
+  await storeMemory('winnability_agent', opp.id, (opp.agency || '') + ',winnability', out, 'winnability', null, 'medium');
   await supabase.from('opportunities').update({ capture_action: out.slice(0, 60000), last_updated: new Date().toISOString() }).eq('id', opp.id);
   return { agent: 'winnability_agent', opp: opp.title, chars: out.length };
 }
