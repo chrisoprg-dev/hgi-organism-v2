@@ -185,7 +185,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (url === '/' || url === '/dashboard') {
+    if (url === '/' || url === '/dashboard' || url === '/interface') {
       const html = getInterface();
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(html);
