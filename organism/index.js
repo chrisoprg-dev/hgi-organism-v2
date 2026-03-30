@@ -56,10 +56,104 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url === '/api/briefing') {
-      const r = await supabase.from('organism_memory').select('observation,agent,created_at').eq('agent','dashboard_agent').order('created_at', { ascending: false }).limit(1);
-      const brief = (r.data && r.data[0]) ? r.data[0].observation : null;
+      // Rich morning briefing — mobile-friendly HTML
+      var bPipeline = await supabase.from('opportunities').select('title,opi_score,stage,status,due_date,estimated_value').eq('status','active').order('opi_score', { ascending: false });
+      var bDash = await supabase.from('organism_memory').select('observation,created_at').eq('agent','dashboard_agent').order('created_at', { ascending: false }).limit(1);
+      var bHunt = await supabase.from('organism_memory').select('observation,created_at').eq('agent','hunting_agent').order('created_at', { ascending: false }).limit(1);
+      var bExec = await supabase.from('organism_memory').select('observation,created_at').eq('agent','executive_brief_agent').order('created_at', { ascending: false }).limit(1);
+      var bAlerts = await supabase.from('organism_memory').select('observation,agent,created_at').in('agent', ['pipeline_scanner','disaster_monitor','amendment_tracker']).order('created_at', { ascending: false }).limit(3);
+      var pipeline = bPipeline.data || [];
+      var dashText = (bDash.data && bDash.data[0]) ? bDash.data[0].observation : 'No briefing yet.';
+      var dashTime = (bDash.data && bDash.data[0]) ? bDash.data[0].created_at : '';
+      var huntText = (bHunt.data && bHunt.data[0]) ? bHunt.data[0].observation : '';
+      var execText = (bExec.data && bExec.data[0]) ? bExec.data[0].observation : '';
+      var alerts = bAlerts.data || [];
+      var today = new Date();
+
+      var pipelineHtml = pipeline.map(function(o) {
+        var days = o.due_date ? Math.ceil((new Date(o.due_date) - today) / 86400000) : null;
+        var urgency = days !== null && days <= 14 ? ' style="color:#d32f2f;font-weight:bold"' : '';
+        return '<div style="padding:8px 0;border-bottom:1px solid #eee">' +
+          '<div style="display:flex;justify-content:space-between">' +
+          '<strong>' + (o.title || '?').slice(0, 60) + '</strong>' +
+          '<span style="background:#1a237e;color:#fff;border-radius:12px;padding:2px 8px;font-size:12px">OPI ' + (o.opi_score || '?') + '</span></div>' +
+          '<div style="font-size:13px;color:#666;margin-top:2px">' +
+          (o.stage || '?') + (days !== null ? ' <span' + urgency + '> | ' + days + ' days</span>' : '') +
+          '</div></div>';
+      }).join('');
+
+      var alertsHtml = alerts.map(function(a) {
+        return '<div style="padding:6px 0;border-bottom:1px solid #eee;font-size:13px"><strong>' + a.agent + ':</strong> ' + (a.observation || '').slice(0, 200) + '</div>';
+      }).join('') || '<div style="color:#666;font-size:13px">No urgent alerts</div>';
+
+      var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+        '<title>HGI Morning Briefing</title>' +
+        '<style>body{font-family:-apple-system,system-ui,sans-serif;margin:0;padding:16px;background:#f5f5f5;color:#333;max-width:600px;margin:0 auto}' +
+        '.card{background:#fff;border-radius:12px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.1)}' +
+        '.header{background:linear-gradient(135deg,#1a237e,#c6a300);color:#fff;border-radius:12px;padding:20px;margin-bottom:12px;text-align:center}' +
+        'h2{margin:0 0 8px 0;font-size:16px;color:#1a237e}pre{white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.5;margin:0}</style></head>' +
+        '<body><div class="header"><h1 style="margin:0;font-size:22px">HGI Organism Briefing</h1>' +
+        '<div style="font-size:13px;opacity:0.8">' + new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) + '</div>' +
+        '<div style="font-size:12px;opacity:0.7">Last cycle: ' + (dashTime ? new Date(dashTime).toLocaleString() : 'unknown') + '</div></div>' +
+        '<div class="card"><h2>Pipeline (' + pipeline.length + ' opportunities)</h2>' + pipelineHtml + '</div>' +
+        '<div class="card"><h2>Alerts</h2>' + alertsHtml + '</div>' +
+        '<div class="card"><h2>Dashboard Briefing</h2><pre>' + dashText.replace(/</g, '&lt;') + '</pre></div>' +
+        (execText ? '<div class="card"><h2>Executive Summary</h2><pre>' + execText.replace(/</g, '&lt;').slice(0, 2000) + '</pre></div>' : '') +
+        (huntText ? '<div class="card"><h2>Latest Hunting</h2><pre>' + huntText.replace(/</g, '&lt;').slice(0, 1000) + '</pre></div>' : '') +
+        '<div style="text-align:center;color:#999;font-size:11px;padding:12px">HGI Organism V3.3 | Refresh to update</div>' +
+        '</body></html>';
+
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(html);
+      return;
+    }
+
+    if (url.startsWith('/api/proposal-brief')) {
+      // Structured proposal brief — all organism intelligence organized per opportunity
+      var pbId = (req.url.split('?id=')[1] || '').split('&')[0];
+      if (!pbId) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Missing ?id=opportunity_id' }));
+        return;
+      }
+      var pbOpp = await supabase.from('opportunities').select('*').eq('id', pbId).single();
+      var pbMems = await supabase.from('organism_memory').select('agent,observation,memory_type,confidence,status,source_url,created_at').eq('opportunity_id', pbId).order('created_at', { ascending: false }).limit(100);
+      if (!pbOpp.data) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Opportunity not found' }));
+        return;
+      }
+      var opp = pbOpp.data;
+      var mems = pbMems.data || [];
+      // Organize by agent role
+      function latestByAgent(agentName) {
+        var m = mems.find(function(x) { return x.agent === agentName; });
+        return m ? { observation: m.observation, confidence: m.confidence, status: m.status, source_url: m.source_url, updated: m.created_at } : null;
+      }
+      var brief = {
+        opportunity: { id: opp.id, title: opp.title, agency: opp.agency, vertical: opp.vertical, opi_score: opp.opi_score, stage: opp.stage, due_date: opp.due_date, estimated_value: opp.estimated_value },
+        scope: opp.scope_analysis || null,
+        sections: {
+          competitive_landscape: latestByAgent('intelligence_engine'),
+          financial_analysis: latestByAgent('financial_agent'),
+          winnability: latestByAgent('winnability_agent'),
+          contacts_crm: latestByAgent('crm_agent'),
+          compliance: latestByAgent('quality_gate'),
+          staffing: latestByAgent('staffing_plan_agent'),
+          proposal_draft: latestByAgent('proposal_agent'),
+          red_team: latestByAgent('red_team'),
+          price_to_win: latestByAgent('price_to_win'),
+          team_briefing: latestByAgent('brief_agent'),
+          full_dossier: latestByAgent('opportunity_brief_agent'),
+          proposal_assembly: latestByAgent('proposal_assembly'),
+          oral_prep: latestByAgent('oral_prep')
+        },
+        all_memories_count: mems.length,
+        verified_count: mems.filter(function(m) { return m.status === 'verified' || m.status === 'doctrine'; }).length,
+        generated_at: new Date().toISOString()
+      };
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ briefing: brief }));
+      res.end(JSON.stringify(brief, null, 2));
       return;
     }
 
