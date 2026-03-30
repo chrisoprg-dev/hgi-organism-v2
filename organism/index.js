@@ -1303,20 +1303,9 @@ async function agentHunting(state) {
     });
   } catch (e) {}
 
-  // LaPAC
-  var kw = ['program management', 'disaster recovery', 'housing', 'workforce', 'grant', 'claims'];
-  for (var k = 0; k < kw.length; k++) {
-    try {
-      var r = await fetch('https://wwwcfts.doa.la.gov/lascts/rest/solicitations?keyword=' + encodeURIComponent(kw[k]) + '&status=OPEN&rows=10', { headers: { Accept: 'application/json' } });
-      if (r.ok) {
-        var d = await r.json();
-        (Array.isArray(d) ? d : d.solicitations || []).forEach(function(o) {
-          var t = o.title || o.solicitationTitle || '';
-          if (t && !isDupe(t)) newOpps.push({ title: t, agency: o.agency || o.agencyName || 'LA State', source: 'lapac', source_url: 'https://wwwcfts.doa.la.gov', description: (o.description || t).slice(0, 500), due_date: o.dueDate || null });
-        });
-      }
-    } catch (e) {}
-  }
+  // LaPAC — DISABLED: No REST API exists. Real LaPAC is ColdFusion web form at wwwcfprd.doa.louisiana.gov/osp/lapac/pubMain.cfm
+  // Needs Apify actor to scrape. Central Bidding covers most LA local/parish solicitations.
+  // TODO: Build LaPAC Apify scraper for state-level coverage
 
   // SAM.gov
   var samKW = ['disaster recovery program management', 'grant administration', 'FEMA public assistance', 'CDBG-DR', 'housing authority'];
@@ -1465,7 +1454,7 @@ async function agentHunting(state) {
 
   log('HUNTING: ' + newOpps.length + ' raw candidates. Scoring...');
   if (newOpps.length === 0) {
-    await storeMemory('hunting_agent', null, 'hunting', 'No new candidates from CB + LaPAC + SAM + FEMA + USAspending + Grants.gov + FedReg', 'analysis', null, 'high');
+    await storeMemory('hunting_agent', null, 'hunting', 'No new candidates from CB + SAM + FEMA + USAspending + Grants.gov + FedReg (LaPAC disabled — no API)', 'analysis', null, 'high');
     return { agent: 'hunting_agent', chars: 100, new_opps: 0 };
   }
 
