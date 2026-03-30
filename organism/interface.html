@@ -125,12 +125,12 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
 
 /* COMMAND PALETTE */
 .cmd-messages{padding:16px 18px;display:flex;flex-direction:column;gap:10px}
-.cmd-msg{border-radius:var(--radius);padding:12px 14px;max-width:85%;font-size:13px;line-height:1.6}
-.cmd-msg.user{background:var(--gold-dim);color:var(--gold);align-self:flex-end;border:1px solid rgba(200,165,90,0.3)}
-.cmd-msg.ai{background:var(--surface2);color:var(--text);align-self:flex-start;border:1px solid var(--border)}
+.cmd-msg{border-radius:var(--radius);padding:12px 14px;max-width:88%;font-size:13px;line-height:1.6}
+.cmd-msg.user{background:var(--gold-dim);color:#fff;align-self:flex-end;border:1px solid rgba(200,165,90,0.3);font-weight:500}
+.cmd-msg.ai{background:var(--surface2);color:var(--text);align-self:flex-start;border:1px solid var(--border);font-size:13px;line-height:1.65}
 .cmd-msg.thinking{color:var(--text3);font-style:italic}
-.cmd-suggestions{padding:12px 18px;display:flex;flex-wrap:wrap;gap:6px}
-.cmd-sug{background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:6px 14px;font-size:12px;color:var(--text2);cursor:pointer;transition:border-color 0.15s}
+.cmd-suggestions{padding:12px 18px;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.cmd-sug{background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:10px 12px;font-size:12px;color:var(--text2);cursor:pointer;transition:border-color 0.15s;line-height:1.4;text-align:center}
 .cmd-sug:active{border-color:var(--gold);color:var(--gold)}
 .cmd-input-area{position:sticky;bottom:calc(var(--tab-h) + 0px);padding:10px 16px;background:var(--bg);border-top:1px solid var(--border);display:flex;gap:8px}
 .cmd-input{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:22px;padding:10px 16px;color:#fff;font-size:14px;font-family:var(--font);outline:none}
@@ -163,6 +163,8 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
 .loading-dot:nth-child(2){animation-delay:0.2s}
 .loading-dot:nth-child(3){animation-delay:0.4s}
 @keyframes pulse{0%,80%,100%{opacity:0.3;transform:scale(0.8)}40%{opacity:1;transform:scale(1)}}
+@keyframes statusPulse{0%{box-shadow:0 0 0 0 rgba(52,211,153,0.6)}70%{box-shadow:0 0 0 6px rgba(52,211,153,0)}100%{box-shadow:0 0 0 0 rgba(52,211,153,0)}}
+.status-dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:statusPulse 2s infinite}
 .empty{text-align:center;padding:60px 30px;color:var(--text3)}
 .empty h3{color:var(--text2);font-size:16px;margin-bottom:8px}
 
@@ -200,7 +202,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
         <div class="header-sub" id="cop-time"></div>
       </div>
       <div style="display:flex;align-items:center;gap:6px">
-        <div style="width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green)"></div>
+        <div class="status-dot"></div>
         <span style="font-size:11px;color:var(--text3)" id="cop-status">Loading...</span>
       </div>
     </div>
@@ -357,10 +359,15 @@ function formatValue(v){ if(!v) return ''; var n=parseFloat(v); if(n>=1e6) retur
 function renderMd(s){
   if(!s) return '<em style="color:var(--text3)">No data.</em>';
   s = esc(s);
+  // Remove raw --- horizontal rules
+  s = s.replace(/^-{3,}$/gm,'<div style="border-top:1px solid var(--border);margin:10px 0"></div>');
   s = s.replace(/\*\*(.+?)\*\*/g,'<strong style="color:#fff">$1</strong>');
   s = s.replace(/\*(.+?)\*/g,'<em>$1</em>');
+  s = s.replace(/^#### (.+)/gm,'<div style="margin:8px 0 3px;color:var(--text2);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">$1</div>');
   s = s.replace(/^### (.+)/gm,'<div style="margin:10px 0 4px;color:var(--gold);font-size:13px;font-weight:600">$1</div>');
   s = s.replace(/^## (.+)/gm,'<div style="margin:12px 0 6px;color:#fff;font-size:14px;font-weight:600">$1</div>');
+  s = s.replace(/^# (.+)/gm,'<div style="margin:14px 0 6px;color:var(--gold);font-size:15px;font-weight:700;letter-spacing:-0.3px">$1</div>');
+  s = s.replace(/^(\d+)\. (.+)/gm,'<div style="padding:2px 0 2px 14px;font-size:13px"><span style="color:var(--gold);font-weight:600">$1.</span> $2</div>');
   s = s.replace(/^[\-\*] (.+)/gm,'<div style="padding:1px 0 1px 14px;font-size:13px">\u2022 $1</div>');
   s = s.replace(/\n\n/g,'<br><br>');
   s = s.replace(/\n/g,'<br>');
@@ -382,10 +389,17 @@ function renderCOP(){
     '<div class="stat"><div class="stat-val" style="color:'+(urg>0?'var(--red)':'var(--green)')+'">'+urg+'</div><div class="stat-label">Urgent</div></div>';
   document.getElementById('cop-pipeline').innerHTML = pipeline.map(oppCardHTML).join('');
   var actHtml = memories.slice(0,10).map(function(m){
-    return '<div style="background:var(--surface2);border-radius:var(--radius);padding:10px 14px;margin-bottom:6px;border-left:2px solid var(--gold)">'+
-      '<div style="font-size:10px;font-weight:600;text-transform:uppercase;color:var(--gold);letter-spacing:0.5px">'+esc(m.agent||'unknown')+'</div>'+
-      '<div style="font-size:12px;color:var(--text);margin-top:3px;line-height:1.5">'+esc((m.observation||'').slice(0,180))+'</div>'+
-      '<div style="font-size:10px;color:var(--text3);margin-top:4px">'+fmtDateTime(m.created_at)+'</div></div>';
+    var agentColors = {intelligence:'#60a5fa',financial:'#34d399',winnability:'#f59e0b',quality:'#ef4444',staffing:'#a78bfa',crm:'#f472b6',dashboard:'#c8a55a',hunting:'#2dd4bf',executive:'#818cf8',self_awareness:'#fb923c'};
+    var ac = 'var(--gold)';
+    var an = (m.agent||'').toLowerCase();
+    Object.keys(agentColors).forEach(function(k){ if(an.indexOf(k)>-1) ac = agentColors[k]; });
+    return '<div style="background:var(--surface2);border-radius:var(--radius);padding:12px 14px;margin-bottom:6px;border-left:3px solid '+ac+'">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center">'+
+        '<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:'+ac+';letter-spacing:0.8px">'+esc(m.agent||'unknown')+'</div>'+
+        '<div style="font-size:10px;color:var(--text3)">'+fmtDateTime(m.created_at)+'</div>'+
+      '</div>'+
+      '<div style="font-size:12px;color:var(--text);margin-top:5px;line-height:1.5">'+esc((m.observation||'').slice(0,180))+'</div>'+
+    '</div>';
   }).join('');
   document.getElementById('cop-activity').innerHTML = actHtml || '<div class="empty"><h3>No recent activity</h3></div>';
   document.getElementById('cop-status').textContent = pipeline.length + ' opps \u00B7 43 agents';
@@ -559,12 +573,17 @@ function renderTalent(tab){
   var ct = document.getElementById('talent-content');
   if(tab==='roster'){
     ct.innerHTML = TEAM.map(function(p){
-      return '<div class="person-card">'+
-        '<div class="person-name">'+esc(p.name)+'</div>'+
-        '<div class="person-title">'+esc(p.title)+' \u00B7 '+p.type+'</div>'+
-        '<div class="person-rate">$'+p.rate+'/hr burdened</div>'+
-        '<div class="person-pursuits">'+p.verticals.map(function(v){ return '<span class="badge badge-stage" style="font-size:10px">'+v+'</span>' }).join('')+'</div>'+
-      '</div>';
+      var initials = p.name.split(' ').map(function(w){return w[0]}).join('');
+      var colors = ['#2563eb','#7c3aed','#059669','#d97706','#dc2626','#0891b2','#4f46e5'];
+      var color = colors[p.name.length % colors.length];
+      return '<div class="person-card" style="display:flex;gap:14px;align-items:flex-start">'+
+        '<div style="width:44px;height:44px;border-radius:50%;background:'+color+';display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;color:#fff;flex-shrink:0;letter-spacing:-0.5px">'+initials+'</div>'+
+        '<div style="flex:1;min-width:0">'+
+          '<div class="person-name">'+esc(p.name)+'</div>'+
+          '<div class="person-title">'+esc(p.title)+' \u00B7 '+p.type+'</div>'+
+          '<div class="person-rate">$'+p.rate+'/hr burdened</div>'+
+          '<div class="person-pursuits">'+p.verticals.map(function(v){ return '<span class="badge badge-stage" style="font-size:10px">'+v+'</span>' }).join('')+'</div>'+
+        '</div></div>';
     }).join('') + '<div style="padding:12px;font-size:12px;color:var(--text3)">Key personnel shown. ~50 total team (FT + 1099).</div>';
   } else if(tab==='pursuits'){
     ct.innerHTML = pipeline.map(function(opp){
