@@ -37,7 +37,7 @@ const server = http.createServer(async (req, res) => {
 
     if (url === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'alive', uptime_seconds: Math.floor(process.uptime()), timestamp: new Date().toISOString(), version: 'V2.10.0-phase1-interface', agents_active: 47 }));
+      res.end(JSON.stringify({ status: 'alive', uptime_seconds: Math.floor(process.uptime()), timestamp: new Date().toISOString(), version: 'V3.4-rfp-gate', agents_active: 47 }));
       return;
     }
 
@@ -100,7 +100,7 @@ const server = http.createServer(async (req, res) => {
         '<div class="card"><h2>Dashboard Briefing</h2><pre>' + dashText.replace(/</g, '&lt;') + '</pre></div>' +
         (execText ? '<div class="card"><h2>Executive Summary</h2><pre>' + execText.replace(/</g, '&lt;').slice(0, 2000) + '</pre></div>' : '') +
         (huntText ? '<div class="card"><h2>Latest Hunting</h2><pre>' + huntText.replace(/</g, '&lt;').slice(0, 1000) + '</pre></div>' : '') +
-        '<div style="text-align:center;color:#999;font-size:11px;padding:12px">HGI Organism V3.3 | Refresh to update</div>' +
+        '<div style="text-align:center;color:#999;font-size:11px;padding:12px">HGI Organism V3.4 | Refresh to update</div>' +
         '</body></html>';
 
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -1507,7 +1507,7 @@ async function agentHunting(state) {
 // ============================================================
 async function runSession(trigger) {
   var id = 'v3-' + Date.now();
-  log('=== SESSION START: ' + id + ' | trigger: ' + trigger + ' | V3.1 43-agent organism ===');
+  log('=== SESSION START: ' + id + ' | trigger: ' + trigger + ' | V3.4 43-agent organism ===');
   cycleWrites.clear(); // Reset dedup tracker for new cycle
 
   try {
@@ -1546,9 +1546,17 @@ async function runSession(trigger) {
       try { var r6 = await agentStaffingPlan(opp, state, cycleBrief); if (r6) allResults.push(r6); } catch (e) { log('Staff err: ' + e.message); }
     }
 
-    // 3. PER-OPP SECOND PASS
+    // 3. PER-OPP SECOND PASS — GATED behind rfp_document_retrieved
     for (var j = 0; j < activeOpps.length; j++) {
       var opp2 = activeOpps[j];
+      // RFP DOCUMENT RETRIEVAL GATE: Skip proposal agents if no RFP and not unsolicited
+      var isUnsolicited = ((opp2.title || '') + ' ' + (opp2.description || '')).toLowerCase().indexOf('unsolicited') >= 0;
+      var hasRFP = opp2.rfp_document_retrieved === true;
+      if (!hasRFP && !isUnsolicited) {
+        log('BLOCKED: RFP not retrieved for ' + (opp2.title || '?').slice(0, 50) + ' — skipping proposal agents');
+        continue;
+      }
+      log('PROPOSAL PASS: ' + (opp2.title || '?').slice(0, 50) + (isUnsolicited ? ' [UNSOLICITED]' : ' [RFP RETRIEVED]'));
       var cb2 = await buildCycleBrief(opp2, state);
       try { var rPW = await agentProposalWriter(opp2, state, cb2); if (rPW) allResults.push(rPW); } catch (e) { log('PW err: ' + e.message); }
       try { var rRT = await agentRedTeam(opp2, state, cb2); if (rRT) allResults.push(rRT); } catch (e) { log('RT err: ' + e.message); }
@@ -1638,8 +1646,8 @@ async function runSession(trigger) {
 // STARTUP
 // ============================================================
 log('==========================================================');
-log('HGI LIVING ORGANISM V3.3 - STARTING');
-log('43 researcher-agents. Task instructions. Sourced intelligence.');
+log('HGI LIVING ORGANISM V3.4 - STARTING');
+log('43 researcher-agents. Task instructions. Sourced intelligence. RFP gate.');
 log('12h dedup guard. Crash logging. Test endpoints.');
 log('==========================================================');
 
@@ -1684,5 +1692,5 @@ setInterval(function() {
   }
 }, 60000);
 
-log('V3.3 ready. Session in 3s...');
+log('V3.4 ready. Session in 3s...');
 
