@@ -31,44 +31,46 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
 /* TAB BAR */
 .tab-bar{
   position:fixed;bottom:0;left:0;right:0;height:var(--tab-h);
-  background:var(--surface);border-top:1px solid var(--border);
+  background:rgba(17,24,39,0.95);border-top:1px solid var(--border);
   display:flex;align-items:center;justify-content:space-around;
   z-index:1000;padding-bottom:env(safe-area-inset-bottom,0);
-  backdrop-filter:blur(12px);
+  backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
 }
 .tab-btn{
   display:flex;flex-direction:column;align-items:center;gap:3px;
   background:none;border:none;color:var(--text3);font-size:10px;
-  font-family:var(--font);font-weight:500;cursor:pointer;
-  padding:6px 10px;transition:color 0.15s;min-width:52px;
+  font-family:var(--font);font-weight:600;cursor:pointer;
+  padding:6px 10px;transition:all 0.2s;min-width:52px;
+  letter-spacing:0.3px;
 }
 .tab-btn.active{color:var(--gold)}
-.tab-btn svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.tab-btn svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;transition:all 0.2s}
+.tab-btn.active svg{stroke-width:2}
 
 /* HEADER */
-.header{padding:16px 18px 12px;border-bottom:1px solid var(--border);background:var(--surface);position:sticky;top:0;z-index:100}
-.header-title{font-size:18px;font-weight:700;color:#fff}
+.header{padding:16px 18px 12px;border-bottom:1px solid var(--border);background:var(--surface);position:sticky;top:0;z-index:100;border-top:2px solid var(--gold)}
+.header-title{font-size:18px;font-weight:700;color:#fff;letter-spacing:-0.3px}
 .header-sub{font-size:11px;color:var(--text3);margin-top:2px}
 .header-row{display:flex;align-items:center;justify-content:space-between}
 
 /* STAT CARDS */
-.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:12px 16px}
-.stat{background:var(--surface2);border-radius:var(--radius);padding:12px;text-align:center;border:1px solid var(--border)}
-.stat-val{font-size:22px;font-weight:700;color:#fff}
-.stat-label{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;margin-top:2px}
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;padding:12px 16px}
+.stat{background:linear-gradient(135deg,var(--surface2),var(--surface3));border-radius:var(--radius);padding:14px;text-align:center;border:1px solid var(--border)}
+.stat-val{font-size:24px;font-weight:700;color:#fff;letter-spacing:-0.5px}
+.stat-label{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.8px;margin-top:3px;font-weight:600}
 
 /* PIPELINE CARDS */
-.section-head{padding:12px 18px 6px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:var(--gold)}
+.section-head{padding:14px 18px 6px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;color:var(--gold)}
 .opp-list{padding:0 12px}
 .opp-card{
   background:var(--surface2);border-radius:var(--radius);padding:14px 16px;margin-bottom:8px;
-  border:1px solid var(--border);cursor:pointer;transition:border-color 0.15s;
+  border:1px solid var(--border);cursor:pointer;transition:all 0.15s;
   -webkit-tap-highlight-color:transparent;
 }
-.opp-card:active{border-color:var(--gold)}
-.opp-title{font-size:14px;font-weight:600;color:#fff;margin-bottom:6px}
+.opp-card:active{border-color:var(--gold);background:var(--surface3)}
+.opp-title{font-size:14px;font-weight:600;color:#fff;margin-bottom:6px;line-height:1.35}
 .opp-meta{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
-.badge{display:inline-flex;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600}
+.badge{display:inline-flex;padding:3px 9px;border-radius:12px;font-size:11px;font-weight:600}
 .badge-opi-high{background:var(--green-dim);color:var(--green)}
 .badge-opi-mid{background:var(--amber-dim);color:var(--amber)}
 .badge-opi-low{background:var(--red-dim);color:var(--red)}
@@ -77,17 +79,17 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
 .badge-gated{background:var(--red-dim);color:var(--red);font-size:10px}
 
 /* DEEP DIVE */
-.dd-back{display:flex;align-items:center;gap:6px;padding:12px 18px;font-size:13px;color:var(--gold);cursor:pointer;font-weight:500;border-bottom:1px solid var(--border)}
+.dd-back{display:flex;align-items:center;gap:6px;padding:12px 18px;font-size:13px;color:var(--gold);cursor:pointer;font-weight:600;border-bottom:1px solid var(--border);letter-spacing:0.3px}
 .dd-header{padding:16px 18px;border-bottom:1px solid var(--border)}
-.dd-header h2{font-size:18px;font-weight:700;color:#fff}
-.dd-badges{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap}
+.dd-header h2{font-size:17px;font-weight:700;color:#fff;line-height:1.35}
+.dd-badges{margin-top:10px;display:flex;gap:6px;flex-wrap:wrap}
 .dd-tabs{display:flex;gap:0;border-bottom:1px solid var(--border);overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
 .dd-tabs::-webkit-scrollbar{display:none}
 .dd-tab{padding:10px 16px;font-size:12px;font-weight:500;color:var(--text3);cursor:pointer;white-space:nowrap;border-bottom:2px solid transparent;transition:all 0.15s;flex-shrink:0}
 .dd-tab.active{color:var(--gold);border-bottom-color:var(--gold)}
 .dd-content{padding:16px 18px}
-.agent-card{background:var(--surface2);border-radius:var(--radius);padding:14px;margin-bottom:10px;border-left:3px solid var(--gold)}
-.agent-name{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:var(--gold);margin-bottom:4px}
+.agent-card{background:linear-gradient(135deg,var(--surface2),rgba(35,45,63,0.8));border-radius:var(--radius);padding:14px 16px;margin-bottom:10px;border-left:3px solid var(--gold);border:1px solid var(--border);border-left:3px solid var(--gold)}
+.agent-name{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--gold);margin-bottom:4px}
 .agent-type{font-size:10px;color:var(--text3);margin-bottom:8px}
 .agent-obs{font-size:13px;line-height:1.6;color:var(--text)}
 .agent-obs.collapsed{max-height:120px;overflow:hidden;position:relative}
@@ -136,10 +138,10 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
 .cmd-send{background:var(--gold);color:var(--bg);border:none;border-radius:22px;padding:10px 18px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--font)}
 
 /* EXECUTIVE VIEW */
-.exec-view{background:#f8f9fa;color:#1a1a1a;min-height:100%}
-.exec-header{padding:20px 18px;background:#fff;border-bottom:1px solid #e5e7eb}
-.exec-header h1{font-size:20px;font-weight:700;color:#111}
-.exec-header p{font-size:12px;color:#6b7280;margin-top:2px}
+.exec-view{background:#f5f6f8;color:#1a1a1a;min-height:100%}
+.exec-header{padding:20px 18px;background:#fff;border-bottom:1px solid #e2e4e9;border-top:3px solid #c8a55a}
+.exec-header h1{font-size:19px;font-weight:700;color:#111;letter-spacing:-0.3px}
+.exec-header p{font-size:12px;color:#6b7280;margin-top:3px}
 .exec-stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:16px}
 .exec-stat{background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.06)}
 .exec-stat-val{font-size:24px;font-weight:700;color:#111}
@@ -178,8 +180,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
   .exec-stats{grid-template-columns:repeat(4,1fr)}
 }
 @media(max-width:380px){
-  .stats{grid-template-columns:repeat(2,1fr)}
-  .stat-val{font-size:18px}
+  .stat-val{font-size:20px}
 }
 ::-webkit-scrollbar{width:4px}
 ::-webkit-scrollbar-track{background:transparent}
@@ -394,12 +395,12 @@ function oppCardHTML(o){
   var days = daysUntil(o.due_date);
   var gated = (o.outcome==='gated'||(o.capture_action||'').toLowerCase().indexOf('gated')>-1);
   return '<div class="opp-card" onclick="goDeepDive(\''+o.id+'\')">'+
-    '<div class="opp-title">'+esc(o.title)+'</div>'+
+    '<div class="opp-title">'+esc((o.title||'').slice(0,80))+((o.title||'').length>80?'…':'')+'</div>'+
     '<div class="opp-meta">'+
       '<span class="badge '+opiClass(o.opi_score||0)+'">OPI '+(o.opi_score||'?')+'</span>'+
       '<span class="badge badge-stage">'+(o.stage||'identified')+'</span>'+
       (gated?'<span class="badge badge-gated">GATED</span>':'')+
-      (days!==null&&o.stage!=='submitted'?'<span class="badge-due">'+(days<=0?'OVERDUE':days+' days')+'</span>':'')+
+      (days!==null&&days>0&&o.stage!=='submitted'?'<span class="badge-due">'+days+' days</span>':'')+
     '</div></div>';
 }
 
@@ -670,13 +671,13 @@ function renderExec(){
     var days = daysUntil(o.due_date);
     var uc = days<=7?'exec-badge-red':days<=14?'exec-badge-amber':'exec-badge-gray';
     return '<div class="exec-card" onclick="showExecDetail(\''+o.id+'\')">'+
-      '<div class="exec-card-title">'+esc(o.title)+'</div>'+
+      '<div class="exec-card-title">'+esc((o.title||'').slice(0,80))+(o.title&&o.title.length>80?'…':'')+'</div>'+
       '<div class="exec-card-meta"><span class="exec-badge '+uc+'">'+days+' days</span><span class="exec-badge '+opiClassExec(o.opi_score||0)+'">OPI '+(o.opi_score||'?')+'</span><span class="exec-badge exec-badge-gray">'+(o.stage||'identified')+'</span></div></div>';
   }).join('') : '<div style="padding:16px;text-align:center;color:#9ca3af;font-size:13px">No imminent deadlines</div>';
 
   document.getElementById('exec-pipeline').innerHTML = pipeline.map(function(o){
     return '<div class="exec-card" onclick="showExecDetail(\''+o.id+'\')">'+
-      '<div class="exec-card-title">'+esc(o.title)+'</div>'+
+      '<div class="exec-card-title">'+esc((o.title||'').slice(0,80))+(o.title&&o.title.length>80?'…':'')+'</div>'+
       '<div class="exec-card-meta">'+
         '<span class="exec-badge '+opiClassExec(o.opi_score||0)+'">OPI '+(o.opi_score||'?')+'</span>'+
         '<span class="exec-badge exec-badge-gray">'+(o.stage||'identified')+'</span>'+
