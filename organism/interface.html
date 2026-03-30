@@ -398,7 +398,7 @@ function oppCardHTML(o){
     '<div class="opp-title">'+esc((o.title||'').slice(0,80))+((o.title||'').length>80?'…':'')+'</div>'+
     '<div class="opp-meta">'+
       '<span class="badge '+opiClass(o.opi_score||0)+'">OPI '+(o.opi_score||'?')+'</span>'+
-      '<span class="badge badge-stage">'+(o.stage||'identified')+'</span>'+
+      '<span class="badge badge-stage">'+(o.stage||'new')+'</span>'+
       (gated?'<span class="badge badge-gated">GATED</span>':'')+
       (days!==null&&days>0&&o.stage!=='submitted'?'<span class="badge-due">'+days+' days</span>':'')+
     '</div></div>';
@@ -429,7 +429,7 @@ async function goDeepDive(id){
     '<h2>'+esc(currentOpp.title)+'</h2>'+
     '<div class="dd-badges">'+
       '<span class="badge '+opiClass(currentOpp.opi_score||0)+'">OPI '+(currentOpp.opi_score||'?')+'</span>'+
-      '<span class="badge badge-stage">'+(currentOpp.stage||'identified')+'</span>'+
+      '<span class="badge badge-stage">'+(currentOpp.stage||'new')+'</span>'+
       (gated?'<span class="badge badge-gated">GATED</span>':'')+
       (currentOpp.agency?'<span class="badge" style="background:var(--blue-dim);color:var(--blue)">'+esc(currentOpp.agency)+'</span>':'')+
       (days!==null&&currentOpp.stage!=='submitted'?'<span class="badge-due" style="font-weight:600;color:'+(days<=10?'var(--red)':'var(--text2)')+'">'+days+' days</span>':'')+
@@ -666,13 +666,13 @@ function renderExec(){
     '<div class="exec-stat"><div class="exec-stat-val">'+sub+'</div><div class="exec-stat-label">Submitted</div></div>'+
     '<div class="exec-stat"><div class="exec-stat-val">'+avg+'</div><div class="exec-stat-label">Avg OPI</div></div>';
 
-  var dl = pipeline.filter(function(o){ var d=daysUntil(o.due_date); return d!==null&&d>=0&&d<=30&&o.stage!=='submitted' }).sort(function(a,b){ return new Date(a.due_date)-new Date(b.due_date) });
+  var dl = pipeline.filter(function(o){ var d=daysUntil(o.due_date); return d!==null&&d>=0&&d<=30&&o.stage!=='submitted'&&o.stage }).sort(function(a,b){ return new Date(a.due_date)-new Date(b.due_date) });
   document.getElementById('exec-deadlines').innerHTML = dl.length ? dl.map(function(o){
     var days = daysUntil(o.due_date);
     var uc = days<=7?'exec-badge-red':days<=14?'exec-badge-amber':'exec-badge-gray';
     return '<div class="exec-card" onclick="showExecDetail(\''+o.id+'\')">'+
       '<div class="exec-card-title">'+esc((o.title||'').slice(0,80))+(o.title&&o.title.length>80?'…':'')+'</div>'+
-      '<div class="exec-card-meta"><span class="exec-badge '+uc+'">'+days+' days</span><span class="exec-badge '+opiClassExec(o.opi_score||0)+'">OPI '+(o.opi_score||'?')+'</span><span class="exec-badge exec-badge-gray">'+(o.stage||'identified')+'</span></div></div>';
+      '<div class="exec-card-meta"><span class="exec-badge '+uc+'">'+days+' days</span><span class="exec-badge '+opiClassExec(o.opi_score||0)+'">OPI '+(o.opi_score||'?')+'</span><span class="exec-badge exec-badge-gray">'+(o.stage||'new')+'</span></div></div>';
   }).join('') : '<div style="padding:16px;text-align:center;color:#9ca3af;font-size:13px">No imminent deadlines</div>';
 
   document.getElementById('exec-pipeline').innerHTML = pipeline.map(function(o){
@@ -680,7 +680,7 @@ function renderExec(){
       '<div class="exec-card-title">'+esc((o.title||'').slice(0,80))+(o.title&&o.title.length>80?'…':'')+'</div>'+
       '<div class="exec-card-meta">'+
         '<span class="exec-badge '+opiClassExec(o.opi_score||0)+'">OPI '+(o.opi_score||'?')+'</span>'+
-        '<span class="exec-badge exec-badge-gray">'+(o.stage||'identified')+'</span>'+
+        '<span class="exec-badge exec-badge-gray">'+(o.stage||'new')+'</span>'+
         (o.due_date&&o.stage!=='submitted'?'<span class="exec-badge exec-badge-gray">Due '+fmtDate(o.due_date)+'</span>':'')+
         (o.estimated_value?'<span class="exec-badge exec-badge-gray">'+formatValue(o.estimated_value)+'</span>':'')+
       '</div></div>';
@@ -695,7 +695,7 @@ function showExecDetail(id){
     '<h2 style="font-size:18px;font-weight:700;color:#111;margin-bottom:12px">'+esc(o.title)+'</h2>'+
     '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">'+
       '<span class="exec-badge '+opiClassExec(o.opi_score||0)+'">OPI '+(o.opi_score||'?')+'</span>'+
-      '<span class="exec-badge exec-badge-gray">'+(o.stage||'identified')+'</span>'+
+      '<span class="exec-badge exec-badge-gray">'+(o.stage||'new')+'</span>'+
       (days!==null?'<span class="exec-badge exec-badge-gray">'+days+' days</span>':'')+
       (o.estimated_value?'<span class="exec-badge exec-badge-gray">'+formatValue(o.estimated_value)+'</span>':'')+
     '</div>'+
