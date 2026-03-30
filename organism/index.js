@@ -1238,9 +1238,142 @@ async function agentHunting(state) {
     } catch (e) {}
   }
 
+
+  // === NEW: OpenFEMA disaster declarations (free, no key) ===
+  var hgiStates = ['Louisiana', 'Texas', 'Florida', 'Mississippi', 'Alabama', 'Georgia'];
+  for (var fs = 0; fs < hgiStates.length; fs++) {
+    try {
+      var femaUrl = 'https://www.fema.gov/api/open/v2/DisasterDeclarationsSummaries?' +
+        '$filter=state%20eq%20%27' + hgiStates[fs] + '%27%20and%20declarationDate%20gt%20%27' +
+        new Date(Date.now() - 180 * 86400000).toISOString().slice(0, 10) + 'T00:00:00.000z%27' +
+        '&$orderby=declarationDate%20desc&$top=10';
+      var fr = await fetch(femaUrl, { headers: { Accept: 'application/json' } });
+      if (fr.ok) {
+        var fd = await fr.json();
+        var decls = fd.DisasterDeclarationsSummaries || [];
+        for (var fi = 0; fi < decls.length; fi++) {
+          var decl = decls[fi];
+          var ft = 'DR-' + decl.disasterNumber + ' ' + (decl.state || '') + ' — ' + (decl.declarationTitle || '');
+          if (!isDupe(ft) && !isDupe('DR-' + decl.disasterNumber)) {
+            newOpps.push({
+              title: ft, agency: 'FEMA / ' + (decl.state || 'Federal'),
+              source: 'openfema', source_url: 'https://www.fema.gov/disaster/' + decl.disasterNumber,
+              description: 'FEMA Declaration. Incident: ' + (decl.incidentType || '') +
+                '. Date: ' + (decl.declarationDate || '').slice(0, 10) +
+                '. Programs: ' + (decl.ihProgramDeclared ? 'IA ' : '') +
+                (decl.paProgramDeclared ? 'PA ' : '') + (decl.hmProgramDeclared ? 'HM' : '') +
+                '. Signal for PA-TAC and CM procurement 3-18 months out.',
+              due_date: null, vertical: 'disaster'
+            });
+          }
+        }
+      }
+    } catch (e) { log('HUNTING OpenFEMA err: ' + e.message); }
+  }
+  log('HUNTING: OpenFEMA checked ' + hgiStates.length + ' states');
+
+  // === NEW: USAspending expiring contracts (free, no key) ===
+  try {
+    var usaBody = JSON.stringify({
+      filters: {
+        time_period: [{ start_date: new Date().toISOString().slice(0, 10),
+          end_date: new Date(Date.now() + 730 * 86400000).toISOString().slice(0, 10) }],
+        place_of_performance_locations: [
+          { country: 'USA', state: 'LA' }, { country: 'USA', state: 'TX' },
+          { country: 'USA', state: 'FL' }, { country: 'USA', state: 'MS' }
+        ],
+        naics_codes: { require: ['541611', '541618', '541990', '624230', '524292'] },
+        award_type_codes: ['A', 'B', 'C', 'D']
+      },
+      fields: ['Award ID', 'Recipient Name', 'Award Amount', 'Description',
+        'Period of Performance Current End Date', 'Awarding Agency', 'NAICS Code'],
+      limit: 15, page: 1, sort: 'Period of Performance Current End Date', order: 'asc'
+    });
+    var usaR = await fetch('https://api.usaspending.gov/api/v2/search/spending_by_award/', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: usaBody
+    });
+    if (usaR.ok) {
+      var usaD = await usaR.json();
+      var usaResults = usaD.results || [];
+      for (var ui = 0; ui < usaResults.length; ui++) {
+        var ua = usaResults[ui];
+        var ut = 'RECOMPETE: ' + (ua['Recipient Name'] || '?') + ' — ' + (ua.Description || '').slice(0, 80);
+        if (!isDupe(ut)) {
+          newOpps.push({
+            title: ut, agency: ua['Awarding Agency'] || 'Federal',
+            source: 'usaspending', source_url: 'https://www.usaspending.gov',
+            description: 'Expiring contract. Incumbent: ' + (ua['Recipient Name'] || '?') +
+              '. Value: ' + (ua['Award Amount'] || '?') +
+              '. Expires: ' + (ua['Period of Performance Current End Date'] || '?') +
+              '. Recompete signal.',
+            due_date: ua['Period of Performance Current End Date'] || null, vertical: null
+          });
+        }
+      }
+      log('HUNTING: USAspending found ' + usaResults.length + ' expiring contracts');
+    }
+  } catch (e) { log('HUNTING USAspending err: ' + e.message); }
+
+  // === NEW: Grants.gov forecasted+posted (free, no key) ===
+  try {
+    var gr = await fetch('https://api.grants.gov/v1/api/search2', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        keyword: 'disaster recovery OR housing program OR workforce development OR grant management OR CDBG OR hazard mitigation',
+        oppStatuses: 'forecasted|posted', rows: 15, startRecordNum: 0
+      })
+    });
+    if (gr.ok) {
+      var gd = await gr.json();
+      var gops = (gd.data && gd.data.oppHits) ? gd.data.oppHits : [];
+      for (var gi = 0; gi < gops.length; gi++) {
+        var go = gops[gi];
+        if (go.oppTitle && !isDupe(go.oppTitle)) {
+          newOpps.push({
+            title: go.oppTitle, agency: go.agencyName || 'Federal',
+            source: 'grants_gov', source_url: 'https://grants.gov/search-grants?oppNumber=' + (go.number || ''),
+            description: (go.synopsis || '').slice(0, 300) +
+              (go.oppStatus === 'forecasted' ? ' [FORECASTED]' : ''),
+            due_date: go.closeDate || null, vertical: 'grant'
+          });
+        }
+      }
+      log('HUNTING: Grants.gov found ' + gops.length + ' results');
+    }
+  } catch (e) { log('HUNTING Grants.gov err: ' + e.message); }
+
+  // === NEW: Federal Register CDBG-DR and FEMA notices (free, no key) ===
+  try {
+    var frTerms = ['CDBG-DR', 'FEMA Public Assistance', 'Hazard Mitigation Grant'];
+    for (var frt = 0; frt < frTerms.length; frt++) {
+      var frUrl = 'https://www.federalregister.gov/api/v1/documents.json?' +
+        'conditions[term]=' + encodeURIComponent(frTerms[frt]) +
+        '&conditions[publication_date][gte]=' + new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10) +
+        '&per_page=5&order=newest';
+      var frR = await fetch(frUrl, { headers: { Accept: 'application/json' } });
+      if (frR.ok) {
+        var frD = await frR.json();
+        var frResults = frD.results || [];
+        for (var fri = 0; fri < frResults.length; fri++) {
+          var frd = frResults[fri];
+          if (frd.title && !isDupe(frd.title)) {
+            newOpps.push({
+              title: 'FED REGISTER: ' + frd.title.slice(0, 100),
+              agency: (frd.agencies || []).map(function(a) { return a.name; }).join(', ') || 'Federal',
+              source: 'federal_register', source_url: frd.html_url || 'https://federalregister.gov',
+              description: (frd.abstract || frd.title || '').slice(0, 300) + ' Published: ' + (frd.publication_date || ''),
+              due_date: null, vertical: null
+            });
+          }
+        }
+      }
+    }
+    log('HUNTING: Federal Register checked ' + frTerms.length + ' terms');
+  } catch (e) { log('HUNTING Federal Register err: ' + e.message); }
+
   log('HUNTING: ' + newOpps.length + ' raw candidates. Scoring...');
   if (newOpps.length === 0) {
-    await storeMemory('hunting_agent', null, 'hunting', 'No new candidates from Central Bidding + LaPAC + SAM.gov', 'analysis', null, 'high');
+    await storeMemory('hunting_agent', null, 'hunting', 'No new candidates from CB + LaPAC + SAM + FEMA + USAspending + Grants.gov + FedReg', 'analysis', null, 'high');
     return { agent: 'hunting_agent', chars: 100, new_opps: 0 };
   }
 
@@ -1413,7 +1546,7 @@ async function runSession(trigger) {
 // STARTUP
 // ============================================================
 log('==========================================================');
-log('HGI LIVING ORGANISM V3.1 - STARTING');
+log('HGI LIVING ORGANISM V3.3 - STARTING');
 log('43 researcher-agents. Task instructions. Sourced intelligence.');
 log('12h dedup guard. Crash logging. Test endpoints.');
 log('==========================================================');
@@ -1459,5 +1592,5 @@ setInterval(function() {
   }
 }, 60000);
 
-log('V3.0 ready. Session in 3s...');
+log('V3.3 ready. Session in 3s...');
 
