@@ -1276,8 +1276,6 @@ async function agentHunting(state) {
   try {
     var usaBody = JSON.stringify({
       filters: {
-        time_period: [{ start_date: new Date().toISOString().slice(0, 10),
-          end_date: new Date(Date.now() + 730 * 86400000).toISOString().slice(0, 10) }],
         place_of_performance_locations: [
           { country: 'USA', state: 'LA' }, { country: 'USA', state: 'TX' },
           { country: 'USA', state: 'FL' }, { country: 'USA', state: 'MS' }
@@ -1287,7 +1285,7 @@ async function agentHunting(state) {
       },
       fields: ['Award ID', 'Recipient Name', 'Award Amount', 'Description',
         'Period of Performance Current End Date', 'Awarding Agency', 'NAICS Code'],
-      limit: 15, page: 1, sort: 'Period of Performance Current End Date', order: 'asc'
+      limit: 15, page: 1, sort: 'Award Amount', order: 'desc'
     });
     var usaR = await fetch('https://api.usaspending.gov/api/v2/search/spending_by_award/', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: usaBody
