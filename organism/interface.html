@@ -432,7 +432,7 @@ async function goDeepDive(id){
       '<span class="badge badge-stage">'+(currentOpp.stage||'new')+'</span>'+
       (gated?'<span class="badge badge-gated">GATED</span>':'')+
       (currentOpp.agency?'<span class="badge" style="background:var(--blue-dim);color:var(--blue)">'+esc(currentOpp.agency)+'</span>':'')+
-      (days!==null&&currentOpp.stage!=='submitted'?'<span class="badge-due" style="font-weight:600;color:'+(days<=10?'var(--red)':'var(--text2)')+'">'+days+' days</span>':'')+
+      (days!==null&&days>0&&currentOpp.stage!=='submitted'?'<span class="badge-due" style="font-weight:600;color:'+(days<=10?'var(--red)':'var(--text2)')+'">'+days+' days</span>':'')+
     '</div>';
 
   var groups = groupMemories(currentOppMemories);
