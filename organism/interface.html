@@ -212,7 +212,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
     </div>
   </div>
   <div id="cop-stats" class="stats"></div>
-  <div id="cop-alerts" style="padding:0 12px"></div>
+  <div id="cop-alerts" style="padding:0 12px;margin-top:4px"></div>
   <div id="cop-briefing" style="padding:0 12px;margin-bottom:4px"></div>
   <div class="section-head">Active Pipeline</div>
   <div class="opp-list" id="cop-pipeline"></div>
@@ -399,7 +399,9 @@ function renderCOP(){
 
   // Urgent deadline alerts
   var urgentOpps = pipeline.filter(function(o){ var d=daysUntil(o.due_date); return d!==null&&d<=14&&d>=0&&o.stage!=='submitted'&&o.stage }).sort(function(a,b){ return new Date(a.due_date)-new Date(b.due_date) });
-  document.getElementById('cop-alerts').innerHTML = urgentOpps.length ? urgentOpps.map(function(o){
+  document.getElementById('cop-alerts').innerHTML = urgentOpps.length ? 
+    '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;color:var(--red);margin-bottom:6px;padding:0 4px">\u26A0 Deadline Alerts</div>' +
+    urgentOpps.map(function(o){
     var d = daysUntil(o.due_date);
     return '<div style="background:var(--red-dim);border:1px solid rgba(239,68,68,0.25);border-radius:var(--radius);padding:12px 14px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="goDeepDive(\''+o.id+'\')">'+
       '<div style="flex:1"><div style="font-size:12px;font-weight:600;color:var(--red)">'+esc((o.title||'').slice(0,50))+'</div>'+
@@ -407,17 +409,21 @@ function renderCOP(){
       '<div style="font-size:18px;font-weight:700;color:var(--red);padding-left:12px">'+d+'d</div></div>';
   }).join('') : '';
 
-  // Briefing card from dashboard agent
-  var briefing = memories.find(function(m){ return (m.agent||'').toLowerCase().indexOf('dashboard')>-1||(m.agent||'').toLowerCase().indexOf('executive')>-1 });
+  // Briefing card — find best available: dashboard > executive > winnability > first memory
+  var briefing = memories.find(function(m){ var a=(m.agent||'').toLowerCase(); return a.indexOf('dashboard')>-1||a.indexOf('executive_brief')>-1 })
+    || memories.find(function(m){ var a=(m.agent||'').toLowerCase(); return a.indexOf('winnability')>-1 })
+    || (memories.length>0 ? memories[0] : null);
   document.getElementById('cop-briefing').innerHTML = briefing ?
     '<div style="background:linear-gradient(135deg,rgba(200,165,90,0.08),rgba(200,165,90,0.02));border:1px solid rgba(200,165,90,0.2);border-radius:var(--radius);padding:14px 16px;margin-bottom:8px">'+
-      '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--gold);margin-bottom:6px">Latest Briefing</div>'+
-      '<div style="font-size:12px;color:var(--text);line-height:1.6">'+esc((briefing.observation||'').slice(0,250))+'</div>'+
-      '<div style="font-size:10px;color:var(--text3);margin-top:6px">'+fmtDateTime(briefing.created_at)+'</div></div>' : '';
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'+
+        '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--gold)">Organism Pulse</div>'+
+        '<div style="font-size:10px;color:var(--text3)">'+fmtDateTime(briefing.created_at)+'</div></div>'+
+      '<div style="font-size:12px;color:var(--text);line-height:1.6">'+renderMd((briefing.observation||'').slice(0,300))+'</div>'+
+    '</div>' : '';
 
   document.getElementById('cop-pipeline').innerHTML = pipeline.map(oppCardHTML).join('');
   var actHtml = memories.slice(0,10).map(function(m){
-    var agentColors = {intelligence:'#60a5fa',financial:'#34d399',winnability:'#f59e0b',quality:'#ef4444',staffing:'#a78bfa',crm:'#f472b6',dashboard:'#c8a55a',hunting:'#2dd4bf',executive:'#818cf8',self_awareness:'#fb923c'};
+    var agentColors = {intelligence:'#60a5fa',financial:'#34d399',winnability:'#f59e0b',quality:'#ef4444',staffing:'#a78bfa',crm:'#f472b6',dashboard:'#c8a55a',hunting:'#2dd4bf',executive:'#818cf8',self_awareness:'#fb923c',v2_engine:'#6b7280'};
     var ac = 'var(--gold)';
     var an = (m.agent||'').toLowerCase();
     Object.keys(agentColors).forEach(function(k){ if(an.indexOf(k)>-1) ac = agentColors[k]; });
@@ -426,7 +432,7 @@ function renderCOP(){
         '<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:'+ac+';letter-spacing:0.8px">'+esc(m.agent||'unknown')+'</div>'+
         '<div style="font-size:10px;color:var(--text3)">'+fmtDateTime(m.created_at)+'</div>'+
       '</div>'+
-      '<div style="font-size:12px;color:var(--text);margin-top:5px;line-height:1.5">'+esc((m.observation||'').slice(0,180))+'</div>'+
+      '<div style="font-size:12px;color:var(--text);margin-top:5px;line-height:1.5">'+renderMd((m.observation||'').slice(0,200))+'</div>'+
     '</div>';
   }).join('');
   document.getElementById('cop-activity').innerHTML = actHtml || '<div class="empty"><h3>No recent activity</h3></div>';
