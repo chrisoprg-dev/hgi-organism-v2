@@ -396,7 +396,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
 
       var result = await anthropic.messages.create({
         model: 'claude-opus-4-6',
-        max_tokens: 16000,
+        max_tokens: 64000,
         system: 'You are a senior government proposal writer at HGI Global. You produce submission-ready documents that EXACTLY match what each solicitation requires — questionnaire forms filled field-by-field when forms are required, narrative proposals when narratives are required, exhibits and attachments as specified. Be specific, factual, and persuasive. Use only confirmed company data. Never produce a generic proposal format when the solicitation specifies a different format.',
         messages: [{role:'user', content: proposalPrompt}]
       });
