@@ -357,13 +357,43 @@ async function loadOppMemories(id){ return (await fetchJSON('/api/opportunity-me
 async function loadOppDetail(id){ return (await fetchJSON('/api/opportunity-detail?id=' + encodeURIComponent(id))) || {}; }
 
 // UTIL
-function daysUntil(ds){ if(!ds) return null; return Math.ceil((new Date(ds) - new Date()) / 86400000); }
-function fmtDate(ds){ if(!ds) return ''; return new Date(ds).toLocaleDateString('en-US',{month:'short',day:'numeric'}); }
-function fmtDateTime(ds){ if(!ds) return ''; return new Date(ds).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); }
+function parseDate(ds){
+  if(!ds) return null;
+  // Standard ISO format
+  var d = new Date(ds);
+  if(!isNaN(d.getTime())) return d;
+  // Handle "DD-Mon-YYYY HH:MM:SS AM/PM TZ" format from Central Bidding
+  var m = ds.match(/(\d{1,2})-(\w{3})-(\d{4})\s+(\d{1,2}):(\d{2}):?(\d{2})?\s*(AM|PM)?/i);
+  if(m){
+    var months = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+    var mon = months[(m[2]||'').toLowerCase()];
+    if(mon !== undefined){
+      var hr = parseInt(m[4]);
+      if(m[7] && m[7].toUpperCase()==='PM' && hr<12) hr+=12;
+      if(m[7] && m[7].toUpperCase()==='AM' && hr===12) hr=0;
+      return new Date(parseInt(m[3]), mon, parseInt(m[1]), hr, parseInt(m[5]), parseInt(m[6]||0));
+    }
+  }
+  return null;
+}
+function daysUntil(ds){ var d=parseDate(ds); if(!d) return null; return Math.ceil((d - new Date()) / 86400000); }
+function fmtDate(ds){ var d=parseDate(ds); if(!d) return ''; return d.toLocaleDateString('en-US',{month:'short',day:'numeric'}); }
+function fmtDateTime(ds){ if(!ds) return ''; var d=new Date(ds); if(isNaN(d.getTime())) return ''; return d.toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); }
 function opiClass(s){ return s>=80?'badge-opi-high':s>=65?'badge-opi-mid':'badge-opi-low'; }
 function opiClassExec(s){ return s>=80?'exec-badge-green':s>=65?'exec-badge-amber':'exec-badge-red'; }
 function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
-function formatValue(v){ if(!v) return ''; var n=parseFloat(v); if(n>=1e6) return '$'+Math.round(n/1e6)+'M'; if(n>=1e3) return '$'+Math.round(n/1e3)+'K'; return '$'+n; }
+function formatValue(v){
+  if(!v || v==='None' || v==='Not specified') return '';
+  var n=parseFloat(String(v).replace(/[^0-9.]/g,''));
+  if(!isNaN(n) && n>0){
+    if(n>=1e6) return '$'+Math.round(n/1e6)+'M';
+    if(n>=1e3) return '$'+Math.round(n/1e3)+'K';
+    return '$'+n;
+  }
+  // Text value — extract short version
+  var short = String(v).replace(/\(.*\)/g,'').trim().slice(0,20);
+  return short || '';
+}
 
 function renderMd(s){
   if(!s) return '<em style="color:var(--text3)">No data.</em>';
@@ -390,7 +420,7 @@ function renderCOP(){
   var t1 = pipeline.filter(function(o){ return (o.opi_score||0)>=75 }).length;
   var pur = pipeline.filter(function(o){ return o.stage==='pursuing'||o.stage==='proposal' }).length;
   var sub = pipeline.filter(function(o){ return o.stage==='submitted' }).length;
-  var urg = pipeline.filter(function(o){ var d=daysUntil(o.due_date); return d!==null&&d<=14&&d>=0&&o.stage!=='submitted' }).length;
+  var urg = pipeline.filter(function(o){ var d=daysUntil(o.due_date); return d!==null&&d<=14&&d>=0&&o.stage!=='submitted'&&o.stage }).length;
   document.getElementById('cop-stats').innerHTML =
     '<div class="stat"><div class="stat-val">'+pipeline.length+'</div><div class="stat-label">Active</div></div>'+
     '<div class="stat"><div class="stat-val">'+t1+'</div><div class="stat-label">Tier 1</div></div>'+
@@ -398,7 +428,7 @@ function renderCOP(){
     '<div class="stat"><div class="stat-val" style="color:'+(urg>0?'var(--red)':'var(--green)')+'">'+urg+'</div><div class="stat-label">Urgent</div></div>';
 
   // Urgent deadline alerts
-  var urgentOpps = pipeline.filter(function(o){ var d=daysUntil(o.due_date); return d!==null&&d<=14&&d>=0&&o.stage!=='submitted'&&o.stage }).sort(function(a,b){ return new Date(a.due_date)-new Date(b.due_date) });
+  var urgentOpps = pipeline.filter(function(o){ var d=daysUntil(o.due_date); return d!==null&&d<=14&&d>=0&&o.stage!=='submitted'&&o.stage }).sort(function(a,b){ return (parseDate(a.due_date)||0)-(parseDate(b.due_date)||0) });
   document.getElementById('cop-alerts').innerHTML = urgentOpps.length ? 
     '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;color:var(--red);margin-bottom:6px;padding:0 4px">\u26A0 Deadline Alerts</div>' +
     urgentOpps.map(function(o){
@@ -724,7 +754,7 @@ function renderExec(){
     '<div class="exec-stat"><div class="exec-stat-val">'+sub+'</div><div class="exec-stat-label">Submitted</div></div>'+
     '<div class="exec-stat"><div class="exec-stat-val">'+avg+'</div><div class="exec-stat-label">Avg OPI</div></div>';
 
-  var dl = pipeline.filter(function(o){ var d=daysUntil(o.due_date); return d!==null&&d>=0&&d<=30&&o.stage!=='submitted'&&o.stage }).sort(function(a,b){ return new Date(a.due_date)-new Date(b.due_date) });
+  var dl = pipeline.filter(function(o){ var d=daysUntil(o.due_date); return d!==null&&d>=0&&d<=30&&o.stage!=='submitted'&&o.stage }).sort(function(a,b){ return (parseDate(a.due_date)||0)-(parseDate(b.due_date)||0) });
   document.getElementById('exec-deadlines').innerHTML = dl.length ? dl.map(function(o){
     var days = daysUntil(o.due_date);
     var uc = days<=7?'exec-badge-red':days<=14?'exec-badge-amber':'exec-badge-gray';
