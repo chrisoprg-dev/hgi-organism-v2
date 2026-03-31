@@ -50,7 +50,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url === '/api/pipeline') {
-      const r = await supabase.from('opportunities').select('id,title,agency,vertical,opi_score,stage,status,due_date,estimated_value,capture_action,scope_analysis,research_brief,staffing_plan,financial_analysis,source_url,outcome').eq('status','active').order('opi_score', { ascending: false }).limit(20);
+      const r = await supabase.from('opportunities').select('id,title,agency,vertical,opi_score,stage,status,due_date,estimated_value,capture_action,scope_analysis,research_brief,staffing_plan,financial_analysis,source_url,outcome,rfp_document_retrieved').eq('status','active').order('opi_score', { ascending: false }).limit(20);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(r.data || []));
       return;
@@ -2040,7 +2040,9 @@ process.on('unhandledRejection', function(reason) {
   } catch (e2) {}
 });
 
-setTimeout(function() { runSession('startup').catch(console.error); }, 3000);
+// STARTUP SESSION DISABLED (Session 68) — deploys no longer trigger agent cycles.
+// Cycles run on scheduled cron only (noon + midnight CST). Use /api/trigger for manual runs.
+// setTimeout(function() { runSession('startup').catch(console.error); }, 3000);
 
 // Cron: noon + midnight CST (UTC-6 = 18:00 and 06:00 UTC)
 setInterval(function() {
@@ -2052,5 +2054,5 @@ setInterval(function() {
   }
 }, 60000);
 
-log('V3.4 ready. Session in 3s...');
+log('V3.4 ready. Cron-only mode — noon + midnight CST. /api/trigger for manual.');
 
