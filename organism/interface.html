@@ -25,8 +25,10 @@ html,body{height:100%;overflow:hidden}
 body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14px;line-height:1.5}
 .app{display:flex;flex-direction:column;height:100%}
 .view-area{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:calc(var(--tab-h) + 12px)}
-.view{display:none;min-height:100%}
+.view{display:none;min-height:100%;animation:fadeIn 0.2s ease}
 .view.active{display:block}
+#view-cmd.active{display:flex;flex-direction:column}
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
 
 /* TAB BAR */
 .tab-bar{
@@ -79,7 +81,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
 .badge-gated{background:var(--red-dim);color:var(--red);font-size:10px}
 
 /* DEEP DIVE */
-.dd-back{display:flex;align-items:center;gap:6px;padding:12px 18px;font-size:13px;color:var(--gold);cursor:pointer;font-weight:600;border-bottom:1px solid var(--border);letter-spacing:0.3px}
+.dd-back{display:flex;align-items:center;gap:6px;padding:12px 18px;font-size:13px;color:var(--gold);cursor:pointer;font-weight:600;border-bottom:1px solid var(--border);letter-spacing:0.3px;background:var(--surface);position:sticky;top:0;z-index:50}
 .dd-header{padding:16px 18px;border-bottom:1px solid var(--border)}
 .dd-header h2{font-size:17px;font-weight:700;color:#fff;line-height:1.35}
 .dd-badges{margin-top:10px;display:flex;gap:6px;flex-wrap:wrap}
@@ -132,7 +134,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
 .cmd-suggestions{padding:12px 18px;display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .cmd-sug{background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:10px 12px;font-size:12px;color:var(--text2);cursor:pointer;transition:border-color 0.15s;line-height:1.4;text-align:center}
 .cmd-sug:active{border-color:var(--gold);color:var(--gold)}
-.cmd-input-area{position:sticky;bottom:calc(var(--tab-h) + 0px);padding:10px 16px;background:var(--bg);border-top:1px solid var(--border);display:flex;gap:8px}
+.cmd-input-area{position:fixed;bottom:var(--tab-h);left:0;right:0;padding:10px 16px;background:var(--bg);border-top:1px solid var(--border);display:flex;gap:8px;z-index:100}
 .cmd-input{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:22px;padding:10px 16px;color:#fff;font-size:14px;font-family:var(--font);outline:none}
 .cmd-input:focus{border-color:var(--gold)}
 .cmd-send{background:var(--gold);color:var(--bg);border:none;border-radius:22px;padding:10px 18px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--font)}
@@ -143,12 +145,14 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
 .exec-header h1{font-size:19px;font-weight:700;color:#111;letter-spacing:-0.3px}
 .exec-header p{font-size:12px;color:#6b7280;margin-top:3px}
 .exec-stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:16px}
-.exec-stat{background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.06)}
-.exec-stat-val{font-size:24px;font-weight:700;color:#111}
-.exec-stat-label{font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;margin-top:2px}
+.exec-stat{background:#fff;border-radius:12px;padding:18px 16px;box-shadow:0 1px 3px rgba(0,0,0,0.06);text-align:center;border-top:3px solid transparent}
+.exec-stat:first-child{border-top-color:#c8a55a}
+.exec-stat-val{font-size:26px;font-weight:700;color:#111;letter-spacing:-0.5px}
+.exec-stat-label{font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin-top:3px;font-weight:600}
 .exec-section{padding:6px 18px;font-size:12px;font-weight:600;text-transform:uppercase;color:#9ca3af;letter-spacing:0.5px}
 .exec-list{padding:0 12px}
-.exec-card{background:#fff;border-radius:12px;padding:16px;margin-bottom:8px;box-shadow:0 1px 3px rgba(0,0,0,0.06);cursor:pointer}
+.exec-card{background:#fff;border-radius:12px;padding:16px;margin-bottom:8px;box-shadow:0 1px 3px rgba(0,0,0,0.06);cursor:pointer;border-left:3px solid transparent;transition:border-color 0.15s}
+.exec-card:active{border-left-color:#c8a55a}
 .exec-card-title{font-size:14px;font-weight:600;color:#111}
 .exec-card-meta{display:flex;gap:8px;margin-top:6px;flex-wrap:wrap}
 .exec-badge{display:inline-flex;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600}
@@ -208,6 +212,8 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
     </div>
   </div>
   <div id="cop-stats" class="stats"></div>
+  <div id="cop-alerts" style="padding:0 12px"></div>
+  <div id="cop-briefing" style="padding:0 12px;margin-bottom:4px"></div>
   <div class="section-head">Active Pipeline</div>
   <div class="opp-list" id="cop-pipeline"></div>
   <div class="section-head" style="margin-top:8px">Recent Organism Activity</div>
@@ -249,13 +255,16 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
 </div>
 
 <!-- VIEW 4: COMMAND PALETTE -->
-<div class="view" id="view-cmd">
+<div class="view" id="view-cmd" style="display:none;flex-direction:column">
   <div class="header">
     <div class="header-title">Command Palette</div>
     <div class="header-sub">Ask the organism anything</div>
   </div>
-  <div id="cmd-suggestions" class="cmd-suggestions"></div>
-  <div class="cmd-messages" id="cmd-messages"></div>
+  <div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch" id="cmd-scroll">
+    <div id="cmd-suggestions" class="cmd-suggestions"></div>
+    <div class="cmd-messages" id="cmd-messages"></div>
+    <div style="height:80px"></div>
+  </div>
   <div class="cmd-input-area">
     <input class="cmd-input" id="cmd-input" placeholder="Ask the organism..." autocomplete="off">
     <button class="cmd-send" id="cmd-send">Send</button>
@@ -387,6 +396,25 @@ function renderCOP(){
     '<div class="stat"><div class="stat-val">'+t1+'</div><div class="stat-label">Tier 1</div></div>'+
     '<div class="stat"><div class="stat-val">'+pur+'</div><div class="stat-label">Pursuing</div></div>'+
     '<div class="stat"><div class="stat-val" style="color:'+(urg>0?'var(--red)':'var(--green)')+'">'+urg+'</div><div class="stat-label">Urgent</div></div>';
+
+  // Urgent deadline alerts
+  var urgentOpps = pipeline.filter(function(o){ var d=daysUntil(o.due_date); return d!==null&&d<=14&&d>=0&&o.stage!=='submitted'&&o.stage }).sort(function(a,b){ return new Date(a.due_date)-new Date(b.due_date) });
+  document.getElementById('cop-alerts').innerHTML = urgentOpps.length ? urgentOpps.map(function(o){
+    var d = daysUntil(o.due_date);
+    return '<div style="background:var(--red-dim);border:1px solid rgba(239,68,68,0.25);border-radius:var(--radius);padding:12px 14px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="goDeepDive(\''+o.id+'\')">'+
+      '<div style="flex:1"><div style="font-size:12px;font-weight:600;color:var(--red)">'+esc((o.title||'').slice(0,50))+'</div>'+
+      '<div style="font-size:11px;color:var(--text3);margin-top:2px">'+(o.stage||'new')+' · OPI '+(o.opi_score||'?')+'</div></div>'+
+      '<div style="font-size:18px;font-weight:700;color:var(--red);padding-left:12px">'+d+'d</div></div>';
+  }).join('') : '';
+
+  // Briefing card from dashboard agent
+  var briefing = memories.find(function(m){ return (m.agent||'').toLowerCase().indexOf('dashboard')>-1||(m.agent||'').toLowerCase().indexOf('executive')>-1 });
+  document.getElementById('cop-briefing').innerHTML = briefing ?
+    '<div style="background:linear-gradient(135deg,rgba(200,165,90,0.08),rgba(200,165,90,0.02));border:1px solid rgba(200,165,90,0.2);border-radius:var(--radius);padding:14px 16px;margin-bottom:8px">'+
+      '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--gold);margin-bottom:6px">Latest Briefing</div>'+
+      '<div style="font-size:12px;color:var(--text);line-height:1.6">'+esc((briefing.observation||'').slice(0,250))+'</div>'+
+      '<div style="font-size:10px;color:var(--text3);margin-top:6px">'+fmtDateTime(briefing.created_at)+'</div></div>' : '';
+
   document.getElementById('cop-pipeline').innerHTML = pipeline.map(oppCardHTML).join('');
   var actHtml = memories.slice(0,10).map(function(m){
     var agentColors = {intelligence:'#60a5fa',financial:'#34d399',winnability:'#f59e0b',quality:'#ef4444',staffing:'#a78bfa',crm:'#f472b6',dashboard:'#c8a55a',hunting:'#2dd4bf',executive:'#818cf8',self_awareness:'#fb923c'};
@@ -409,12 +437,16 @@ function oppCardHTML(o){
   var days = daysUntil(o.due_date);
   var gated = (o.outcome==='gated'||(o.capture_action||'').toLowerCase().indexOf('gated')>-1);
   return '<div class="opp-card" onclick="goDeepDive(\''+o.id+'\')">'+
-    '<div class="opp-title">'+esc((o.title||'').slice(0,80))+((o.title||'').length>80?'…':'')+'</div>'+
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">'+
+      '<div class="opp-title" style="flex:1">'+esc((o.title||'').slice(0,70))+((o.title||'').length>70?'…':'')+'</div>'+
+      '<span class="badge '+opiClass(o.opi_score||0)+'" style="flex-shrink:0;margin-top:2px">OPI '+(o.opi_score||'?')+'</span>'+
+    '</div>'+
+    (o.agency?'<div style="font-size:11px;color:var(--text3);margin:3px 0 6px">'+esc((o.agency||'').slice(0,50))+'</div>':'')+
     '<div class="opp-meta">'+
-      '<span class="badge '+opiClass(o.opi_score||0)+'">OPI '+(o.opi_score||'?')+'</span>'+
       '<span class="badge badge-stage">'+(o.stage||'new')+'</span>'+
       (gated?'<span class="badge badge-gated">GATED</span>':'')+
       (days!==null&&days>0&&o.stage!=='submitted'?'<span class="badge-due">'+days+' days</span>':'')+
+      (o.estimated_value?'<span class="badge-due">'+formatValue(o.estimated_value)+'</span>':'')+
     '</div></div>';
 }
 
@@ -654,17 +686,18 @@ document.getElementById('cmd-input').addEventListener('keydown', function(e){
 async function sendChat(msg){
   document.getElementById('cmd-suggestions').innerHTML = '';
   var ma = document.getElementById('cmd-messages');
+  var sc = document.getElementById('cmd-scroll');
   ma.innerHTML += '<div class="cmd-msg user">'+esc(msg)+'</div>';
   var thinkId = 'think-'+Date.now();
   ma.innerHTML += '<div class="cmd-msg ai thinking" id="'+thinkId+'">Thinking...</div>';
-  ma.scrollTop = ma.scrollHeight;
+  sc.scrollTop = sc.scrollHeight;
   try {
     var resp = await fetch(BASE+'/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg})});
     var data = await resp.json();
     var reply = data.response||data.error||'No response';
     var te = document.getElementById(thinkId); if(te) te.remove();
     ma.innerHTML += '<div class="cmd-msg ai">'+renderMd(reply)+'</div>';
-    ma.scrollTop = ma.scrollHeight;
+    sc.scrollTop = sc.scrollHeight;
     chatHistory.push({user:msg,ai:reply});
   } catch(e){
     var te = document.getElementById(thinkId);
