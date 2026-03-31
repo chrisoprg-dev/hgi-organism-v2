@@ -362,24 +362,35 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         '## FINANCIAL ANALYSIS\n' + (opp.financial_analysis || 'Not yet produced') + '\n\n' +
         '## STAFFING PLAN\n' + (opp.staffing_plan || 'Not yet produced') + '\n\n' +
         '## INSTRUCTIONS\n' +
-        'Produce the COMPLETE proposal response document with these sections:\n' +
-        '1. COVER LETTER — addressed to the agency, signed by Christopher Oney, President\n' +
-        '2. EXECUTIVE SUMMARY — why HGI is the right choice, specific to this opportunity\n' +
-        '3. FIRM QUALIFICATIONS & EXPERIENCE — HGI history, minority ownership, relevant verticals\n' +
-        '4. PAST PERFORMANCE — specific projects with contract values, dates, scope, client references. Use ONLY confirmed HGI past performance. Never fabricate.\n' +
-        '5. TECHNICAL APPROACH — detailed methodology for how HGI will deliver the scope of work. Must be specific to the RFP requirements, not generic.\n' +
-        '6. STAFFING PLAN — named personnel with titles, rates, qualifications, role assignments\n' +
-        '7. PRICING/COST PROPOSAL — build rates per the RFP requirements using HGI rate card. Show the math.\n' +
-        '8. REQUIRED CERTIFICATIONS & COMPLIANCE — minority status, insurance, bonding, SAM registration\n\n' +
+        'STEP 1 — ANALYZE THE SUBMISSION FORMAT:\n' +
+        'Read the RFP/SOQ document above CAREFULLY. Determine EXACTLY what the agency is asking for:\n' +
+        '- Is it a fill-in-the-blank questionnaire/form? If so, fill out every field of that form.\n' +
+        '- Is it a narrative proposal with specific sections? If so, write those exact sections in that exact order.\n' +
+        '- Is there a page limit? Note it and stay within it.\n' +
+        '- Are there specific exhibits or attachments required? List and complete each one.\n' +
+        '- What is the submission format (font, spacing, page count)?\n' +
+        '- Are there required forms, affidavits, or certifications? Flag what HGI must complete manually.\n\n' +
+        'STEP 2 — PRODUCE THE EXACT DELIVERABLE THE AGENCY WANTS:\n' +
+        'Do NOT produce a generic proposal. Produce EXACTLY what the submission requirements specify.\n' +
+        'If they want a questionnaire filled out, fill out the questionnaire field by field.\n' +
+        'If they want a 20-page narrative, write a 20-page narrative with their exact section headings.\n' +
+        'If they want Exhibit A and Exhibit B, produce both exhibits with HGI data filled in.\n' +
+        'If they want a fee schedule by staff classification, build it from the HGI rate card.\n\n' +
+        'STEP 3 — MAP EVALUATION CRITERIA TO CONTENT:\n' +
+        'Extract the exact evaluation criteria and point values from the RFP.\n' +
+        'Organize your response to maximize points on the highest-weighted criteria.\n' +
+        'Address every criterion explicitly — do not leave points on the table.\n\n' +
         'RULES:\n' +
-        '- Write to WIN, not just to comply\n' +
-        '- Every claim must be backed by real HGI data\n' +
-        '- No placeholder text — every section must be complete\n' +
-        '- Match the RFP evaluation criteria in order of weight\n' +
-        '- Include specific dollar amounts, dates, staff names\n' +
+        '- Produce ONLY what the solicitation asks for — nothing more, nothing less\n' +
+        '- Every claim must be backed by real HGI data from the company profile and organism intelligence above\n' +
+        '- No placeholder text — every field, section, and exhibit must be complete\n' +
+        '- Use ONLY confirmed HGI past performance. Never fabricate projects, dollar amounts, or references.\n' +
+        '- Include specific dollar amounts, dates, staff names from confirmed HGI data\n' +
         '- Professional tone — this goes directly to the evaluators\n' +
         '- No mention of AI, organism, agents, or the capture system\n' +
-        '- Document must look like it came from Christopher Oney with no visible AI involvement';
+        '- Document must look like it came from Christopher Oney with no visible AI involvement\n' +
+        '- Flag any items that require manual action (notarized signatures, insurance certificates, forms that must be wet-signed)\n' +
+        '- If the RFP requires information HGI does not have, flag it clearly as [ACTION REQUIRED: description] rather than inventing data';
 
       log('PROPOSAL ENGINE: Calling Claude Sonnet with ' + proposalPrompt.length + ' char prompt');
 
