@@ -186,6 +186,105 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // ============================================================
+    // VISIBILITY KIT (Session 68)
+    // ============================================================
+
+    if (url === '/api/diagnostics') {
+      try {
+        var dNow = new Date();
+        var d24h = new Date(dNow - 86400000).toISOString();
+        var dResults = await Promise.all([
+          supabase.from('opportunities').select('id,opi_score,stage,status').eq('status','active'),
+          supabase.from('organism_memory').select('agent,created_at').gte('created_at', d24h).order('created_at', { ascending: false }),
+          supabase.from('organism_memory').select('id', { count: 'exact', head: true }),
+          supabase.from('hunt_runs').select('source,created_at').order('created_at', { ascending: false }).limit(5),
+          supabase.from('organism_memory').select('agent,observation,created_at').eq('memory_type','analysis').ilike('observation','%error%').gte('created_at', d24h).limit(10)
+        ]);
+        var pipeline = dResults[0].data || [];
+        var recent24h = dResults[1].data || [];
+        var totalMems = dResults[2].count || 0;
+        var recentHunts = dResults[3].data || [];
+        var recentErrors = dResults[4].data || [];
+        var agentCounts = {};
+        recent24h.forEach(function(m) { agentCounts[m.agent] = (agentCounts[m.agent]||0)+1; });
+        var byStage = {};
+        pipeline.forEach(function(o) { var s=o.stage||'unset'; byStage[s]=(byStage[s]||0)+1; });
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.end(JSON.stringify({
+          timestamp: dNow.toISOString(),
+          uptime_seconds: Math.floor(process.uptime()),
+          version: 'V3.4-rfp-gate',
+          pipeline: { total_active: pipeline.length, by_stage: byStage, avg_opi: pipeline.length ? Math.round(pipeline.reduce(function(a,o){return a+(o.opi_score||0)},0)/pipeline.length) : 0 },
+          memory: { total: totalMems, last_24h: recent24h.length, agents_active_24h: Object.keys(agentCounts).length, by_agent_24h: agentCounts },
+          hunting: { recent_runs: recentHunts },
+          errors_24h: recentErrors.map(function(e){ return { agent: e.agent, excerpt: (e.observation||'').slice(0,200), time: e.created_at }; }),
+          cost_estimate: { note: 'Approximate based on agent activity', memories_24h: recent24h.length, est_api_calls_24h: recent24h.length, est_cost_24h_usd: (recent24h.length * 0.015).toFixed(2) }
+        }));
+      } catch(de) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: de.message }));
+      }
+      return;
+    }
+
+    if (url.startsWith('/api/proposal-preview')) {
+      var ppId = (req.url.split('?id=')[1]||'').split('&')[0];
+      if (!ppId) { res.writeHead(400, {'Content-Type':'application/json'}); res.end('{"error":"id required"}'); return; }
+      try {
+        var ppOpp = await supabase.from('opportunities').select('title,agency,opi_score,stage,due_date,scope_analysis,financial_analysis,research_brief,staffing_plan,capture_action,rfp_document_retrieved').eq('id', decodeURIComponent(ppId)).single();
+        var ppMems = await supabase.from('organism_memory').select('agent,observation,memory_type,created_at').eq('opportunity_id', decodeURIComponent(ppId)).neq('memory_type','decision_point').order('created_at', { ascending: false }).limit(50);
+        var o = ppOpp.data || {};
+        var mems = ppMems.data || [];
+        var sections = [
+          { title: 'Scope Analysis', content: o.scope_analysis },
+          { title: 'Financial Analysis', content: o.financial_analysis },
+          { title: 'Research Brief', content: o.research_brief },
+          { title: 'Staffing Plan', content: o.staffing_plan },
+          { title: 'Capture Action / GO Decision', content: o.capture_action }
+        ].filter(function(s){ return s.content; });
+        var memsByAgent = {};
+        mems.forEach(function(m){ if(!memsByAgent[m.agent]) memsByAgent[m.agent]=[]; memsByAgent[m.agent].push(m); });
+        var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Proposal Preview</title>' +
+          '<style>body{font-family:-apple-system,system-ui,sans-serif;margin:0;padding:20px;background:#f8f9fa;color:#333;max-width:900px;margin:0 auto;line-height:1.6}' +
+          '.header{background:linear-gradient(135deg,#0a0e17,#1a2332);color:#fff;padding:24px;border-radius:12px;margin-bottom:20px}' +
+          '.section{background:#fff;border-radius:8px;padding:20px;margin-bottom:16px;border:1px solid #e0e0e0}' +
+          '.section h2{color:#1a237e;margin:0 0 12px;font-size:18px;border-bottom:2px solid #c8a55a;padding-bottom:8px}' +
+          '.section pre{white-space:pre-wrap;font-family:inherit;font-size:14px;margin:0}' +
+          '.badge{display:inline-block;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:600;margin-right:6px}' +
+          '.mem-card{background:#f0f4f8;border-radius:6px;padding:12px;margin-bottom:8px;border-left:3px solid #c8a55a}' +
+          '.mem-agent{font-size:11px;font-weight:700;text-transform:uppercase;color:#c8a55a;letter-spacing:0.5px}' +
+          '.mem-obs{font-size:13px;margin-top:4px}' +
+          '</style></head><body>' +
+          '<div class="header"><h1 style="margin:0">' + (o.title||'Unknown').replace(/</g,'&lt;') + '</h1>' +
+          '<div style="margin-top:8px;font-size:14px">' + (o.agency||'').replace(/</g,'&lt;') + '</div>' +
+          '<div style="margin-top:8px">' +
+          '<span class="badge" style="background:' + ((o.opi_score||0)>=80?'#34d399':'#f59e0b') + ';color:#000">OPI ' + (o.opi_score||'?') + '</span>' +
+          '<span class="badge" style="background:rgba(255,255,255,0.2);color:#fff">' + (o.stage||'unset') + '</span>' +
+          '<span class="badge" style="background:rgba(255,255,255,0.1);color:#fff">RFP: ' + (o.rfp_document_retrieved?'YES':'NO') + '</span>' +
+          '</div></div>';
+        sections.forEach(function(s) {
+          html += '<div class="section"><h2>' + s.title + '</h2><pre>' + (s.content||'').replace(/</g,'&lt;').slice(0,15000) + '</pre></div>';
+        });
+        if (Object.keys(memsByAgent).length > 0) {
+          html += '<div class="section"><h2>Agent Intelligence (' + mems.length + ' memories)</h2>';
+          Object.keys(memsByAgent).forEach(function(agent) {
+            memsByAgent[agent].slice(0,3).forEach(function(m) {
+              html += '<div class="mem-card"><div class="mem-agent">' + agent + ' &mdash; ' + (m.memory_type||'') + '</div>' +
+                '<div class="mem-obs">' + (m.observation||'').replace(/</g,'&lt;').slice(0,500) + '</div></div>';
+            });
+          });
+          html += '</div>';
+        }
+        html += '</body></html>';
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+        res.end(html);
+      } catch(pe) {
+        res.writeHead(500, {'Content-Type':'application/json'}); res.end(JSON.stringify({error:pe.message}));
+      }
+      return;
+    }
+
     if (url === '/' || url === '/dashboard' || url === '/interface') {
       const html = getInterface();
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache', 'Expires': '0' });
