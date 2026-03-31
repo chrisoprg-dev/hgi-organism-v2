@@ -29,6 +29,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
 .view.active{display:block}
 #view-cmd.active{display:flex;flex-direction:column}
 @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
 
 /* TAB BAR */
 .tab-bar{
@@ -204,6 +205,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
       <div>
         <div class="header-title">Pipeline COP</div>
         <div class="header-sub" id="cop-time"></div>
+    <div style="display:flex;align-items:center;gap:6px;margin-top:4px"><div id="status-dot" style="width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 2s infinite"></div><div id="cop-refresh" style="font-size:10px;color:var(--text3)">Loading...</div></div>
       </div>
       <div style="display:flex;align-items:center;gap:6px">
         <div class="status-dot"></div>
@@ -341,17 +343,21 @@ function switchView(view){
   var el = document.getElementById('view-'+view);
   if(el) el.classList.add('active');
   document.getElementById('viewArea').scrollTop = 0;
-  if(view === 'dive'){ showDiveList(); renderDivePipeline(); }
-  if(view === 'talent') renderTalent('roster');
-  if(view === 'exec') renderExec();
-  if(view === 'cmd' && chatHistory.length === 0) renderSuggestions();
+  // Auto-refresh data on tab switch
+  loadPipeline().then(function(){ loadMemories().then(function(){
+    if(view === 'cop') renderCOP();
+    if(view === 'dive'){ showDiveList(); renderDivePipeline(); }
+    if(view === 'talent') renderTalent('roster');
+    if(view === 'exec') renderExec();
+    if(view === 'cmd' && chatHistory.length === 0) renderSuggestions();
+  }); });
 }
 
 // DATA
 function fetchJSON(url){
   return fetch(BASE + url).then(function(r){ return r.json() }).catch(function(e){ console.error('Fetch error:', url, e); return null; });
 }
-async function loadPipeline(){ var d = await fetchJSON('/api/pipeline'); if(d) pipeline = d; return pipeline; }
+async function loadPipeline(){ var d = await fetchJSON('/api/pipeline'); if(d){ d.sort(function(a,b){ return (b.opi_score||0)-(a.opi_score||0) }); pipeline = d; } return pipeline; }
 async function loadMemories(){ var d = await fetchJSON('/api/memories'); if(d) memories = d; return memories; }
 async function loadOppMemories(id){ return (await fetchJSON('/api/opportunity-memories?id=' + encodeURIComponent(id))) || []; }
 async function loadOppDetail(id){ return (await fetchJSON('/api/opportunity-detail?id=' + encodeURIComponent(id))) || {}; }
@@ -466,12 +472,14 @@ function renderCOP(){
     '</div>';
   }).join('');
   document.getElementById('cop-activity').innerHTML = actHtml || '<div class="empty"><h3>No recent activity</h3></div>';
-  document.getElementById('cop-status').textContent = pipeline.length + ' opps \u00B7 43 agents';
+  document.getElementById('cop-status').textContent = pipeline.length + ' opps \u00B7 47 agents';
+  var refreshEl = document.getElementById('cop-refresh');
+  if(refreshEl) refreshEl.textContent = 'Live \u00B7 ' + new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) + ' \u00B7 ' + pipeline.length + ' opps \u00B7 47 agents';
 }
 
 function oppCardHTML(o){
   var days = daysUntil(o.due_date);
-  var gated = (o.outcome==='gated'||(o.capture_action||'').toLowerCase().indexOf('gated')>-1);
+  var gated = (o.rfp_document_retrieved===false && o.stage!=='submitted' && o.stage!=='no_bid');
   return '<div class="opp-card" onclick="goDeepDive(\''+o.id+'\')">'+
     '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">'+
       '<div class="opp-title" style="flex:1">'+esc((o.title||'').slice(0,70))+((o.title||'').length>70?'…':'')+'</div>'+
@@ -480,7 +488,7 @@ function oppCardHTML(o){
     (o.agency?'<div style="font-size:11px;color:var(--text3);margin:3px 0 6px">'+esc((o.agency||'').slice(0,50))+'</div>':'')+
     '<div class="opp-meta">'+
       '<span class="badge badge-stage">'+(o.stage||'new')+'</span>'+
-      (gated?'<span class="badge badge-gated">GATED</span>':'')+
+      (gated?'<span class="badge badge-gated">RFP NEEDED</span>':'')+
       (days!==null&&days>0&&o.stage!=='submitted'?'<span class="badge-due">'+days+' days</span>':'')+
       (o.estimated_value?'<span class="badge-due">'+formatValue(o.estimated_value)+'</span>':'')+
     '</div></div>';
@@ -506,13 +514,13 @@ async function goDeepDive(id){
   currentOppMemories = await loadOppMemories(id);
 
   var days = daysUntil(currentOpp.due_date);
-  var gated = (currentOpp.outcome==='gated'||(currentOpp.capture_action||'').toLowerCase().indexOf('gated')>-1);
+  var gated = (currentOpp.rfp_document_retrieved===false && currentOpp.stage!=='submitted' && currentOpp.stage!=='no_bid');
   document.getElementById('dive-header').innerHTML =
     '<h2>'+esc(currentOpp.title)+'</h2>'+
     '<div class="dd-badges">'+
       '<span class="badge '+opiClass(currentOpp.opi_score||0)+'">OPI '+(currentOpp.opi_score||'?')+'</span>'+
       '<span class="badge badge-stage">'+(currentOpp.stage||'new')+'</span>'+
-      (gated?'<span class="badge badge-gated">GATED</span>':'')+
+      (gated?'<span class="badge badge-gated">RFP NEEDED</span>':'')+
       (currentOpp.agency?'<span class="badge" style="background:var(--blue-dim);color:var(--blue)">'+esc(currentOpp.agency)+'</span>':'')+
       (days!==null&&days>0&&currentOpp.stage!=='submitted'?'<span class="badge-due" style="font-weight:600;color:'+(days<=10?'var(--red)':'var(--text2)')+'">'+days+' days</span>':'')+
     '</div>'+
@@ -663,14 +671,14 @@ var TEAM = [
 var GAPS = [
   {role:'FEMA PA Specialist (PW Cat C-G)',priority:'Critical',pursuits:['DR-4900 LA','DR-4899 MS','NOLA Water']},
   {role:'CDBG-DR Program Manager',priority:'Critical',pursuits:['DR-4900 LA','St. George DR PM']},
-  {role:'HUD Grants Specialist',priority:'Critical',pursuits:['CmDv HUD Consulting']},
+  {role:'Field Debris Monitors',priority:'Critical',pursuits:['St. Mary Parish']},
   {role:'Cost Estimator / CPA',priority:'High',pursuits:['NOLA Water','JP SOQ 26-005']},
   {role:'Environmental Compliance Officer',priority:'High',pursuits:['DR-4900 LA','St. Mary Parish']},
-  {role:'Housing Program Coordinator',priority:'High',pursuits:['HTHA','CmDv HUD Consulting']},
-  {role:'Construction Inspector',priority:'Medium',pursuits:['NOLA Water','JP SOQ 26-005']},
+  {role:'Field Supervisor / On-Site PM',priority:'High',pursuits:['St. Mary Parish','St. George DR PM']},
+  {role:'Construction Inspector',priority:'Medium',pursuits:['NOLA Water','St. George DR PM']},
   {role:'Data Analyst / Reporting',priority:'Medium',pursuits:['All pursuits']},
-  {role:'GIS / Mapping Specialist',priority:'Medium',pursuits:['DR-4900 LA','DR-4899 MS']},
-  {role:'Bilingual Outreach Coordinator',priority:'Medium',pursuits:['HTHA','St. Mary Parish']}
+  {role:'GIS / Mapping Specialist',priority:'Medium',pursuits:['DR-4900 LA','DR-4899 MS','St. Mary Parish']},
+  {role:'Debris Tracking Platform',priority:'High',pursuits:['St. Mary Parish']}
 ];
 
 document.querySelectorAll('.talent-tab').forEach(function(tab){
