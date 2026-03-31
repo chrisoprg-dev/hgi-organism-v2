@@ -392,12 +392,12 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         '- Flag any items that require manual action (notarized signatures, insurance certificates, forms that must be wet-signed)\n' +
         '- If the RFP requires information HGI does not have, flag it clearly as [ACTION REQUIRED: description] rather than inventing data';
 
-      log('PROPOSAL ENGINE: Calling Claude Sonnet with ' + proposalPrompt.length + ' char prompt');
+      log('PROPOSAL ENGINE: Calling Claude Opus 4.6 with ' + proposalPrompt.length + ' char prompt');
 
       var result = await anthropic.messages.create({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 8000,
-        system: 'You are a senior government proposal writer at HGI Global. Produce submission-ready proposal documents. Be specific, factual, and persuasive. Use only confirmed company data.',
+        model: 'claude-opus-4-6',
+        max_tokens: 16000,
+        system: 'You are a senior government proposal writer at HGI Global. You produce submission-ready documents that EXACTLY match what each solicitation requires — questionnaire forms filled field-by-field when forms are required, narrative proposals when narratives are required, exhibits and attachments as specified. Be specific, factual, and persuasive. Use only confirmed company data. Never produce a generic proposal format when the solicitation specifies a different format.',
         messages: [{role:'user', content: proposalPrompt}]
       });
 
