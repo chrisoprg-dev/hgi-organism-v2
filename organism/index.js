@@ -702,6 +702,29 @@ async function claudeCall(system, prompt, maxTokens, opts) {
   return texts.join('\n');
 }
 
+// === MULTI-SEARCH: Targeted pre-research before agent reasoning ===
+async function multiSearch(queries) {
+  var results = [];
+  for (var i = 0; i < queries.length; i++) {
+    try {
+      var r = await anthropic.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1500,
+        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        system: 'Intelligence analyst. Return specific verified findings with sources. Be concise.',
+        messages: [{ role: 'user', content: queries[i].q }]
+      });
+      var text = (r.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('\n');
+      if (text && text.length > 30) {
+        results.push(queries[i].label + ':\n' + text.slice(0, 1500));
+      }
+    } catch(e) { log('Search error: ' + e.message); }
+  }
+  return results.length > 0 ? '\n\n=== LIVE WEB RESEARCH (VERIFIED) ===\n' + results.join('\n\n') : '';
+}
+
+
+
 // === LOAD STATE ===
 async function loadState() {
   log('Loading system state...');
@@ -842,6 +865,20 @@ async function agentIntelligence(opp, state, cycleBrief) {
   log('INTEL: ' + (opp.title || '?').slice(0, 50));
   var ctx = buildAgentCtx(state, 'intelligence_engine', opp.id);
 
+  // PRE-RESEARCH: 5 targeted searches before reasoning
+  var agency = opp.agency || '';
+  var st = opp.state || 'Louisiana';
+  var ttl = (opp.title || '').slice(0, 60);
+  var vert = opp.vertical || 'professional services';
+  var preResearch = await multiSearch([
+    { label: 'INCUMBENT/AWARDS', q: agency + ' ' + st + ' contract award ' + vert + ' incumbent consultant 2023 2024 2025' },
+    { label: 'SPECIFIC COMPETITION', q: agency + ' ' + ttl + ' bid proposal awarded who won price amount' },
+    { label: 'AGENCY PROCUREMENT', q: agency + ' ' + st + ' council minutes professional services contract approval' },
+    { label: 'PORTAL ACTIVITY', q: ttl + ' ' + agency + ' Central Bidding questions addendum amendment 2026' },
+    { label: 'MARKET COMPETITORS', q: st + ' ' + vert + ' consulting firms awarded contracts parishes municipalities 2024 2025' }
+  ]);
+  log('INTEL pre-research: ' + preResearch.length + ' chars from targeted searches');
+
   var taskInstructions = 'TASK: Research competitive intelligence for this opportunity using web search.\n' +
     'REQUIRED OUTPUTS:\n' +
     '1. Named competitors with source URLs proving their activity in this market\n' +
@@ -857,7 +894,7 @@ async function agentIntelligence(opp, state, cycleBrief) {
     '- Never write "market research shows..." without a specific source\n' +
     'Write in the professional tone of a competitive intelligence analyst at a top government consulting firm.';
 
-  var prompt = cycleBrief + '\n\n' + oppFull(opp) + '\n\nORGANISM MEMORY:\n' + ctx.memText + '\n\n' + taskInstructions;
+  var prompt = cycleBrief + '\n\n' + oppFull(opp) + preResearch + '\n\nORGANISM MEMORY:\n' + ctx.memText + '\n\n' + taskInstructions;
   var out = await claudeCall(taskInstructions, prompt, 4000, { webSearch: true });
   if (!out || out.length < 100) return null;
   log('INTEL: ' + out.length + ' chars');
@@ -872,6 +909,17 @@ async function agentIntelligence(opp, state, cycleBrief) {
 async function agentFinancial(opp, state, cycleBrief) {
   log('FINANCIAL: ' + (opp.title || '?').slice(0, 50));
   var ctx = buildAgentCtx(state, 'financial_agent', opp.id);
+
+  // PRE-RESEARCH: 3 targeted searches for real pricing data
+  var agency = opp.agency || '';
+  var st = opp.state || 'Louisiana';
+  var vert = opp.vertical || 'professional services';
+  var preResearch = await multiSearch([
+    { label: 'AGENCY AWARDS', q: agency + ' ' + vert + ' contract award amount value 2023 2024 2025' },
+    { label: 'MARKET RATES', q: st + ' ' + vert + ' consulting hourly rate price bid tabulation comparable' },
+    { label: 'FEDERAL COMPARABLES', q: 'USAspending ' + st + ' ' + vert + ' grant management program administration award 2024 2025' }
+  ]);
+  log('FINANCIAL pre-research: ' + preResearch.length + ' chars');
 
   var taskInstructions = 'TASK: Build a defensible pricing model for this opportunity.\n' +
     'REQUIRED OUTPUTS:\n' +
@@ -889,7 +937,7 @@ async function agentFinancial(opp, state, cycleBrief) {
     '- No unsourced dollar estimates\n' +
     'Write with the precision of a government contracts CFO.';
 
-  var prompt = cycleBrief + '\n\n' + oppFull(opp) + '\n\nORGANISM MEMORY:\n' + ctx.memText + '\n\n' + taskInstructions;
+  var prompt = cycleBrief + '\n\n' + oppFull(opp) + preResearch + '\n\nORGANISM MEMORY:\n' + ctx.memText + '\n\n' + taskInstructions;
   var out = await claudeCall(taskInstructions, prompt, 4000, { webSearch: true });
   if (!out || out.length < 100) return null;
   log('FINANCIAL: ' + out.length + ' chars');
@@ -948,6 +996,16 @@ async function agentCRM(opp, state, cycleBrief) {
   log('CRM: ' + (opp.title || '?').slice(0, 50));
   var ctx = buildAgentCtx(state, 'crm_agent', opp.id);
 
+  // PRE-RESEARCH: 3 targeted searches for real contacts
+  var agency = opp.agency || '';
+  var st = opp.state || 'Louisiana';
+  var preResearch = await multiSearch([
+    { label: 'LEADERSHIP/ORG CHART', q: agency + ' ' + st + ' leadership directory staff org chart department head contact' },
+    { label: 'PROCUREMENT CONTACTS', q: agency + ' purchasing procurement director buyer specialist contact email phone' },
+    { label: 'COUNCIL/BOARD', q: agency + ' council board members committee professional services ' + st }
+  ]);
+  log('CRM pre-research: ' + preResearch.length + ' chars');
+
   var taskInstructions = 'TASK: Find decision-makers for this opportunity using web search.\n' +
     'REQUIRED OUTPUTS:\n' +
     '1. Named individuals with titles — search "[agency] organizational chart" and "[agency] procurement contact"\n' +
@@ -962,7 +1020,7 @@ async function agentCRM(opp, state, cycleBrief) {
     '- confidence:inferred when guessing who might be involved\n' +
     'Write as a capture manager building an engagement plan.';
 
-  var prompt = cycleBrief + '\n\n' + oppFull(opp) + '\n\nORGANISM MEMORY:\n' + ctx.memText + '\n\n' + taskInstructions;
+  var prompt = cycleBrief + '\n\n' + oppFull(opp) + preResearch + '\n\nORGANISM MEMORY:\n' + ctx.memText + '\n\n' + taskInstructions;
   var out = await claudeCall(taskInstructions, prompt, 2500, { webSearch: true });
   if (!out || out.length < 100) return null;
   log('CRM: ' + out.length + ' chars');
@@ -1204,10 +1262,20 @@ async function agentContractExpiration(state) {
 async function agentAmendmentTracker(state) {
   var pursuing = state.pipeline.filter(function(o) { return o.stage === 'pursuing' || o.stage === 'proposal'; });
   if (pursuing.length === 0) return null;
-  log('AMENDMENT TRACKER...');
+  log('AMENDMENT TRACKER (with targeted portal searches)...');
+  
+  // PRE-RESEARCH: Search Central Bidding and agency portals for each pursuing opp
+  var searchQueries = [];
+  for (var i = 0; i < pursuing.length && i < 5; i++) {
+    var o = pursuing[i];
+    searchQueries.push({ label: (o.title || '?').slice(0,40) + ' PORTAL', q: (o.title || '') + ' ' + (o.agency || '') + ' Central Bidding questions addendum amendment deadline change 2026' });
+  }
+  var preResearch = await multiSearch(searchQueries);
+  log('AMENDMENT pre-research: ' + preResearch.length + ' chars from ' + searchQueries.length + ' portal checks');
+
   var oppList = pursuing.map(function(o) { return (o.title || '?') + ' | Source: ' + (o.source_url || 'none'); }).join('\n');
-  var task = 'TASK: Check each pursuing-stage opportunity for RFP amendments, addenda, Q&A, deadline changes. Search agency procurement pages.';
-  var prompt = 'OPPORTUNITIES:\n' + oppList + '\n\n' + task;
+  var task = 'TASK: Check each pursuing-stage opportunity for RFP amendments, addenda, Q&A postings, deadline changes. Flag any competitor activity visible on bid boards (questions asked, firms registered). This is CRITICAL — if a competitor asked a question on a bid board, that is confirmed competitive intelligence.';
+  var prompt = 'OPPORTUNITIES:\n' + oppList + preResearch + '\n\n' + task;
   var out = await claudeCall(task, prompt, 1200, { webSearch: true });
   if (!out || out.length < 100) return null;
   await storeMemory('amendment_tracker', null, 'amendments', out, 'analysis', null, 'medium');
