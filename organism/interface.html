@@ -515,7 +515,10 @@ async function goDeepDive(id){
       (gated?'<span class="badge badge-gated">GATED</span>':'')+
       (currentOpp.agency?'<span class="badge" style="background:var(--blue-dim);color:var(--blue)">'+esc(currentOpp.agency)+'</span>':'')+
       (days!==null&&days>0&&currentOpp.stage!=='submitted'?'<span class="badge-due" style="font-weight:600;color:'+(days<=10?'var(--red)':'var(--text2)')+'">'+days+' days</span>':'')+
-    '</div>';
+    '</div>'+
+    '<div style="margin-top:12px"><button onclick="produceProposal(\''+currentOpp.id+'\')" id="produce-btn" style="background:var(--gold);color:var(--bg);border:none;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font);letter-spacing:0.3px">'+
+      ((currentOpp.capture_action||'').indexOf('PROPOSAL DRAFT')>-1?'PROPOSAL READY — VIEW':'PRODUCE PROPOSAL')+
+    '</button></div>';
 
   var groups = groupMemories(currentOppMemories);
   var tabs = ['Overview'];
@@ -602,6 +605,47 @@ function toggleExpand(id, btn){
   if(!el) return;
   if(el.classList.contains('collapsed')){ el.classList.remove('collapsed'); btn.textContent='COLLAPSE \u25B2'; }
   else { el.classList.add('collapsed'); btn.textContent='SHOW FULL REPORT \u25BC'; }
+}
+
+async function produceProposal(id){
+  var btn = document.getElementById('produce-btn');
+  if(!btn) return;
+  // If proposal exists, switch to overview tab to view it
+  if(currentOpp && (currentOpp.capture_action||'').indexOf('PROPOSAL DRAFT')>-1){
+    renderDiveTab('overview');
+    document.querySelectorAll('.dd-tab').forEach(function(t){ t.classList.remove('active'); if(t.textContent==='Overview') t.classList.add('active'); });
+    return;
+  }
+  btn.textContent = 'PRODUCING...';
+  btn.disabled = true;
+  btn.style.opacity = '0.6';
+  try {
+    await fetch(BASE+'/api/produce-proposal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})});
+    btn.textContent = 'GENERATING... (1-2 min)';
+    // Poll for completion
+    var attempts = 0;
+    var poll = setInterval(async function(){
+      attempts++;
+      var detail = await loadOppDetail(id);
+      if(detail.capture_action && detail.capture_action.indexOf('PROPOSAL DRAFT')>-1){
+        clearInterval(poll);
+        currentOpp = Object.assign(currentOpp||{}, detail);
+        btn.textContent = 'PROPOSAL READY — VIEW';
+        btn.disabled = false;
+        btn.style.opacity = '1';
+        renderDiveTab('overview');
+      } else if(attempts > 30){
+        clearInterval(poll);
+        btn.textContent = 'TIMEOUT — TRY AGAIN';
+        btn.disabled = false;
+        btn.style.opacity = '1';
+      }
+    }, 5000);
+  } catch(e){
+    btn.textContent = 'ERROR — TRY AGAIN';
+    btn.disabled = false;
+    btn.style.opacity = '1';
+  }
 }
 
 document.getElementById('dive-back').addEventListener('click', showDiveList);

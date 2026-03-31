@@ -290,6 +290,132 @@ if (url === '/api/chat' && req.method === 'POST') {
 }
 
 
+// === PROPOSAL PRODUCTION ENGINE ===
+if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
+  let body = '';
+  for await (const chunk of req) body += chunk;
+  var ppId = '';
+  try { ppId = JSON.parse(body || '{}').id || ''; } catch(e) {}
+  if (!ppId) { var qId = (req.url.split('?id=')[1]||'').split('&')[0]; ppId = qId; }
+  if (!ppId) { res.writeHead(400); res.end(JSON.stringify({error:'id required'})); return; }
+
+  log('PROPOSAL ENGINE: Starting for ' + ppId);
+  res.writeHead(200, {'Content-Type':'application/json'});
+  res.end(JSON.stringify({started:true, id:ppId}));
+
+  // Run async — don't block response
+  setImmediate(async () => {
+    try {
+      // 1. Load opportunity
+      var oppR = await supabase.from('opportunities').select('*').eq('id', ppId).single();
+      var opp = oppR.data;
+      if (!opp) { log('PROPOSAL ENGINE: Opp not found ' + ppId); return; }
+
+      // 2. Load all memories
+      var memR = await supabase.from('organism_memory').select('agent,observation,memory_type,created_at')
+        .eq('opportunity_id', ppId).neq('memory_type','decision_point')
+        .order('created_at',{ascending:false}).limit(100);
+      var mems = memR.data || [];
+
+      // 3. Load KB chunks (relevant to vertical)
+      var kbR = await supabase.from('knowledge_base_chunks').select('content,source_document')
+        .order('id',{ascending:false}).limit(30);
+      var kbChunks = (kbR.data || []).map(function(c){ return c.content; }).join('\n---\n').slice(0, 8000);
+
+      // 4. Build agent intelligence summary by category
+      var intelSummary = '';
+      var categories = {
+        'Scope & Requirements': ['scope','quality_gate','compliance'],
+        'Competitive Intelligence': ['intelligence','competitor','research'],
+        'Financial & Pricing': ['financial','price','cost'],
+        'Staffing': ['staffing','recruiting','bench','talent'],
+        'Win Strategy': ['winnability','capture','brief'],
+        'Proposal Drafts': ['proposal','assembly','red_team','content']
+      };
+      Object.keys(categories).forEach(function(cat) {
+        var keywords = categories[cat];
+        var catMems = mems.filter(function(m) {
+          var a = (m.agent||'').toLowerCase();
+          return keywords.some(function(k) { return a.indexOf(k) > -1; });
+        });
+        if (catMems.length > 0) {
+          intelSummary += '\n## ' + cat + '\n';
+          catMems.slice(0,3).forEach(function(m) {
+            intelSummary += '[' + m.agent + ']: ' + (m.observation||'').slice(0,1500) + '\n';
+          });
+        }
+      });
+
+      // 5. Build the mega-prompt
+      var D = String.fromCharCode(36);
+      var proposalPrompt = 'You are the HGI Global proposal production engine. Your job is to produce a COMPLETE, SUBMISSION-READY response document.\n\n' +
+        '## OPPORTUNITY\n' +
+        'Title: ' + (opp.title||'') + '\n' +
+        'Agency: ' + (opp.agency||'') + '\n' +
+        'Due: ' + (opp.due_date||'TBD') + '\n' +
+        'Value: ' + (opp.estimated_value||'TBD') + '\n\n' +
+        '## RFP/SOQ REQUIREMENTS\n' + (opp.scope_analysis || opp.rfp_text || opp.description || 'No RFP text available') + '\n\n' +
+        '## HGI COMPANY PROFILE\n' + HGI + '\n\n' +
+        '## ORGANISM INTELLIGENCE (43 agents analyzed this opportunity)\n' + intelSummary + '\n\n' +
+        '## KNOWLEDGE BASE EXCERPTS\n' + kbChunks.slice(0,4000) + '\n\n' +
+        '## FINANCIAL ANALYSIS\n' + (opp.financial_analysis || 'Not yet produced') + '\n\n' +
+        '## STAFFING PLAN\n' + (opp.staffing_plan || 'Not yet produced') + '\n\n' +
+        '## INSTRUCTIONS\n' +
+        'Produce the COMPLETE proposal response document with these sections:\n' +
+        '1. COVER LETTER — addressed to the agency, signed by Christopher Oney, President\n' +
+        '2. EXECUTIVE SUMMARY — why HGI is the right choice, specific to this opportunity\n' +
+        '3. FIRM QUALIFICATIONS & EXPERIENCE — HGI history, minority ownership, relevant verticals\n' +
+        '4. PAST PERFORMANCE — specific projects with contract values, dates, scope, client references. Use ONLY confirmed HGI past performance. Never fabricate.\n' +
+        '5. TECHNICAL APPROACH — detailed methodology for how HGI will deliver the scope of work. Must be specific to the RFP requirements, not generic.\n' +
+        '6. STAFFING PLAN — named personnel with titles, rates, qualifications, role assignments\n' +
+        '7. PRICING/COST PROPOSAL — build rates per the RFP requirements using HGI rate card. Show the math.\n' +
+        '8. REQUIRED CERTIFICATIONS & COMPLIANCE — minority status, insurance, bonding, SAM registration\n\n' +
+        'RULES:\n' +
+        '- Write to WIN, not just to comply\n' +
+        '- Every claim must be backed by real HGI data\n' +
+        '- No placeholder text — every section must be complete\n' +
+        '- Match the RFP evaluation criteria in order of weight\n' +
+        '- Include specific dollar amounts, dates, staff names\n' +
+        '- Professional tone — this goes directly to the evaluators\n' +
+        '- No mention of AI, organism, agents, or the capture system\n' +
+        '- Document must look like it came from Christopher Oney with no visible AI involvement';
+
+      log('PROPOSAL ENGINE: Calling Claude Sonnet with ' + proposalPrompt.length + ' char prompt');
+
+      var result = await anthropic.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 8000,
+        system: 'You are a senior government proposal writer at HGI Global. Produce submission-ready proposal documents. Be specific, factual, and persuasive. Use only confirmed company data.',
+        messages: [{role:'user', content: proposalPrompt}]
+      });
+
+      var proposalText = result.content[0] && result.content[0].type === 'text' ? result.content[0].text : '';
+      log('PROPOSAL ENGINE: Generated ' + proposalText.length + ' chars');
+
+      // 6. Store the proposal
+      await supabase.from('opportunities').update({
+        capture_action: '# PROPOSAL DRAFT — READY FOR REVIEW\n\n' + proposalText,
+        last_updated: new Date().toISOString()
+      }).eq('id', ppId);
+
+      // 7. Write memory
+      await supabase.from('organism_memory').insert({
+        agent: 'proposal_engine',
+        opportunity_id: ppId,
+        observation: 'PROPOSAL PRODUCED: ' + (opp.title||'').slice(0,50) + ' — ' + proposalText.length + ' chars generated. Stored in capture_action field. Ready for Christopher review.',
+        memory_type: 'analysis',
+        created_at: new Date().toISOString()
+      });
+
+      log('PROPOSAL ENGINE: Complete for ' + (opp.title||'').slice(0,40));
+
+    } catch(e) {
+      log('PROPOSAL ENGINE ERROR: ' + e.message);
+    }
+  });
+  return;
+}
+
 // Fallthrough — unmatched routes
 if (!res.headersSent) {
   res.writeHead(404, { 'Content-Type': 'application/json' });
