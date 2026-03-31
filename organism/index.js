@@ -354,7 +354,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         'Agency: ' + (opp.agency||'') + '\n' +
         'Due: ' + (opp.due_date||'TBD') + '\n' +
         'Value: ' + (opp.estimated_value||'TBD') + '\n\n' +
-        '## RFP/SOQ REQUIREMENTS\n' + (opp.scope_analysis || opp.rfp_text || opp.description || 'No RFP text available') + '\n\n' +
+        '## RFP/SOQ REQUIREMENTS\n' + ((opp.rfp_text && opp.rfp_text.trim().length > 200) ? opp.rfp_text.slice(0, 50000) : (opp.scope_analysis || opp.description || 'No RFP text available')) + '\n\n' +
         '## HGI COMPANY PROFILE\n' + HGI + '\n\n' +
         '## ORGANISM INTELLIGENCE (43 agents analyzed this opportunity)\n' + intelSummary + '\n\n' +
         '## KNOWLEDGE BASE EXCERPTS\n' + kbChunks.slice(0,4000) + '\n\n' +
@@ -599,6 +599,7 @@ async function buildCycleBrief(opp, state) {
   if (verified.length === 0) gaps.push('No findings have been promoted to verified status');
   if (!opp.research_brief || opp.research_brief.length < 200) gaps.push('Research brief is thin or missing');
   if (!opp.financial_analysis || opp.financial_analysis.length < 200) gaps.push('Financial analysis is thin or missing');
+  if (!opp.rfp_text || opp.rfp_text.trim().length < 200) gaps.push('CRITICAL: Actual RFP/SOQ document has NOT been retrieved. All analysis is inferred from listing metadata only.');
 
   brief += '\n\n=== WHAT WE STILL NEED ===\n';
   brief += gaps.length > 0 ? gaps.map(function(g) { return '- ' + g; }).join('\n') : '- Coverage looks good. Focus on deepening existing intelligence.\n';
@@ -608,12 +609,17 @@ async function buildCycleBrief(opp, state) {
 
 // === OPP FULL CONTEXT (no truncation) ===
 function oppFull(opp) {
+  var rfpSection = '';
+  if (opp.rfp_text && opp.rfp_text.trim().length > 200) {
+    rfpSection = '\n\n=== ACTUAL RFP/SOQ DOCUMENT TEXT ===\n' + opp.rfp_text.slice(0, 50000) + '\n=== END RFP DOCUMENT ===\n';
+  }
   return 'OPPORTUNITY: ' + (opp.title || 'unknown') +
     '\nAgency: ' + (opp.agency || 'unknown') +
     '\nVertical: ' + (opp.vertical || 'unknown') +
     '\nOPI: ' + (opp.opi_score || 0) + ' | Stage: ' + (opp.stage || 'identified') +
     '\nDue: ' + (opp.due_date || 'TBD') + ' | Est Value: ' + (opp.estimated_value || 'unknown') +
-    '\nScope:\n' + (opp.scope_analysis || 'Not yet analyzed') +
+    rfpSection +
+    '\nScope Analysis:\n' + (opp.scope_analysis || 'Not yet analyzed') +
     '\nResearch Brief:\n' + (opp.research_brief || 'Not yet researched') +
     '\nFinancial:\n' + (opp.financial_analysis || 'Not yet analyzed') +
     '\nStaffing:\n' + (opp.staffing_plan || 'Not yet planned') +
