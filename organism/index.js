@@ -6,6 +6,7 @@ import http from 'http';
 import { createClient } from '@supabase/supabase-js';
 import fs from 'fs';
 import path from 'path';
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, BorderStyle, Tab, TabStopType, Header, Footer } from 'docx';
 
 process.on('unhandledRejection', (r) => log('UNHANDLED: ' + (r instanceof Error ? r.message : String(r)).slice(0,150)));
 process.on('uncaughtException', (e) => log('UNCAUGHT: ' + e.message.slice(0,150)));
@@ -158,7 +159,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url === '/api/memories') {
-      const r = await supabase.from('organism_memory').select('agent,observation,memory_type,created_at,opportunity_id').neq('memory_type','decision_point').order('created_at', { ascending: false }).limit(30);
+      const r = await supabase.from('organism_memory').select('agent,observation,memory_type,created_at,opportunity_id').neq('memory_type','decision_point').order('created_at', { ascending: false }).limit(100);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(r.data || []));
       return;
@@ -207,7 +208,7 @@ if (url.startsWith('/api/opportunity-detail')) {
 if (url.startsWith('/api/opportunity-memories')) {
   var oId = (req.url.split('?id=')[1]||'').split('&')[0];
   if (!oId) { res.writeHead(400); res.end(JSON.stringify({error:'id required'})); return; }
-  var mr = await supabase.from('organism_memory').select('agent,observation,memory_type,created_at').eq('opportunity_id',oId).neq('memory_type','decision_point').order('created_at',{ascending:false}).limit(50);
+  var mr = await supabase.from('organism_memory').select('agent,observation,memory_type,created_at').eq('opportunity_id',oId).neq('memory_type','decision_point').order('created_at',{ascending:false}).limit(200);
   res.writeHead(200, {'Content-Type':'application/json'});
   res.end(JSON.stringify(mr.data || []));
   return;
@@ -219,7 +220,7 @@ if (url.startsWith('/api/opportunity-intel')) {
 
   if (!oId) { res.writeHead(400); res.end(JSON.stringify({error:'id required'})); return; }
 
-  var ir = await supabase.from('organism_memory').select('agent,observation,memory_type,created_at').eq('opportunity_id',oId).eq('memory_type','competitive_intel').order('created_at',{ascending:false}).limit(20);
+  var ir = await supabase.from('organism_memory').select('agent,observation,memory_type,created_at').eq('opportunity_id',oId).eq('memory_type','competitive_intel').order('created_at',{ascending:false}).limit(100);
 
   res.writeHead(200, {'Content-Type':'application/json'});
 
@@ -416,6 +417,186 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
   return;
 }
 
+// === PROPOSAL DOCUMENT GENERATOR — /api/proposal-doc ===
+if (url.startsWith('/api/proposal-doc')) {
+  var docId = (req.url.split('?id=')[1]||'').split('&')[0];
+  if (!docId) { res.writeHead(400); res.end(JSON.stringify({error:'id required'})); return; }
+
+  try {
+    log('PROPOSAL DOC: Generating for ' + docId);
+    var docOpp = await supabase.from('opportunities').select('*').eq('id', docId).single();
+    var opp = docOpp.data;
+    if (!opp) { res.writeHead(404); res.end(JSON.stringify({error:'not found'})); return; }
+
+    // Get proposal text from capture_action
+    var proposalText = (opp.capture_action || '').replace(/^# PROPOSAL DRAFT.*?\n\n/, '');
+    if (!proposalText || proposalText.length < 500) {
+      res.writeHead(400); res.end(JSON.stringify({error:'No proposal draft found. Run /api/proposal-brief first.'})); return;
+    }
+
+    // Parse markdown into sections
+    var lines = proposalText.split('\n');
+    var sections = [];
+    var currentSection = null;
+
+    for (var li = 0; li < lines.length; li++) {
+      var line = lines[li];
+      if (line.startsWith('# ')) {
+        if (currentSection) sections.push(currentSection);
+        currentSection = { title: line.slice(2).trim(), level: 1, content: [] };
+      } else if (line.startsWith('## ')) {
+        if (currentSection) sections.push(currentSection);
+        currentSection = { title: line.slice(3).trim(), level: 2, content: [] };
+      } else if (line.startsWith('### ')) {
+        if (currentSection) sections.push(currentSection);
+        currentSection = { title: line.slice(4).trim(), level: 3, content: [] };
+      } else {
+        if (!currentSection) currentSection = { title: '', level: 0, content: [] };
+        currentSection.content.push(line);
+      }
+    }
+    if (currentSection) sections.push(currentSection);
+
+    // Build Word document
+    var docChildren = [];
+
+    // Title page
+    docChildren.push(new Paragraph({ spacing: { before: 4000 }, alignment: AlignmentType.CENTER, children: [] }));
+    docChildren.push(new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 200 },
+      children: [new TextRun({ text: (opp.title || 'Proposal').toUpperCase(), bold: true, size: 36, font: 'Calibri', color: '1B2A4A' })]
+    }));
+    docChildren.push(new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 100 },
+      children: [new TextRun({ text: 'Submitted to: ' + (opp.agency || 'Agency'), size: 24, font: 'Calibri', color: '4B5563' })]
+    }));
+    docChildren.push(new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 600 },
+      children: [new TextRun({ text: 'Due: ' + (opp.due_date || 'TBD'), size: 22, font: 'Calibri', color: '6B7280' })]
+    }));
+    docChildren.push(new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 1000 },
+      children: [new TextRun({ text: 'Prepared by:', size: 22, font: 'Calibri', color: '6B7280' })]
+    }));
+    docChildren.push(new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 100 },
+      children: [new TextRun({ text: 'HGI Global — Hammerman & Gainer LLC', bold: true, size: 28, font: 'Calibri', color: '1B2A4A' })]
+    }));
+    docChildren.push(new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [new TextRun({ text: '2400 Veterans Memorial Blvd, Suite 510, Kenner, LA 70062', size: 20, font: 'Calibri', color: '6B7280' })]
+    }));
+    docChildren.push(new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [new TextRun({ text: '100% Minority-Owned | Est. 1929 | SAM UEI: DL4SJEVKZ6H4', size: 20, font: 'Calibri', color: '6B7280' })]
+    }));
+
+    // Page break
+    docChildren.push(new Paragraph({ pageBreakBefore: true, children: [] }));
+
+    // Sections
+    for (var si = 0; si < sections.length; si++) {
+      var sec = sections[si];
+      if (sec.title) {
+        var headingLevel = sec.level === 1 ? HeadingLevel.HEADING_1 : sec.level === 2 ? HeadingLevel.HEADING_2 : HeadingLevel.HEADING_3;
+        docChildren.push(new Paragraph({
+          heading: headingLevel,
+          spacing: { before: 300, after: 120 },
+          children: [new TextRun({ text: sec.title, bold: true, font: 'Calibri', color: '1B2A4A' })]
+        }));
+      }
+      // Process content lines
+      var contentText = sec.content.join('\n').trim();
+      if (contentText) {
+        // Split into paragraphs on double newlines
+        var paragraphs = contentText.split(/\n\n+/);
+        for (var pi = 0; pi < paragraphs.length; pi++) {
+          var para = paragraphs[pi].trim();
+          if (!para) continue;
+
+          // Check if it's a bullet point
+          if (para.startsWith('- ') || para.startsWith('* ')) {
+            var bullets = para.split('\n').filter(function(b) { return b.trim(); });
+            for (var bi = 0; bi < bullets.length; bi++) {
+              var bulletText = bullets[bi].replace(/^[\-\*]\s*/, '').trim();
+              // Handle bold within bullets
+              var bRuns = [];
+              var bParts = bulletText.split(/\*\*(.+?)\*\*/);
+              for (var bpi = 0; bpi < bParts.length; bpi++) {
+                if (bpi % 2 === 1) {
+                  bRuns.push(new TextRun({ text: bParts[bpi], bold: true, size: 22, font: 'Calibri' }));
+                } else if (bParts[bpi]) {
+                  bRuns.push(new TextRun({ text: bParts[bpi], size: 22, font: 'Calibri' }));
+                }
+              }
+              docChildren.push(new Paragraph({
+                bullet: { level: 0 },
+                spacing: { after: 60 },
+                children: bRuns
+              }));
+            }
+          } else {
+            // Regular paragraph — handle bold
+            var runs = [];
+            var parts = para.replace(/\n/g, ' ').split(/\*\*(.+?)\*\*/);
+            for (var ppi = 0; ppi < parts.length; ppi++) {
+              if (ppi % 2 === 1) {
+                runs.push(new TextRun({ text: parts[ppi], bold: true, size: 22, font: 'Calibri' }));
+              } else if (parts[ppi]) {
+                runs.push(new TextRun({ text: parts[ppi], size: 22, font: 'Calibri' }));
+              }
+            }
+            docChildren.push(new Paragraph({
+              spacing: { after: 120 },
+              children: runs
+            }));
+          }
+        }
+      }
+    }
+
+    var doc = new Document({
+      styles: {
+        default: {
+          heading1: { run: { size: 32, bold: true, color: '1B2A4A', font: 'Calibri' }, paragraph: { spacing: { before: 400, after: 200 } } },
+          heading2: { run: { size: 28, bold: true, color: '1B2A4A', font: 'Calibri' }, paragraph: { spacing: { before: 300, after: 150 } } },
+          heading3: { run: { size: 24, bold: true, color: '4B5563', font: 'Calibri' }, paragraph: { spacing: { before: 200, after: 100 } } },
+        }
+      },
+      sections: [{
+        properties: {
+          page: { margin: { top: 1440, bottom: 1440, left: 1440, right: 1440 } }
+        },
+        headers: { default: new Header({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: 'HGI Global — ' + (opp.title || '').slice(0, 50), size: 16, font: 'Calibri', color: '9CA3AF', italics: true })] })] }) },
+        footers: { default: new Footer({ children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'CONFIDENTIAL — Prepared by HGI Global (Hammerman & Gainer LLC)', size: 16, font: 'Calibri', color: '9CA3AF' })] })] }) },
+        children: docChildren
+      }]
+    });
+
+    var buffer = await Packer.toBuffer(doc);
+    log('PROPOSAL DOC: Generated ' + buffer.length + ' bytes');
+
+    var filename = 'HGI_' + (opp.title || 'Proposal').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 60) + '.docx';
+    res.writeHead(200, {
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'Content-Disposition': 'attachment; filename="' + filename + '"',
+      'Content-Length': buffer.length,
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.end(buffer);
+
+  } catch(e) {
+    log('PROPOSAL DOC ERROR: ' + e.message);
+    if (!res.headersSent) { res.writeHead(500); res.end(JSON.stringify({error: e.message})); }
+  }
+  return;
+}
+
 // Fallthrough — unmatched routes
 if (!res.headersSent) {
   res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -513,9 +694,9 @@ async function loadState() {
   log('Loading system state...');
   var results = await Promise.all([
     supabase.from('opportunities').select('*').eq('status', 'active').order('opi_score', { ascending: false }).limit(15),
-    supabase.from('organism_memory').select('*').neq('memory_type', 'decision_point').order('created_at', { ascending: false }).limit(500),
-    supabase.from('competitive_intelligence').select('*').order('created_at', { ascending: false }).limit(50),
-    supabase.from('relationship_graph').select('*').order('updated_at', { ascending: false }).limit(50)
+    supabase.from('organism_memory').select('*').neq('memory_type', 'decision_point').order('created_at', { ascending: false }).limit(1000),
+    supabase.from('competitive_intelligence').select('*').order('created_at', { ascending: false }).limit(100),
+    supabase.from('relationship_graph').select('*').order('updated_at', { ascending: false }).limit(100)
   ]);
   var state = { pipeline: results[0].data || [], memories: results[1].data || [], competitive: results[2].data || [], relationships: results[3].data || [] };
   log('State: ' + state.pipeline.length + ' opps | ' + state.memories.length + ' mems');
