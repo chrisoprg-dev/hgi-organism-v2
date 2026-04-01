@@ -68,6 +68,16 @@ async function loadData(){
   var c=await sb('/competitive_intelligence?select=competitor_name,threat_level,hq_location,strengths&limit=50');
   var ct=await sb('/relationship_graph?select=contact_name,title,organization,contact_type,priority&order=priority.asc&limit=50');
   state.pipe=p||[];state.mems=m||[];state.comps=c||[];state.cts=ct||[];
+  // Load proposal lengths separately (lightweight, no full content)
+  var pIds=state.pipe.map(function(o){return o.id}).join(',');
+  if(pIds){
+    var pLens=await sb('/rpc/get_proposal_lengths');
+    // Fallback: query directly
+    if(!pLens||pLens.length===0){
+      var pq=await sb('/opportunities?status=eq.active&opi_score=gte.60&select=id,proposal_content&order=opi_score.desc&limit=15');
+      if(pq&&pq.length>0){state.pipe.forEach(function(o){var match=pq.find(function(q){return q.id===o.id});o.pLen=match&&match.proposal_content?match.proposal_content.length:0;})}
+    }
+  }
   try{var p3r=await fetch('/api/phase3');state.p3=await p3r.json();}catch(e){state.p3=null;}
   state.loading=false;render();
 }
@@ -93,7 +103,7 @@ function render(){
   h+='<div class="header"><div style="display:flex;align-items:center;gap:10px"><div class="logo">H</div><div><div style="font-size:12px;font-weight:700;color:#eee;letter-spacing:0.12em">HGI ORGANISM</div><div class="mono" style="font-size:8px;color:#555;letter-spacing:0.15em">'+(state.loading?'LOADING\u2026':'V3.4 \u00B7 '+p.length+' ACTIVE \u00B7 47 AGENTS')+'</div></div></div><div style="display:flex;align-items:center;gap:8px">'+(state.loading?'':'<div class="dot"></div><span class="mono" style="font-size:8px;color:#22c55e">LIVE</span>')+'<button class="btn mono" onclick="loadData()">\u21BB</button></div></div>';
 
   // METRICS
-  var mc=[{l:'PIPELINE',v:p.length,s:urgs.length>0?urgs.length+' urgent':'active',c:'#0ea5e9'},{l:'INTEL',v:state.mems.length,s:'recent',c:'#eab308'},{l:'THREATS',v:state.comps.length,s:'tracked',c:'#f97316'},{l:'CONTACTS',v:state.cts.length,s:'mapped',c:'#22c55e'}];
+  var mc=[{l:'PIPELINE',v:p.length,s:p.filter(function(o){return o.pLen&&o.pLen>100}).length+' proposals'+(urgs.length>0?' / '+urgs.length+' urgent':''),c:'#0ea5e9'},{l:'INTEL',v:state.mems.length,s:'recent',c:'#eab308'},{l:'THREATS',v:state.comps.length,s:'tracked',c:'#f97316'},{l:'CONTACTS',v:state.cts.length,s:'mapped',c:'#22c55e'}];
   h+='<div class="metrics">';mc.forEach(function(m){h+='<div class="metric"><div class="metric-bar" style="background:'+m.c+'"></div><div class="lbl mono">'+m.l+'</div><div class="metric-val mono">'+m.v+'</div><div class="metric-sub mono">'+m.s+'</div></div>'});h+='</div>';
 
   // ALERTS
@@ -113,6 +123,7 @@ function render(){
       h+='<div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:5px"><div style="font-size:12px;font-weight:600;color:#ccc;line-height:1.3;flex:1">'+tr(o.title,50)+'</div><div class="mono" style="font-size:20px;font-weight:900;color:'+oc(o.opi_score)+';line-height:1">'+o.opi_score+'</div></div>';
       h+='<div><span class="badge" style="background:'+sc+'15;color:'+sc+'">'+(o.stage||'new')+'</span>';
       if(!o.rfp_document_retrieved)h+='<span class="badge" style="background:rgba(239,68,68,0.08);color:#f87171">NO RFP</span>';
+      if(o.pLen&&o.pLen>100)h+='<span class="badge" style="background:rgba(34,197,94,0.1);color:#22c55e">PROPOSAL '+Math.round(o.pLen/1000)+'K</span>';
       if(urg)h+='<span class="badge mono" style="background:rgba(239,68,68,0.1);color:#ef4444;font-weight:700">\u26A0 '+dl+'d</span>';
       h+='</div>';if(o.agency)h+='<div class="mono" style="font-size:9px;color:#444;margin-top:4px">'+tr(o.agency,40)+'</div>';h+='</div>';});
     if(p.length===0)h+='<div style="font-size:11px;color:#555;padding:12px">No opportunities</div>';
@@ -168,7 +179,7 @@ function render(){
         h+='<div class="p3card" style="border-left:3px solid '+cc+'">';
         h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-size:12px;font-weight:600;color:#ccc">'+cat.label+'</span><span class="mono" style="font-size:8px;padding:1px 4px;border-radius:2px;background:'+cc+'15;color:'+cc+';font-weight:700">'+cat.count+'</span></div>';
         cat.data.slice(0,2).forEach(function(d){
-          h+='<div style="font-size:10px;color:#777;line-height:1.3;margin-bottom:4px;padding-left:8px;border-left:1px solid rgba(255,255,255,0.06)">'+tr(d.obs,200)+'</div>';
+          h+='<div style="font-size:10px;color:#777;line-height:1.3;margin-bottom:4px;padding-left:8px;border-left:1px solid rgba(255,255,255,0.06)">'+tr((d.obs||'').replace(/^(Excellent|Good|This is|I\'ll|Now |All |Here is|I now|Let me|I have)[^\\n]*\\n*/,'').replace(/^---\\n*/,'').replace(/^#/,''),200)+'</div>';
         });
         h+='</div>';
       });
