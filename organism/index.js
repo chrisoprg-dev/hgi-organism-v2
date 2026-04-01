@@ -3454,6 +3454,50 @@ async function runSession(trigger) {
       }
     } catch(ciAutoErr) { log('CI AUTO-EXTRACT failed: ' + ciAutoErr.message); }
 
+    // Auto-extract structured contacts from new CRM memories  
+    try {
+      log('CRM AUTO-EXTRACT: Mining contacts from recent relationship memories...');
+      var crmAutoMems = await supabase.from('organism_memory')
+        .select('id,agent,observation,opportunity_id,created_at')
+        .eq('memory_type', 'relationship')
+        .gte('created_at', new Date(Date.now() - 24*60*60*1000).toISOString())
+        .order('created_at', { ascending: false })
+        .limit(50);
+      var recentCRM = crmAutoMems.data || [];
+      if (recentCRM.length > 0) {
+        var crmByOpp = {};
+        recentCRM.forEach(function(m) { var o = m.opportunity_id || 'global'; if (!crmByOpp[o]) crmByOpp[o] = []; crmByOpp[o].push(m); });
+        var crmTotal = 0;
+        var crmOids = Object.keys(crmByOpp);
+        for (var cri = 0; cri < crmOids.length; cri++) {
+          var crOid = crmOids[cri];
+          var crMems = crmByOpp[crOid];
+          var crCombined = crMems.slice(0,2).map(function(m){ return (m.observation||'').substring(0,4000); }).join('\n---\n');
+          if (crCombined.length < 200) continue;
+          var oppCtx = '';
+          if (crOid !== 'global') { var ol = await supabase.from('opportunities').select('title,agency').eq('id',crOid).limit(1); if (ol.data && ol.data[0]) oppCtx = (ol.data[0].agency||'')+' - '+(ol.data[0].title||''); }
+          try {
+            var crResp = await claudeCall('Extract contacts. Return ONLY JSON array.',
+              'Extract ALL named contacts. JSON array with: contact_name, title, organization, agency, email, phone, role_in_procurement, contact_type (decision_maker/evaluator/procurement/technical/political/influencer/engineer_of_record/other), priority (critical/high/medium/low), hgi_relationship (warm/cold/unknown), notes.\n\nContext: '+oppCtx+'\n\n'+crCombined,
+              4000, { model: 'claude-haiku-4-5-20251001' });
+            var crMatch = crResp.match(/\[[\s\S]*\]/);
+            if (!crMatch) continue;
+            var crContacts = JSON.parse(crMatch[0]);
+            for (var crc = 0; crc < crContacts.length; crc++) {
+              var cc2 = crContacts[crc];
+              if (!cc2.contact_name || cc2.contact_name.length < 3) continue;
+              var cc2Ex = await supabase.from('relationship_graph').select('id').eq('contact_name',cc2.contact_name).eq('opportunity_id',crOid==='global'?null:crOid).limit(1);
+              var cc2Rec = { contact_name:cc2.contact_name, title:cc2.title, organization:cc2.organization, agency:cc2.agency, email:cc2.email, phone:cc2.phone, role_in_procurement:cc2.role_in_procurement, contact_type:cc2.contact_type||'other', priority:cc2.priority||'medium', hgi_relationship:cc2.hgi_relationship||'unknown', outreach_status:'not_contacted', relationship_strength:cc2.hgi_relationship||'unknown', notes:cc2.notes, opportunity_id:crOid==='global'?null:crOid, source_agent:'crm_auto_extractor', updated_at:new Date().toISOString() };
+              if (cc2Ex.data && cc2Ex.data.length > 0) { await supabase.from('relationship_graph').update(cc2Rec).eq('id',cc2Ex.data[0].id); }
+              else { cc2Rec.id='ct-'+Date.now()+'-'+Math.random().toString(36).slice(2,6); cc2Rec.created_at=new Date().toISOString(); await supabase.from('relationship_graph').insert(cc2Rec); }
+              crmTotal++;
+            }
+          } catch(crErr) { log('CRM AUTO-EXTRACT error: '+crErr.message); }
+        }
+        log('CRM AUTO-EXTRACT: '+crmTotal+' contacts upserted from '+recentCRM.length+' recent memories');
+      } else { log('CRM AUTO-EXTRACT: No new relationship memories in last 24h'); }
+    } catch(crmAutoErr) { log('CRM AUTO-EXTRACT failed: '+crmAutoErr.message); }
+
   } catch (e) {
     log('SESSION ERROR: ' + e.message);
     try {
