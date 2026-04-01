@@ -1154,20 +1154,23 @@ if (url.startsWith('/api/org-chart')) {
     var ocData;
     try { ocData = JSON.parse(ocText); } catch(pe) { ocData = { raw: ocText, parse_error: pe.message }; }
 
-    // Try to render via Kroki
+    // Try to render via Kroki (POST method)
     var svgResults = {};
     for (var diagramType of ['org_chart', 'methodology_flow']) {
       if (ocData[diagramType]) {
         try {
           var mermaidCode = ocData[diagramType];
-          var encoded = Buffer.from(mermaidCode).toString('base64');
-          var krokiUrl = 'https://kroki.io/mermaid/svg/' + encoded;
-          var krokiResp = await fetch(krokiUrl);
+          var krokiResp = await fetch('https://kroki.io/mermaid/svg', {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain' },
+            body: mermaidCode
+          });
           if (krokiResp.ok) {
             svgResults[diagramType] = await krokiResp.text();
             log('ORG CHART: ' + diagramType + ' rendered via Kroki (' + svgResults[diagramType].length + ' bytes SVG)');
           } else {
-            svgResults[diagramType + '_error'] = 'Kroki returned ' + krokiResp.status;
+            var errBody = await krokiResp.text();
+            svgResults[diagramType + '_error'] = 'Kroki ' + krokiResp.status + ': ' + errBody.slice(0, 200);
           }
         } catch(ke) {
           svgResults[diagramType + '_error'] = ke.message;
