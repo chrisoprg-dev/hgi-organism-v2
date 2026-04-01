@@ -420,7 +420,13 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
 
       // 3. Load KB chunks (relevant to vertical)
       var kbR = await supabase.from('knowledge_base_chunks').select('content,source_document')
+        .ilike('content', '%' + (opp.vertical || 'disaster recovery') + '%')
         .order('id',{ascending:false}).limit(30);
+      // Fallback: if filtered returns < 5, get unfiltered
+      if (!kbR.data || kbR.data.length < 5) {
+        kbR = await supabase.from('knowledge_base_chunks').select('content,source_document')
+          .order('id',{ascending:false}).limit(30);
+      }
       var kbChunks = (kbR.data || []).map(function(c){ return c.content; }).join('\n---\n').slice(0, 8000);
 
       // 4. Build agent intelligence summary by category
@@ -521,7 +527,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
 
       // 6. Store the proposal in dedicated column (NOT capture_action — that's the organism's internal analysis)
       await supabase.from('opportunities').update({
-        proposal_content: '# PROPOSAL DRAFT — READY FOR REVIEW\n\n' + proposalText,
+        proposal_content: proposalText,
         last_updated: new Date().toISOString()
       }).eq('id', ppId);
 
@@ -540,7 +546,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         var rfpRef = (opp.rfp_text && opp.rfp_text.trim().length > 200) ? opp.rfp_text.slice(0, 20000) : (opp.scope_analysis || opp.description || '');
         var reviewPrompt = 'You are a ruthless government proposal red team reviewer. Your job is to find every weakness, gap, and compliance failure BEFORE the proposal reaches evaluators.\n\n' +
           '## RFP/SOQ REQUIREMENTS\n' + rfpRef.slice(0, 20000) + '\n\n' +
-          '## PROPOSAL TEXT (first 30K chars)\n' + proposalText.slice(0, 30000) + '\n\n' +
+          '## PROPOSAL TEXT\n' + proposalText.slice(0, 80000) + '\n\n' +
           '## REVIEW CHECKLIST — Flag every issue you find:\n\n' +
           '1. COMPLIANCE GAPS: Does the proposal address every section the RFP requires? List any missing sections or exhibits.\n' +
           '2. PERSONNEL: Is Geoffrey Brien mentioned anywhere? (He should NOT be — he left HGI.) Are HGI leadership names (Lou Resweber, Dillon Truax, Candy Dottolo, Chris Feduccia, Vanessa James) auto-assigned to project roles? They should NOT be — all positions should be listed as [TO BE ASSIGNED] with role requirements. The only name that should appear is Christopher J. Oney on the cover letter signature.\n' +
@@ -553,7 +559,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
           '9. SCORING RISK: Which sections would lose the most points with evaluators as written? What specific improvements would close the gap?\n\n' +
           'Be specific. Cite section names and page references. Do not praise — only identify problems and specific fixes.\n' +
           'Format: For each issue, write CATEGORY | SEVERITY (critical/major/minor) | DESCRIPTION | FIX';
-        var reviewResp = await claudeCall('Red team proposal review', reviewPrompt, 6000, { model: 'claude-haiku-4-5-20251001' });
+        var reviewResp = await claudeCall('Red team proposal review', reviewPrompt, 12000, { model: 'claude-sonnet-4-6' });
         
         // Count issues by severity
         var critCount = (reviewResp.match(/critical/gi) || []).length;
@@ -2201,11 +2207,7 @@ if (url.startsWith('/api/rate-table')) {
     var rtPrompt = 'Build a rate table for this RFP based on the positions/roles it requires.\n\n' +
       '## RFP TEXT\n' + rfpSource.slice(0, 30000) + '\n\n' +
       '## HGI RATE CARD (fully burdened, per hour)\n' +
-      'Principal ' + D + '220 | Program Director ' + D + '210 | SME ' + D + '200\n' +
-      'Sr Grant Manager ' + D + '180 | Grant Manager ' + D + '175 | Sr PM ' + D + '180 | PM ' + D + '155\n' +
-      'Grant Writer ' + D + '145 | Architect/Engineer ' + D + '135 | Cost Estimator ' + D + '125\n' +
-      'Appeals Specialist ' + D + '145 | Sr Damage Assessor ' + D + '115 | Damage Assessor ' + D + '105\n' +
-      'Admin Support ' + D + '65\n\n' +
+      RATE_CARD + '\n\n' +
       '## FINANCIAL INTELLIGENCE\n' + finIntel + '\n\n' +
       '## INSTRUCTIONS\n' +
       '1. Extract every position/role the RFP requires\n' +
@@ -2705,7 +2707,11 @@ function getInterface() {
 }
 
 // === HGI COMPANY CONTEXT (cached across all agent calls) ===
-var HGI = 'SYSTEM CONTEXT: HGI Global (Hammerman & Gainer LLC) is a 95-year-old, 100% minority-owned program management firm in Kenner, Louisiana (2400 Veterans Memorial Blvd, Suite 510, 70062). 8 verticals: Disaster Recovery, TPA/Claims (full P&C), Property Tax Appeals, Workforce/WIOA, Construction Management, Program Administration, Housing/HUD, Grant Management. Past performance: Road Home ' + String.fromCharCode(36) + '67M direct/' + String.fromCharCode(36) + '13B+ program (2006-2015, zero misappropriation), HAP ' + String.fromCharCode(36) + '950M, Restore LA ' + String.fromCharCode(36) + '42.3M, Rebuild NJ ' + String.fromCharCode(36) + '67.7M, TPSD ' + String.fromCharCode(36) + '2.96M (completed 2022-2025), St. John Sheriff ' + String.fromCharCode(36) + '788K, BP GCCF ' + String.fromCharCode(36) + '1.65M. Key staff by role: President, Chairman, CEO, CAO, VP, SVP Claims, 1099 SME (~' + String.fromCharCode(36) + '1B grants/incentives). ~50 team members across offices in Kenner (HQ), Shreveport, Alexandria, New Orleans. Phone: (504) 681-6135. Email: info@hgi-global.com. SAM UEI: DL4SJEVKZ6H4. Insurance: ' + String.fromCharCode(36) + '5M fidelity/' + String.fromCharCode(36) + '5M E&O/' + String.fromCharCode(36) + '2M GL. Rate card (burdened/hr): Principal ' + String.fromCharCode(36) + '220, Prog Dir ' + String.fromCharCode(36) + '210, SME ' + String.fromCharCode(36) + '200, Sr Grant Mgr ' + String.fromCharCode(36) + '180, Grant Mgr ' + String.fromCharCode(36) + '175, Sr PM ' + String.fromCharCode(36) + '180, PM ' + String.fromCharCode(36) + '155, Grant Writer ' + String.fromCharCode(36) + '145, Arch/Eng ' + String.fromCharCode(36) + '135, Cost Est ' + String.fromCharCode(36) + '125, Appeals ' + String.fromCharCode(36) + '145, Sr Damage ' + String.fromCharCode(36) + '115, Damage ' + String.fromCharCode(36) + '105, Admin ' + String.fromCharCode(36) + '65. HGI has NEVER had a direct federal contract. All work flows through state agencies, local governments, housing authorities, and insurance entities. Do NOT list PBGC or Orleans Parish School Board as past performance without explicit President confirmation. RULES: (1) Every claim must cite source+date. Unverified = say so. (2) Set confidence:high only with source URL. Medium when extrapolating. Inferred when reasoning without sources. (3) Set source_url to specific URL or null. CRITICAL PERSONNEL UPDATE: Geoffrey Brien is NO LONGER with HGI — do not reference him in any proposals, staffing plans, or deliverables. The DR Manager position is currently unfilled. Any organism memories referencing Brien as current staff are OUTDATED. FOUNDING YEAR: HGI was founded in 1931, not 1929. Use 1931 in all documents.';
+var HGI = 'SYSTEM CONTEXT: HGI Global (Hammerman & Gainer LLC) is a 95-year-old, 100% minority-owned program management firm in Kenner, Louisiana (2400 Veterans Memorial Blvd, Suite 510, 70062). 8 verticals: Disaster Recovery, TPA/Claims (full P&C), Property Tax Appeals, Workforce/WIOA, Construction Management, Program Administration, Housing/HUD, Grant Management. Past performance: Road Home ' + String.fromCharCode(36) + '67M direct/' + String.fromCharCode(36) + '13B+ program (2006-2015, zero misappropriation), HAP ' + String.fromCharCode(36) + '950M, Restore LA ' + String.fromCharCode(36) + '42.3M, Rebuild NJ ' + String.fromCharCode(36) + '67.7M, TPSD ' + String.fromCharCode(36) + '2.96M (completed 2022-2025), St. John Sheriff ' + String.fromCharCode(36) + '788K, BP GCCF ' + String.fromCharCode(36) + '1.65M. Key staff by role: President, Chairman, CEO, CAO, VP, SVP Claims, 1099 SME (~' + String.fromCharCode(36) + '1B grants/incentives). ~50 team members across offices in Kenner (HQ), Shreveport, Alexandria, New Orleans. Phone: (504) 681-6135. Email: info@hgi-global.com. SAM UEI: DL4SJEVKZ6H4. Insurance: ' + String.fromCharCode(36) + '5M fidelity/' + String.fromCharCode(36) + '5M E&O/' + String.fromCharCode(36) + '2M GL. Rates: Built per-RFP from market analysis and financial agent output. Do NOT copy standard rates into proposals. HGI has NEVER had a direct federal contract. All work flows through state agencies, local governments, housing authorities, and insurance entities. Do NOT list PBGC or Orleans Parish School Board as past performance without explicit President confirmation. RULES: (1) Every claim must cite source+date. Unverified = say so. (2) Set confidence:high only with source URL. Medium when extrapolating. Inferred when reasoning without sources. (3) Set source_url to specific URL or null. CRITICAL PERSONNEL UPDATE: Geoffrey Brien is NO LONGER with HGI — do not reference him in any proposals, staffing plans, or deliverables. The DR Manager position is currently unfilled. Any organism memories referencing Brien as current staff are OUTDATED. FOUNDING YEAR: HGI was founded in 1931, not 1929. Use 1931 in all documents.';
+
+
+// RATE_CARD — only referenced by financial agent and rate-table endpoint. NOT sent to other agents or proposals.
+var RATE_CARD = 'HGI Rate Card (burdened/hr): Principal ' + String.fromCharCode(36) + '220, Prog Dir ' + String.fromCharCode(36) + '210, SME ' + String.fromCharCode(36) + '200, Sr Grant Mgr ' + String.fromCharCode(36) + '180, Grant Mgr ' + String.fromCharCode(36) + '175, Sr PM ' + String.fromCharCode(36) + '180, PM ' + String.fromCharCode(36) + '155, Grant Writer ' + String.fromCharCode(36) + '145, Arch/Eng ' + String.fromCharCode(36) + '135, Cost Est ' + String.fromCharCode(36) + '125, Appeals ' + String.fromCharCode(36) + '145, Sr Damage ' + String.fromCharCode(36) + '115, Damage ' + String.fromCharCode(36) + '105, Admin ' + String.fromCharCode(36) + '65.';
 
 
 // ============================================================
@@ -2784,7 +2790,8 @@ async function agentFinancial(opp, state, cycleBrief) {
     '5. Base period only — option years shown separately\n\n' +
     'RULES:\n' +
     '- Show all math. Every comparable must have a source.\n' +
-    '- Use HGI rate card from system context for staffing-based method\n' +
+    '- Use the HGI rate card below for staffing-based method\n' +
+    '- ' + RATE_CARD + '\n' +
     '- No unsourced dollar estimates\n' +
     'Write with the precision of a government contracts CFO.';
 
@@ -2921,13 +2928,14 @@ async function agentStaffingPlan(opp, state, cycleBrief) {
     '- CAO\n' +
     '- SVP Claims\n\n' +
     'REQUIRED OUTPUTS:\n' +
-    '1. Staffing matrix: position | named person | qualifications | rate | availability\n' +
+    '1. Staffing matrix: position | role title (e.g. CEO, VP, CAO — NO NAMES) | qualifications required | rate | availability\n' +
     '2. Gaps requiring recruitment or teaming\n' +
     '3. Org chart structure\n' +
     '4. Key personnel commitments\n\n' +
     'RULES:\n' +
+    '- CRITICAL: Use role titles ONLY (President, CEO, VP, CAO, SVP Claims, SME). NEVER assign specific names to positions. Write [TO BE ASSIGNED] for all Key Personnel.\n' +
     '- NEVER overwrite scope_analysis. You READ it, not write to it.\n' +
-    '- confidence:high for named HGI personnel and rate card data\n' +
+    '- confidence:high for role assignments and rate card data\n' +
     (lastPlan ? '- If staffing is unchanged, respond ONLY with "NO_MATERIAL_CHANGE"\n' : '') +
     'Write as a proposal staffing lead.';
 
