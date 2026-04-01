@@ -425,12 +425,13 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       // 4. Build agent intelligence summary by category
       var intelSummary = '';
       var categories = {
-        'Scope & Requirements': ['scope','quality_gate','compliance'],
+        'Scope & Requirements': ['scope','quality_gate','compliance','compliance_matrix'],
         'Competitive Intelligence': ['intelligence','competitor','research'],
-        'Financial & Pricing': ['financial','price','cost'],
+        'Financial & Pricing': ['financial','price','cost','rate_table'],
         'Staffing': ['staffing','recruiting','bench','talent'],
         'Win Strategy': ['winnability','capture','brief'],
-        'Proposal Drafts': ['proposal','assembly','red_team','content']
+        'Proposal Drafts': ['proposal','assembly','red_team','content'],
+        'Graphics & Diagrams': ['graphics','org_chart','diagram']
       };
       Object.keys(categories).forEach(function(cat) {
         var keywords = categories[cat];
