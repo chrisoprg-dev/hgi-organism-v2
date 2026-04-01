@@ -10,7 +10,6 @@
 body{background:#080a0e;color:#bbb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;overflow-x:hidden}
 ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#2a2a2a;border-radius:2px}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
-@keyframes fadeUp{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
 .mono{font-family:'JetBrains Mono','Fira Code','Consolas',monospace}
 .lbl{font-size:9px;font-weight:700;letter-spacing:0.15em;color:#555;text-transform:uppercase}
 .header{padding:10px 16px;border-bottom:1px solid rgba(234,179,8,0.08);background:linear-gradient(180deg,rgba(234,179,8,0.025) 0%,transparent 100%);display:flex;justify-content:space-between;align-items:center}
@@ -22,24 +21,20 @@ body{background:#080a0e;color:#bbb;font-family:-apple-system,BlinkMacSystemFont,
 .metric-val{font-size:24px;font-weight:800;color:#fff;line-height:1;margin-top:4px}
 .metric-sub{font-size:9px;color:#444;margin-top:3px}
 .alert-box{margin:0 16px 4px;background:rgba(239,68,68,0.04);border:1px solid rgba(239,68,68,0.1);border-radius:6px;padding:7px 10px}
-.tabs{padding:0 16px;display:flex;gap:1px;border-bottom:1px solid rgba(255,255,255,0.04)}
-.tab{background:transparent;border:none;border-bottom:2px solid transparent;padding:7px 12px;cursor:pointer;color:#444;font-size:9px;font-weight:600;letter-spacing:0.15em}
+.tabs{padding:0 16px;display:flex;gap:1px;border-bottom:1px solid rgba(255,255,255,0.04);overflow-x:auto}
+.tab{background:transparent;border:none;border-bottom:2px solid transparent;padding:7px 12px;cursor:pointer;color:#444;font-size:9px;font-weight:600;letter-spacing:0.15em;white-space:nowrap}
 .tab.active{background:rgba(234,179,8,0.05);border-bottom-color:#eab308;color:#eab308}
 .content{padding:8px 16px;min-height:320px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px}
-.opp{background:rgba(255,255,255,0.015);border:1px solid rgba(255,255,255,0.04);border-radius:6px;padding:10px 12px;cursor:pointer;margin-bottom:4px;transition:border-color 0.15s}
+.opp{background:rgba(255,255,255,0.015);border:1px solid rgba(255,255,255,0.04);border-radius:6px;padding:10px 12px;cursor:pointer;margin-bottom:4px}
 .opp.sel{background:rgba(234,179,8,0.05);border-color:rgba(234,179,8,0.2)}
-.opp-title{font-size:12px;font-weight:600;color:#ccc;line-height:1.3;flex:1}
-.opp-opi{font-size:20px;font-weight:900;line-height:1}
 .badge{font-size:9px;padding:1px 6px;border-radius:3px;font-weight:600;text-transform:uppercase;display:inline-block;margin-right:4px;margin-bottom:2px}
 .mem{padding:8px 10px;background:rgba(255,255,255,0.012);border-radius:0 4px 4px 0;margin-bottom:2px}
-.mem-agent{font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:0.12em}
-.mem-time{font-size:8px;color:#3a3a3a}
-.mem-text{font-size:11px;color:#888;line-height:1.3}
 .threat{padding:10px 11px;background:rgba(255,255,255,0.015);border:1px solid rgba(255,255,255,0.04);border-radius:6px;margin-bottom:5px}
 .contact{padding:8px 10px;background:rgba(255,255,255,0.015);border:1px solid rgba(255,255,255,0.04);border-radius:6px}
 .detail-box{background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.04);border-radius:6px;padding:12px;margin-bottom:8px}
+.p3card{background:rgba(255,255,255,0.015);border:1px solid rgba(255,255,255,0.04);border-radius:6px;padding:10px 12px;margin-bottom:5px}
 .btn{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:2px 7px;color:#666;font-size:8px;cursor:pointer}
 .footer{padding:5px 16px;border-top:1px solid rgba(255,255,255,0.025);display:flex;justify-content:space-between}
 .footer span{font-size:8px;color:#2a2a2a}
@@ -49,166 +44,143 @@ body{background:#080a0e;color:#bbb;font-family:-apple-system,BlinkMacSystemFont,
 <body>
 <div id="app"></div>
 <script>
-const SB='https://mfvfbeyjpwllndeuhldi.supabase.co/rest/v1';
-const AK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1mdmZiZXlqcHdsbG5kZXVobGRpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI0MDM0NjQsImV4cCI6MjA4Nzk3OTQ2NH0.V-p5WqM8uwJWRcndiQZJcXw7mz9vBcCVsCrfI6Jz0qs';
-const HD={apikey:AK,Authorization:'Bearer '+AK};
+var SB='https://mfvfbeyjpwllndeuhldi.supabase.co/rest/v1';
+var AK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1mdmZiZXlqcHdsbG5kZXVobGRpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI0MDM0NjQsImV4cCI6MjA4Nzk3OTQ2NH0.V-p5WqM8uwJWRcndiQZJcXw7mz9vBcCVsCrfI6Jz0qs';
+var HD={apikey:AK,Authorization:'Bearer '+AK};
+async function sb(p){try{var r=await fetch(SB+p,{headers:HD});return r.ok?await r.json():[];}catch(e){return[];}}
 
-async function sb(p){try{const r=await fetch(SB+p,{headers:HD});return r.ok?await r.json():[];}catch(e){return[];}}
-
-// Colors
 function oc(s){return s>=90?'#22c55e':s>=80?'#0ea5e9':s>=70?'#eab308':s>=60?'#f97316':'#ef4444'}
-const SC={pursuing:'#0ea5e9',submitted:'#22c55e',identified:'#eab308',watching:'#f97316',won:'#22c55e',lost:'#ef4444'};
-const TC={critical:'#ef4444',primary:'#ef4444',secondary:'#f97316',watch:'#64748b',emerging:'#eab308',high:'#f97316',medium:'#eab308',low:'#22c55e'};
-const PC={critical:'#ef4444',high:'#f97316',medium:'#eab308',low:'#64748b'};
-function ac(a){const m={intelligence:'#0ea5e9',financial:'#22c55e',crm:'#f97316',winnability:'#eab308',quality:'#ef4444',proposal:'#a855f7',staffing:'#06b6d4',research:'#10b981',disaster:'#ef4444',competitor:'#f59e0b',executive:'#8b5cf6',brief:'#14b8a6',discovery:'#22d3ee',budget:'#84cc16',pipeline:'#6366f1',content:'#c084fc',hunting:'#22d3ee',amendment:'#fb923c',entrepreneurial:'#eab308',self_awareness:'#eab308',design:'#e879f9',regulatory:'#ec4899',learning:'#0ea5e9',scraper:'#64748b',kb:'#2dd4bf',teaming:'#a855f7',contract:'#f97316',source:'#7c3aed',outreach:'#f43f5e',recompete:'#d946ef',agency:'#0891b2',subcontractor:'#65a30d',recruiting:'#06b6d4',price:'#10b981',red_team:'#ef4444',oral:'#a855f7',post_award:'#84cc16'};for(const[k,v]of Object.entries(m))if((a||'').includes(k))return v;return'#64748b'}
+var SC={pursuing:'#0ea5e9',submitted:'#22c55e',identified:'#eab308',watching:'#f97316'};
+var TC={critical:'#ef4444',primary:'#ef4444',secondary:'#f97316',watch:'#64748b',emerging:'#eab308'};
+var PC={critical:'#ef4444',high:'#f97316',medium:'#eab308',low:'#64748b'};
+function ac(a){var m={intelligence:'#0ea5e9',financial:'#22c55e',crm:'#f97316',winnability:'#eab308',quality:'#ef4444',proposal:'#a855f7',staffing:'#06b6d4',research:'#10b981',disaster:'#ef4444',competitor:'#f59e0b',executive:'#8b5cf6',brief:'#14b8a6',discovery:'#22d3ee',budget:'#84cc16',pipeline:'#6366f1',content:'#c084fc',hunting:'#22d3ee',amendment:'#fb923c',entrepreneurial:'#eab308',self_awareness:'#eab308',design:'#e879f9',regulatory:'#ec4899',teaming:'#a855f7',contract:'#f97316',recompete:'#d946ef',agency:'#0891b2',subcontractor:'#65a30d',learning:'#0ea5e9',source:'#7c3aed',win_rate:'#84cc16',loss:'#f43f5e'};for(var k in m)if((a||'').indexOf(k)>=0)return m[k];return'#64748b'}
 function tr(s,n){n=n||55;return!s?'':s.length>n?s.slice(0,n)+'\u2026':s}
-function ago(ts){const m=Math.floor((Date.now()-new Date(ts).getTime())/6e4);return m<60?m+'m':m<1440?Math.floor(m/60)+'h':Math.floor(m/1440)+'d'}
-function dtl(ds){if(!ds)return null;const d=new Date(ds);if(isNaN(d)){const m=ds.match(/(\d{1,2})-([A-Za-z]+)-(\d{4})/);if(m){const d2=new Date(m[2]+' '+m[1]+', '+m[3]);return isNaN(d2)?null:Math.ceil((d2-new Date())/864e5)}return null}return Math.ceil((d-new Date())/864e5)}
-function fd(ds){if(!ds)return'\u2014';const d=new Date(ds);return isNaN(d)?ds.slice(0,12):d.toLocaleDateString('en-US',{month:'short',day:'numeric'})}
+function ago(ts){var m=Math.floor((Date.now()-new Date(ts).getTime())/6e4);return m<60?m+'m':m<1440?Math.floor(m/60)+'h':Math.floor(m/1440)+'d'}
+function dtl(ds){if(!ds)return null;var d=new Date(ds);if(isNaN(d)){var m=ds.match(/(\d{1,2})-([A-Za-z]+)-(\d{4})/);if(m){d=new Date(m[2]+' '+m[1]+', '+m[3]);}else return null}return isNaN(d)?null:Math.ceil((d-new Date())/864e5)}
+function fd(ds){if(!ds)return'\u2014';var d=new Date(ds);return isNaN(d)?ds.slice(0,12):d.toLocaleDateString('en-US',{month:'short',day:'numeric'})}
 
-let state={tab:'cop',pipe:[],mems:[],comps:[],cts:[],sel:null,selMems:[],selPc:null,loading:true};
+var state={tab:'cop',pipe:[],mems:[],comps:[],cts:[],p3:null,sel:null,selMems:[],selPc:null,loading:true};
 
 async function loadData(){
   state.loading=true;render();
-  const[p,m,c,ct]=await Promise.all([
-    sb('/opportunities?status=eq.active&opi_score=gte.60&select=id,title,agency,opi_score,stage,due_date,rfp_document_retrieved&order=opi_score.desc&limit=15'),
-    sb('/organism_memory?memory_type=neq.decision_point&memory_type=neq.compliance_matrix_data&memory_type=neq.rate_table_data&memory_type=neq.org_chart_data&select=agent,observation,created_at,memory_type,opportunity_id&order=created_at.desc&limit=25'),
-    sb('/competitive_intelligence?select=competitor_name,threat_level,hq_location,strengths&limit=50'),
-    sb('/relationship_graph?select=contact_name,title,organization,contact_type,priority&order=priority.asc&limit=50'),
-  ]);
-  state.pipe=p||[];state.mems=m||[];state.comps=c||[];state.cts=ct||[];state.loading=false;
-  render();
+  var p=await sb('/opportunities?status=eq.active&opi_score=gte.60&select=id,title,agency,opi_score,stage,due_date,rfp_document_retrieved&order=opi_score.desc&limit=15');
+  var m=await sb('/organism_memory?memory_type=neq.decision_point&memory_type=neq.compliance_matrix_data&memory_type=neq.rate_table_data&memory_type=neq.org_chart_data&select=agent,observation,created_at,memory_type,opportunity_id&order=created_at.desc&limit=25');
+  var c=await sb('/competitive_intelligence?select=competitor_name,threat_level,hq_location,strengths&limit=50');
+  var ct=await sb('/relationship_graph?select=contact_name,title,organization,contact_type,priority&order=priority.asc&limit=50');
+  state.pipe=p||[];state.mems=m||[];state.comps=c||[];state.cts=ct||[];
+  try{var p3r=await fetch('/api/phase3');state.p3=await p3r.json();}catch(e){state.p3=null;}
+  state.loading=false;render();
 }
 
-async function loadOppDetail(opp){
-  state.sel=opp;state.selMems=[];state.selPc=null;render();
-  const[mems,det]=await Promise.all([
-    sb('/organism_memory?opportunity_id=eq.'+opp.id+'&memory_type=neq.decision_point&memory_type=neq.compliance_matrix_data&memory_type=neq.rate_table_data&memory_type=neq.org_chart_data&select=agent,observation,created_at,memory_type&order=created_at.desc&limit=30'),
-    sb('/opportunities?id=eq.'+opp.id+'&select=proposal_content&limit=1'),
-  ]);
+async function loadOppDetail(idx){
+  var opp=state.pipe[idx];state.sel=opp;state.selMems=[];state.selPc=null;render();
+  var mems=await sb('/organism_memory?opportunity_id=eq.'+opp.id+'&memory_type=neq.decision_point&memory_type=neq.compliance_matrix_data&memory_type=neq.rate_table_data&memory_type=neq.org_chart_data&select=agent,observation,created_at,memory_type&order=created_at.desc&limit=30');
+  var det=await sb('/opportunities?id=eq.'+opp.id+'&select=proposal_content&limit=1');
   state.selMems=mems||[];
   state.selPc=det&&det[0]&&det[0].proposal_content?det[0].proposal_content.length:0;
   render();
 }
-
+function clearSel(){state.sel=null;render()}
 function setTab(t){state.tab=t;state.sel=null;render()}
 
 function render(){
-  const a=document.getElementById('app');
-  const p=state.pipe;
-  const urgs=p.filter(o=>{const d=dtl(o.due_date);return d!==null&&d>=0&&d<=10&&o.stage!=='submitted'});
-  const withP=p.filter(o=>false); // We don't have proposal_content in list query
+  var a=document.getElementById('app');
+  var p=state.pipe;
+  var urgs=p.filter(function(o){var d=dtl(o.due_date);return d!==null&&d>=0&&d<=10&&o.stage!=='submitted'});
+  var h='';
 
-  let h='';
   // HEADER
-  h+='<div class="header"><div style="display:flex;align-items:center;gap:10px"><div class="logo">H</div><div><div style="font-size:12px;font-weight:700;color:#eee;letter-spacing:0.12em">HGI ORGANISM</div><div class="mono" style="font-size:8px;color:#555;letter-spacing:0.15em">'+(state.loading?'LOADING\u2026':'V3.4 \u00B7 '+p.length+' ACTIVE \u00B7 47 AGENTS')+'</div></div></div><div style="display:flex;align-items:center;gap:8px">'+(state.loading?'':'<div class="dot"></div><span class="mono" style="font-size:8px;color:#22c55e">LIVE</span>')+'<button class="btn mono" onclick="loadData()">\u21BB REFRESH</button></div></div>';
+  h+='<div class="header"><div style="display:flex;align-items:center;gap:10px"><div class="logo">H</div><div><div style="font-size:12px;font-weight:700;color:#eee;letter-spacing:0.12em">HGI ORGANISM</div><div class="mono" style="font-size:8px;color:#555;letter-spacing:0.15em">'+(state.loading?'LOADING\u2026':'V3.4 \u00B7 '+p.length+' ACTIVE \u00B7 47 AGENTS')+'</div></div></div><div style="display:flex;align-items:center;gap:8px">'+(state.loading?'':'<div class="dot"></div><span class="mono" style="font-size:8px;color:#22c55e">LIVE</span>')+'<button class="btn mono" onclick="loadData()">\u21BB</button></div></div>';
 
   // METRICS
-  const mc=[{l:'PIPELINE',v:p.length,s:urgs.length>0?urgs.length+' urgent':'active',c:'#0ea5e9'},{l:'INTEL',v:state.mems.length,s:'recent',c:'#eab308'},{l:'THREATS',v:state.comps.length,s:'tracked',c:'#f97316'},{l:'CONTACTS',v:state.cts.length,s:'mapped',c:'#22c55e'}];
-  h+='<div class="metrics">';
-  mc.forEach(function(m){h+='<div class="metric"><div class="metric-bar" style="background:'+m.c+'"></div><div class="lbl mono">'+m.l+'</div><div class="metric-val mono">'+m.v+'</div><div class="metric-sub mono">'+m.s+'</div></div>'});
-  h+='</div>';
+  var mc=[{l:'PIPELINE',v:p.length,s:urgs.length>0?urgs.length+' urgent':'active',c:'#0ea5e9'},{l:'INTEL',v:state.mems.length,s:'recent',c:'#eab308'},{l:'THREATS',v:state.comps.length,s:'tracked',c:'#f97316'},{l:'CONTACTS',v:state.cts.length,s:'mapped',c:'#22c55e'}];
+  h+='<div class="metrics">';mc.forEach(function(m){h+='<div class="metric"><div class="metric-bar" style="background:'+m.c+'"></div><div class="lbl mono">'+m.l+'</div><div class="metric-val mono">'+m.v+'</div><div class="metric-sub mono">'+m.s+'</div></div>'});h+='</div>';
 
   // ALERTS
-  if(urgs.length>0){
-    h+='<div class="alert-box"><div class="lbl mono" style="color:#ef4444;margin-bottom:3px">\u26A0 DEADLINES</div>';
-    urgs.forEach(function(o){var dl=dtl(o.due_date);h+='<div style="font-size:11px;color:#aaa"><span class="mono" style="color:#ef4444;font-weight:700">'+dl+'d</span> '+tr(o.title,48)+' \u2014 '+fd(o.due_date)+'</div>'});
-    h+='</div>';
-  }
+  if(urgs.length>0){h+='<div class="alert-box"><div class="lbl mono" style="color:#ef4444;margin-bottom:3px">\u26A0 DEADLINES</div>';urgs.forEach(function(o){var dl=dtl(o.due_date);h+='<div style="font-size:11px;color:#aaa"><span class="mono" style="color:#ef4444;font-weight:700">'+dl+'d</span> '+tr(o.title,48)+' \u2014 '+fd(o.due_date)+'</div>'});h+='</div>';}
 
   // TABS
-  var tabs=[{id:'cop',l:'PIPELINE',i:'\u25CE'},{id:'feed',l:'FEED',i:'\u25C8'},{id:'rivals',l:'RIVALS',i:'\u2B21'},{id:'crm',l:'CRM',i:'\u25C9'}];
-  h+='<div class="tabs">';
-  tabs.forEach(function(t){h+='<button class="tab mono'+(state.tab===t.id?' active':'')+'" onclick="setTab(\''+t.id+'\')">'+t.i+' '+t.l+'</button>'});
-  h+='</div>';
-
+  var tabs=[{id:'cop',l:'PIPELINE',i:'\u25CE'},{id:'feed',l:'FEED',i:'\u25C8'},{id:'rivals',l:'RIVALS',i:'\u2B21'},{id:'crm',l:'CRM',i:'\u25C9'},{id:'p3',l:'STRATEGY',i:'\u25C7'}];
+  h+='<div class="tabs">';tabs.forEach(function(t){h+='<button class="tab mono'+(state.tab===t.id?' active':'')+'" onclick="setTab(\''+t.id+'\')">'+t.i+' '+t.l+'</button>'});h+='</div>';
   h+='<div class="content">';
-  if(state.loading){h+='<div style="text-align:center;padding:30px;color:#444" class="mono">LOADING INTELLIGENCE\u2026</div>';}
+  if(state.loading){h+='<div style="text-align:center;padding:30px;color:#444" class="mono">LOADING\u2026</div>';}
 
-  // PIPELINE TAB
+  // PIPELINE
   else if(state.tab==='cop'){
     h+='<div class="grid2"><div><div class="lbl mono" style="margin-bottom:5px">ACTIVE ('+p.length+')</div>';
-    p.forEach(function(o,i){
-      var sc=SC[o.stage]||'#555';var dl=dtl(o.due_date);var urg=dl!==null&&dl>=0&&dl<=10&&o.stage!=='submitted';
-      var isSel=state.sel&&state.sel.id===o.id;
-      h+='<div class="opp'+(isSel?' sel':'')+'" style="border-left:3px solid '+oc(o.opi_score)+';animation:fadeUp .2s ease '+(i*.03)+'s both" onclick="loadOppDetail(state.pipe['+i+'])">';
-      h+='<div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:5px"><div class="opp-title">'+tr(o.title,50)+'</div><div class="opp-opi mono" style="color:'+oc(o.opi_score)+'">'+o.opi_score+'</div></div>';
-      h+='<div>';
-      h+='<span class="badge" style="background:'+sc+'15;color:'+sc+'">'+( o.stage||'new')+'</span>';
+    p.forEach(function(o,i){var sc=SC[o.stage]||'#555';var dl=dtl(o.due_date);var urg=dl!==null&&dl>=0&&dl<=10&&o.stage!=='submitted';var isSel=state.sel&&state.sel.id===o.id;
+      h+='<div class="opp'+(isSel?' sel':'')+'" style="border-left:3px solid '+oc(o.opi_score)+'" onclick="loadOppDetail('+i+')">';
+      h+='<div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:5px"><div style="font-size:12px;font-weight:600;color:#ccc;line-height:1.3;flex:1">'+tr(o.title,50)+'</div><div class="mono" style="font-size:20px;font-weight:900;color:'+oc(o.opi_score)+';line-height:1">'+o.opi_score+'</div></div>';
+      h+='<div><span class="badge" style="background:'+sc+'15;color:'+sc+'">'+(o.stage||'new')+'</span>';
       if(!o.rfp_document_retrieved)h+='<span class="badge" style="background:rgba(239,68,68,0.08);color:#f87171">NO RFP</span>';
       if(urg)h+='<span class="badge mono" style="background:rgba(239,68,68,0.1);color:#ef4444;font-weight:700">\u26A0 '+dl+'d</span>';
-      h+='</div>';
-      if(o.agency)h+='<div class="mono" style="font-size:9px;color:#444;margin-top:4px">'+tr(o.agency,40)+'</div>';
-      h+='</div>';
-    });
+      h+='</div>';if(o.agency)h+='<div class="mono" style="font-size:9px;color:#444;margin-top:4px">'+tr(o.agency,40)+'</div>';h+='</div>';});
     if(p.length===0)h+='<div style="font-size:11px;color:#555;padding:12px">No opportunities</div>';
     h+='</div><div>';
-
-    // RIGHT PANEL
-    if(state.sel){
-      var s=state.sel;
-      h+='<div style="display:flex;justify-content:space-between;margin-bottom:6px"><span class="lbl mono">'+tr(s.title,28)+'</span><button class="btn" onclick="state.sel=null;render()">\u2715</button></div>';
-      h+='<div class="detail-box"><div style="font-size:13px;font-weight:700;color:#eee;margin-bottom:8px">'+s.title+'</div>';
-      h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">';
-      h+='<div><div style="font-size:8px;color:#444">OPI</div><div class="mono" style="font-size:18px;font-weight:900;color:'+oc(s.opi_score)+'">'+s.opi_score+'</div></div>';
-      h+='<div><div style="font-size:8px;color:#444">STAGE</div><span class="badge" style="background:'+(SC[s.stage]||'#555')+'15;color:'+(SC[s.stage]||'#555')+'">'+(s.stage||'new')+'</span></div>';
-      h+='<div><div style="font-size:8px;color:#444">DUE</div><div class="mono" style="font-size:11px;color:#999">'+fd(s.due_date)+'</div></div>';
-      h+='<div><div style="font-size:8px;color:#444">PROPOSAL</div><div class="mono" style="font-size:11px;color:'+(state.selPc>100?'#22c55e':'#ef4444')+'">'+(state.selPc===null?'\u2026':state.selPc>100?Math.round(state.selPc/1000)+'K chars':'NONE')+'</div></div>';
-      h+='</div></div>';
-      h+='<div class="lbl mono" style="margin-bottom:4px">AGENT INTEL ('+state.selMems.length+')</div>';
-      h+='<div style="max-height:280px;overflow:auto">';
+    if(state.sel){var s=state.sel;
+      h+='<div style="display:flex;justify-content:space-between;margin-bottom:6px"><span class="lbl mono">'+tr(s.title,28)+'</span><button class="btn" onclick="clearSel()">\u2715</button></div>';
+      h+='<div class="detail-box"><div style="font-size:13px;font-weight:700;color:#eee;margin-bottom:8px">'+s.title+'</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px"><div><div style="font-size:8px;color:#444">OPI</div><div class="mono" style="font-size:18px;font-weight:900;color:'+oc(s.opi_score)+'">'+s.opi_score+'</div></div><div><div style="font-size:8px;color:#444">STAGE</div><span class="badge" style="background:'+(SC[s.stage]||'#555')+'15;color:'+(SC[s.stage]||'#555')+'">'+(s.stage||'new')+'</span></div><div><div style="font-size:8px;color:#444">DUE</div><div class="mono" style="font-size:11px;color:#999">'+fd(s.due_date)+'</div></div><div><div style="font-size:8px;color:#444">PROPOSAL</div><div class="mono" style="font-size:11px;color:'+(state.selPc>100?'#22c55e':'#ef4444')+'">'+(state.selPc===null?'\u2026':state.selPc>100?Math.round(state.selPc/1000)+'K':'NONE')+'</div></div></div></div>';
+      h+='<div class="lbl mono" style="margin-bottom:4px">AGENT INTEL ('+state.selMems.length+')</div><div style="max-height:280px;overflow:auto">';
       if(state.selMems.length===0)h+='<div style="font-size:10px;color:#3a3a3a;padding:12px;text-align:center">No findings yet</div>';
-      state.selMems.forEach(function(m){
-        var c=ac(m.agent);
-        h+='<div class="mem" style="border-left:2px solid '+c+'"><div style="display:flex;justify-content:space-between;margin-bottom:2px"><span class="mem-agent mono" style="color:'+c+'">'+(m.agent||'?').replace(/_/g,' ')+'</span><span class="mem-time mono">'+ago(m.created_at)+'</span></div><div class="mem-text">'+tr(m.observation,140)+'</div></div>';
-      });
+      state.selMems.forEach(function(m){var c=ac(m.agent);h+='<div class="mem" style="border-left:2px solid '+c+'"><div style="display:flex;justify-content:space-between;margin-bottom:2px"><span class="mono" style="font-size:8px;font-weight:700;color:'+c+';text-transform:uppercase;letter-spacing:0.12em">'+(m.agent||'?').replace(/_/g,' ')+'</span><span class="mono" style="font-size:8px;color:#3a3a3a">'+ago(m.created_at)+'</span></div><div style="font-size:11px;color:#888;line-height:1.3">'+tr(m.observation,140)+'</div></div>'});
       h+='</div>';
-    } else {
+    }else{
       h+='<div class="lbl mono" style="margin-bottom:4px">RECENT AGENT ACTIVITY</div><div style="max-height:420px;overflow:auto">';
-      state.mems.forEach(function(m,i){
-        var c=ac(m.agent);
-        h+='<div class="mem" style="border-left:2px solid '+c+';animation:fadeUp .2s ease '+(i*.02)+'s both"><div style="display:flex;justify-content:space-between;margin-bottom:2px"><span class="mem-agent mono" style="color:'+c+'">'+(m.agent||'?').replace(/_/g,' ')+'</span><span class="mem-time mono">'+ago(m.created_at)+'</span></div><div class="mem-text">'+tr(m.observation,140)+'</div></div>';
-      });
-      if(state.mems.length===0)h+='<div style="font-size:10px;color:#3a3a3a;padding:12px">No activity data</div>';
-      h+='</div>';
-    }
-    h+='</div></div>';
+      state.mems.forEach(function(m){var c=ac(m.agent);h+='<div class="mem" style="border-left:2px solid '+c+'"><div style="display:flex;justify-content:space-between;margin-bottom:2px"><span class="mono" style="font-size:8px;font-weight:700;color:'+c+';text-transform:uppercase;letter-spacing:0.12em">'+(m.agent||'?').replace(/_/g,' ')+'</span><span class="mono" style="font-size:8px;color:#3a3a3a">'+ago(m.created_at)+'</span></div><div style="font-size:11px;color:#888;line-height:1.3">'+tr(m.observation,140)+'</div></div>'});
+      if(state.mems.length===0)h+='<div style="font-size:10px;color:#3a3a3a;padding:12px">No activity</div>';h+='</div>';
+    }h+='</div></div>';
   }
 
-  // FEED TAB
+  // FEED
   else if(state.tab==='feed'){
     h+='<div class="lbl mono" style="margin-bottom:6px">ALL AGENT INTELLIGENCE</div><div class="grid2" style="gap:4px">';
-    state.mems.forEach(function(m){var c=ac(m.agent);h+='<div class="mem" style="border-left:2px solid '+c+'"><div style="display:flex;justify-content:space-between;margin-bottom:2px"><span class="mem-agent mono" style="color:'+c+'">'+(m.agent||'?').replace(/_/g,' ')+'</span><span class="mem-time mono">'+ago(m.created_at)+'</span></div><div class="mem-text">'+tr(m.observation,140)+'</div></div>'});
+    state.mems.forEach(function(m){var c=ac(m.agent);h+='<div class="mem" style="border-left:2px solid '+c+'"><div style="display:flex;justify-content:space-between;margin-bottom:2px"><span class="mono" style="font-size:8px;font-weight:700;color:'+c+';text-transform:uppercase;letter-spacing:0.12em">'+(m.agent||'?').replace(/_/g,' ')+'</span><span class="mono" style="font-size:8px;color:#3a3a3a">'+ago(m.created_at)+'</span></div><div style="font-size:11px;color:#888;line-height:1.3">'+tr(m.observation,140)+'</div></div>'});
     h+='</div>';
   }
 
-  // RIVALS TAB
+  // RIVALS
   else if(state.tab==='rivals'){
     h+='<div class="lbl mono" style="margin-bottom:6px">COMPETITIVE LANDSCAPE ('+state.comps.length+')</div><div class="grid2" style="gap:5px">';
-    state.comps.forEach(function(c){var tc=TC[c.threat_level]||'#64748b';
-      h+='<div class="threat" style="border-left:3px solid '+tc+'"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px"><span style="font-size:12px;font-weight:600;color:#ccc">'+c.competitor_name+'</span>'+(c.threat_level?'<span class="mono" style="font-size:7px;padding:1px 4px;border-radius:2px;background:'+tc+'15;color:'+tc+';font-weight:700;text-transform:uppercase">'+c.threat_level+'</span>':'')+'</div>'+(c.strengths?'<div style="font-size:10px;color:#777;line-height:1.25">'+tr(c.strengths,100)+'</div>':'')+'</div>'});
-    if(state.comps.length===0)h+='<div style="text-align:center;padding:24px;color:#333;font-size:10px">No competitor data</div>';
-    h+='</div>';
+    state.comps.forEach(function(c){var tc=TC[c.threat_level]||'#64748b';h+='<div class="threat" style="border-left:3px solid '+tc+'"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px"><span style="font-size:12px;font-weight:600;color:#ccc">'+c.competitor_name+'</span>'+(c.threat_level?'<span class="mono" style="font-size:7px;padding:1px 4px;border-radius:2px;background:'+tc+'15;color:'+tc+';font-weight:700;text-transform:uppercase">'+c.threat_level+'</span>':'')+'</div>'+(c.strengths?'<div style="font-size:10px;color:#777;line-height:1.25">'+tr(c.strengths,100)+'</div>':'')+'</div>'});
+    if(state.comps.length===0)h+='<div style="text-align:center;padding:24px;color:#333;font-size:10px">No competitor data</div>';h+='</div>';
   }
 
-  // CRM TAB
+  // CRM
   else if(state.tab==='crm'){
     h+='<div class="lbl mono" style="margin-bottom:6px">CONTACTS ('+state.cts.length+')</div><div class="grid3">';
-    state.cts.forEach(function(c){var pc=PC[c.priority]||'#555';
-      h+='<div class="contact"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px"><span style="font-size:11px;font-weight:600;color:#ccc">'+c.contact_name+'</span><span style="width:6px;height:6px;border-radius:50%;background:'+pc+';display:inline-block"></span></div>'+(c.title?'<div style="font-size:9px;color:#777">'+tr(c.title,35)+'</div>':'')+(c.organization?'<div style="font-size:9px;color:#555">'+tr(c.organization,30)+'</div>':'')+(c.contact_type?'<span style="font-size:7px;padding:1px 4px;border-radius:2px;background:rgba(255,255,255,0.04);color:#666;margin-top:2px;display:inline-block;text-transform:uppercase">'+c.contact_type.replace(/_/g,' ')+'</span>':'')+'</div>'});
-    if(state.cts.length===0)h+='<div style="text-align:center;padding:24px;color:#333;font-size:10px">No contacts</div>';
-    h+='</div>';
+    state.cts.forEach(function(c){var pc=PC[c.priority]||'#555';h+='<div class="contact"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px"><span style="font-size:11px;font-weight:600;color:#ccc">'+c.contact_name+'</span><span style="width:6px;height:6px;border-radius:50%;background:'+pc+';display:inline-block"></span></div>'+(c.title?'<div style="font-size:9px;color:#777">'+tr(c.title,35)+'</div>':'')+(c.organization?'<div style="font-size:9px;color:#555">'+tr(c.organization,30)+'</div>':'')+(c.contact_type?'<span style="font-size:7px;padding:1px 4px;border-radius:2px;background:rgba(255,255,255,0.04);color:#666;margin-top:2px;display:inline-block;text-transform:uppercase">'+c.contact_type.replace(/_/g,' ')+'</span>':'')+'</div>'});
+    if(state.cts.length===0)h+='<div style="text-align:center;padding:24px;color:#333;font-size:10px">No contacts</div>';h+='</div>';
+  }
+
+  // STRATEGY (Phase 3)
+  else if(state.tab==='p3'){
+    h+='<div class="lbl mono" style="margin-bottom:6px">STRATEGIC INTELLIGENCE \u2014 PHASE 3 AGENTS</div>';
+    if(!state.p3||!state.p3.categories){
+      h+='<div style="font-size:11px;color:#555;padding:12px">Phase 3 data loading from /api/phase3...</div>';
+    }else{
+      var cats=state.p3.categories;
+      var order=['disaster','contracts','regulatory','budget','analytics','teaming','agencies','growth'];
+      var colors={disaster:'#ef4444',contracts:'#f97316',regulatory:'#ec4899',budget:'#84cc16',analytics:'#eab308',teaming:'#a855f7',agencies:'#0891b2',growth:'#22c55e'};
+      h+='<div class="grid2" style="gap:8px">';
+      order.forEach(function(k){
+        var cat=cats[k];if(!cat||cat.count===0)return;
+        var cc=colors[k]||'#64748b';
+        h+='<div class="p3card" style="border-left:3px solid '+cc+'">';
+        h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-size:12px;font-weight:600;color:#ccc">'+cat.label+'</span><span class="mono" style="font-size:8px;padding:1px 4px;border-radius:2px;background:'+cc+'15;color:'+cc+';font-weight:700">'+cat.count+'</span></div>';
+        cat.data.slice(0,2).forEach(function(d){
+          h+='<div style="font-size:10px;color:#777;line-height:1.3;margin-bottom:4px;padding-left:8px;border-left:1px solid rgba(255,255,255,0.06)">'+tr(d.obs,200)+'</div>';
+        });
+        h+='</div>';
+      });
+      h+='</div>';
+    }
   }
 
   h+='</div>';
   h+='<div class="footer"><span class="mono">HGI GLOBAL \u00B7 EST. 1931</span><span class="mono">'+new Date().toLocaleTimeString()+'</span></div>';
   a.innerHTML=h;
 }
-
-// Boot
-loadData();
-// Auto-refresh every 5 minutes
-setInterval(loadData,300000);
+loadData();setInterval(loadData,300000);
 </script>
 </body>
 </html>
