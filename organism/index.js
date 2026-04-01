@@ -1270,16 +1270,17 @@ if (url.startsWith('/api/compliance-matrix')) {
     if (!opp) { res.writeHead(404); res.end(JSON.stringify({error:'not found'})); return; }
 
     // RFP GATE: compliance matrix requires actual solicitation text
-    var hasRfp = (opp.rfp_text && opp.rfp_text.trim().length > 200) || opp.rfp_document_retrieved === true;
+    var hasRfp = opp.rfp_document_retrieved === true && opp.rfp_text && opp.rfp_text.trim().length > 200;
     if (!hasRfp) {
       res.writeHead(400); res.end(JSON.stringify({
         error: 'No RFP/SOQ document available. Compliance matrix requires an actual solicitation to extract requirements from.',
         opportunity: opp.title,
-        suggestion: opp.stage === 'pursuing' ? 'Upload the RFP document first, or mark as unsolicited.' : 'This appears to be an unsolicited opportunity — compliance matrix is not applicable.'
+        rfp_document_retrieved: opp.rfp_document_retrieved || false,
+        suggestion: 'Upload the RFP/SOQ document first. For unsolicited proposals, compliance matrix is not applicable.'
       })); return;
     }
 
-    var rfpSource = (opp.rfp_text && opp.rfp_text.trim().length > 200) ? opp.rfp_text : (opp.scope_analysis || opp.description || '');
+    var rfpSource = opp.rfp_text;
 
     var D = String.fromCharCode(36);
     var cmPrompt = 'Extract EVERY requirement from this RFP/SOQ and produce a compliance matrix.\n\n' +
@@ -1354,16 +1355,17 @@ if (url.startsWith('/api/rate-table')) {
     if (!opp) { res.writeHead(404); res.end(JSON.stringify({error:'not found'})); return; }
 
     // RFP GATE: rate table requires actual solicitation to map positions
-    var hasRfp = (opp.rfp_text && opp.rfp_text.trim().length > 200) || opp.rfp_document_retrieved === true;
+    var hasRfp = opp.rfp_document_retrieved === true && opp.rfp_text && opp.rfp_text.trim().length > 200;
     if (!hasRfp) {
       res.writeHead(400); res.end(JSON.stringify({
         error: 'No RFP/SOQ document available. Rate table requires an actual solicitation to map required positions.',
         opportunity: opp.title,
+        rfp_document_retrieved: opp.rfp_document_retrieved || false,
         suggestion: 'Upload the RFP document first. For unsolicited proposals, staffing is defined by HGI, not extracted from a solicitation.'
       })); return;
     }
 
-    var rfpSource = (opp.rfp_text && opp.rfp_text.trim().length > 200) ? opp.rfp_text : (opp.scope_analysis || opp.description || '');
+    var rfpSource = opp.rfp_text;
     var finMems = await supabase.from('organism_memory').select('agent,observation')
       .eq('opportunity_id', rtId)
       .or('agent.ilike.%financial%,agent.ilike.%price%,agent.ilike.%cost%')
@@ -1539,7 +1541,7 @@ if (url.startsWith('/api/proposal-bundle')) {
       log('PROPOSAL BUNDLE: Processing ' + (opp.title || '').slice(0, 50));
 
       // Check if RFP/SOQ is available — determines which steps to run
-      var hasRfp = (opp.rfp_text && opp.rfp_text.trim().length > 200) || opp.rfp_document_retrieved === true;
+      var hasRfp = opp.rfp_document_retrieved === true && opp.rfp_text && opp.rfp_text.trim().length > 200;
       if (!hasRfp) {
         log('PROPOSAL BUNDLE: No RFP — unsolicited opportunity. Skipping compliance matrix and rate table.');
         results.compliance_matrix = 'SKIPPED (unsolicited — no RFP)';
