@@ -977,6 +977,171 @@ if (url.startsWith('/api/extract-budgets')) {
   return;
 }
 
+// === EXTRACT REGULATORY CHANGES — /api/extract-regulatory ===
+if (url.startsWith('/api/extract-regulatory')) {
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  try {
+    var regMems = await supabase.from('organism_memory')
+      .select('id,agent,observation,created_at')
+      .eq('agent', 'regulatory_monitor')
+      .order('created_at', { ascending: false })
+      .limit(10);
+    var regRecords = regMems.data || [];
+    var regTotal = 0;
+    for (var ri = 0; ri < regRecords.length; ri++) {
+      var rm = regRecords[ri];
+      if (!rm.observation || rm.observation.length < 200) continue;
+      try {
+        var regResp = await claudeCall('Extract regulatory changes. Return ONLY JSON array.',
+          'Extract ALL regulatory changes, policy updates, and rule modifications mentioned. JSON array with: regulation_name, agency_source, effective_date, category (fema_policy/state_procurement/cdbg_dr/hud/insurance/workforce), impact_level (critical/high/medium/low), affected_verticals (comma-separated), summary, hgi_action_required.\n\n' + (rm.observation || '').substring(0, 6000),
+          4000, { model: 'claude-haiku-4-5-20251001' });
+        var regMatch = regResp.match(/\[[\s\S]*\]/);
+        if (!regMatch) continue;
+        var regs = JSON.parse(regMatch[0]);
+        for (var rr = 0; rr < regs.length; rr++) {
+          var reg = regs[rr];
+          if (!reg.regulation_name || reg.regulation_name.length < 3) continue;
+          var regEx = await supabase.from('regulatory_changes').select('id').eq('regulation_name', reg.regulation_name).limit(1);
+          var regRec = { regulation_name: reg.regulation_name, agency_source: reg.agency_source, effective_date: reg.effective_date, category: reg.category, impact_level: reg.impact_level || 'medium', affected_verticals: reg.affected_verticals, summary: reg.summary, hgi_action_required: reg.hgi_action_required, source_agent: 'regulatory_extract', updated_at: new Date().toISOString() };
+          if (regEx.data && regEx.data.length > 0) {
+            await supabase.from('regulatory_changes').update(regRec).eq('id', regEx.data[0].id);
+          } else {
+            regRec.id = 'reg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+            regRec.created_at = new Date().toISOString();
+            await supabase.from('regulatory_changes').insert(regRec);
+          }
+          regTotal++;
+        }
+      } catch (re) { log('Regulatory extract error: ' + re.message); }
+    }
+    res.end(JSON.stringify({ extracted: regTotal, from_memories: regRecords.length }));
+  } catch (e) { res.end(JSON.stringify({ error: e.message })); }
+  return;
+}
+
+// === EXTRACT TEAMING PARTNERS — /api/extract-teaming ===
+if (url.startsWith('/api/extract-teaming')) {
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  try {
+    var teamMems = await supabase.from('organism_memory')
+      .select('id,agent,observation,created_at')
+      .ilike('agent', '%teaming%')
+      .order('created_at', { ascending: false })
+      .limit(10);
+    var subMems = await supabase.from('organism_memory')
+      .select('id,agent,observation,created_at')
+      .ilike('agent', '%subcontractor%')
+      .order('created_at', { ascending: false })
+      .limit(10);
+    var allTeamMems = (teamMems.data || []).concat(subMems.data || []);
+    var teamTotal = 0;
+    for (var ti = 0; ti < allTeamMems.length; ti++) {
+      var tm = allTeamMems[ti];
+      if (!tm.observation || tm.observation.length < 200) continue;
+      try {
+        var teamResp = await claudeCall('Extract teaming partners and subcontractors. Return ONLY JSON array.',
+          'Extract ALL potential teaming partners, subcontractors, and joint venture candidates mentioned. JSON array with: partner_name, capability, location, certifications (DBE/MBE/SBE/8a/HUBZone etc), past_teaming (previous work with HGI or others), verticals (comma-separated), fit_score (strong/medium/speculative), contact_info, notes.\n\n' + (tm.observation || '').substring(0, 6000),
+          4000, { model: 'claude-haiku-4-5-20251001' });
+        var teamMatch = teamResp.match(/\[[\s\S]*\]/);
+        if (!teamMatch) continue;
+        var partners = JSON.parse(teamMatch[0]);
+        for (var tp = 0; tp < partners.length; tp++) {
+          var ptr = partners[tp];
+          if (!ptr.partner_name || ptr.partner_name.length < 3) continue;
+          var teamEx = await supabase.from('teaming_partners').select('id').eq('partner_name', ptr.partner_name).limit(1);
+          var teamRec = { partner_name: ptr.partner_name, capability: ptr.capability, location: ptr.location, certifications: ptr.certifications, past_teaming: ptr.past_teaming, verticals: ptr.verticals, fit_score: ptr.fit_score || 'medium', contact_info: ptr.contact_info, notes: ptr.notes, source_agent: 'teaming_extract', updated_at: new Date().toISOString() };
+          if (teamEx.data && teamEx.data.length > 0) {
+            await supabase.from('teaming_partners').update(teamRec).eq('id', teamEx.data[0].id);
+          } else {
+            teamRec.id = 'team-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+            teamRec.created_at = new Date().toISOString();
+            await supabase.from('teaming_partners').insert(teamRec);
+          }
+          teamTotal++;
+        }
+      } catch (te) { log('Teaming extract error: ' + te.message); }
+    }
+    res.end(JSON.stringify({ extracted: teamTotal, from_memories: allTeamMems.length }));
+  } catch (e) { res.end(JSON.stringify({ error: e.message })); }
+  return;
+}
+
+// === EXTRACT AGENCY PROFILES — /api/extract-agencies ===
+if (url.startsWith('/api/extract-agencies')) {
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  try {
+    var agMems = await supabase.from('organism_memory')
+      .select('id,agent,observation,created_at')
+      .eq('agent', 'agency_profile_agent')
+      .order('created_at', { ascending: false })
+      .limit(10);
+    var agRecords = agMems.data || [];
+    var agTotal = 0;
+    for (var ai = 0; ai < agRecords.length; ai++) {
+      var am = agRecords[ai];
+      if (!am.observation || am.observation.length < 200) continue;
+      try {
+        var agResp = await claudeCall('Extract agency profiles. Return ONLY JSON array.',
+          'Extract ALL agency/client profiles mentioned. JSON array with: agency_name, state, agency_type (parish/city/state_agency/housing_authority/school_board/federal), annual_budget, key_contacts, procurement_process, incumbent_contractors, hgi_relationship (active/warm/cold/none), hgi_history, verticals (comma-separated), notes.\n\n' + (am.observation || '').substring(0, 6000),
+          4000, { model: 'claude-haiku-4-5-20251001' });
+        var agMatch = agResp.match(/\[[\s\S]*\]/);
+        if (!agMatch) continue;
+        var agencies = JSON.parse(agMatch[0]);
+        for (var aa = 0; aa < agencies.length; aa++) {
+          var ag = agencies[aa];
+          if (!ag.agency_name || ag.agency_name.length < 3) continue;
+          var agEx = await supabase.from('agency_profiles').select('id').eq('agency_name', ag.agency_name).limit(1);
+          var agRec = { agency_name: ag.agency_name, state: ag.state, agency_type: ag.agency_type, annual_budget: ag.annual_budget, key_contacts: ag.key_contacts, procurement_process: ag.procurement_process, incumbent_contractors: ag.incumbent_contractors, hgi_relationship: ag.hgi_relationship || 'none', hgi_history: ag.hgi_history, verticals: ag.verticals, notes: ag.notes, source_agent: 'agency_extract', updated_at: new Date().toISOString() };
+          if (agEx.data && agEx.data.length > 0) {
+            await supabase.from('agency_profiles').update(agRec).eq('id', agEx.data[0].id);
+          } else {
+            agRec.id = 'ag-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+            agRec.created_at = new Date().toISOString();
+            await supabase.from('agency_profiles').insert(agRec);
+          }
+          agTotal++;
+        }
+      } catch (ae) { log('Agency extract error: ' + ae.message); }
+    }
+    res.end(JSON.stringify({ extracted: agTotal, from_memories: agRecords.length }));
+  } catch (e) { res.end(JSON.stringify({ error: e.message })); }
+  return;
+}
+
+// === READ ENDPOINTS FOR PHASE 3 STRUCTURED TABLES ===
+if (url.startsWith('/api/regulatory')) {
+  res.writeHead(200, corsJ);
+  try {
+    var regData = await supabase.from('regulatory_changes').select('*').order('updated_at', { ascending: false }).limit(100);
+    res.end(JSON.stringify(regData.data || []));
+  } catch(e) { res.end(JSON.stringify({ error: e.message })); }
+  return;
+}
+if (url.startsWith('/api/teaming')) {
+  res.writeHead(200, corsJ);
+  try {
+    var teamData = await supabase.from('teaming_partners').select('*').order('updated_at', { ascending: false }).limit(100);
+    res.end(JSON.stringify(teamData.data || []));
+  } catch(e) { res.end(JSON.stringify({ error: e.message })); }
+  return;
+}
+if (url.startsWith('/api/agencies')) {
+  res.writeHead(200, corsJ);
+  try {
+    var agData = await supabase.from('agency_profiles').select('*').order('updated_at', { ascending: false }).limit(100);
+    res.end(JSON.stringify(agData.data || []));
+  } catch(e) { res.end(JSON.stringify({ error: e.message })); }
+  return;
+}
+if (url.startsWith('/api/recompetes')) {
+  res.writeHead(200, corsJ);
+  try {
+    var rcData = await supabase.from('recompete_tracker').select('*').order('last_updated', { ascending: false }).limit(100);
+    res.end(JSON.stringify(rcData.data || []));
+  } catch(e) { res.end(JSON.stringify({ error: e.message })); }
+  return;
+}
+
 // === PHASE 3 INTELLIGENCE SUMMARY — /api/phase3 ===
 if (url.startsWith('/api/phase3')) {
   res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1014,7 +1179,18 @@ if (url.startsWith('/api/phase3')) {
       });
       categories[k].count = categories[k].data.length;
     });
-    res.end(JSON.stringify({ total: p3mems.length, categories: categories }));
+    // Fetch structured table counts
+    var structuredCounts = {};
+    try {
+      var dcnt = await supabase.from('disaster_alerts').select('id', { count: 'exact', head: true });
+      var bcnt = await supabase.from('budget_cycles').select('id', { count: 'exact', head: true });
+      var rcnt = await supabase.from('recompete_tracker').select('id', { count: 'exact', head: true });
+      var rgcnt = await supabase.from('regulatory_changes').select('id', { count: 'exact', head: true });
+      var tcnt = await supabase.from('teaming_partners').select('id', { count: 'exact', head: true });
+      var acnt = await supabase.from('agency_profiles').select('id', { count: 'exact', head: true });
+      structuredCounts = { disaster_alerts: dcnt.count || 0, budget_cycles: bcnt.count || 0, recompete_tracker: rcnt.count || 0, regulatory_changes: rgcnt.count || 0, teaming_partners: tcnt.count || 0, agency_profiles: acnt.count || 0 };
+    } catch(sc) { structuredCounts = { error: sc.message }; }
+    res.end(JSON.stringify({ total: p3mems.length, categories: categories, structured_tables: structuredCounts }));
   } catch(e) { res.end(JSON.stringify({ error: e.message })); }
   return;
 }
@@ -3660,6 +3836,90 @@ async function runSession(trigger) {
 
       } else { log('CRM AUTO-EXTRACT: No new relationship memories in last 24h'); }
     } catch(crmAutoErr) { log('CRM AUTO-EXTRACT failed: '+crmAutoErr.message); }
+
+    // === REGULATORY AUTO-EXTRACT ===
+    try {
+      var recentReg = await supabase.from('organism_memory').select('id,observation').eq('agent','regulatory_monitor').gte('created_at', new Date(Date.now()-24*60*60*1000).toISOString()).order('created_at',{ascending:false}).limit(5);
+      if (recentReg.data && recentReg.data.length > 0) {
+        var regAutoTotal = 0;
+        for (var rai = 0; rai < recentReg.data.length; rai++) {
+          var ram = recentReg.data[rai];
+          if (!ram.observation || ram.observation.length < 200) continue;
+          try {
+            var raResp = await claudeCall('Extract regulatory changes. JSON array only.', 'Extract regulatory changes. JSON array: regulation_name, agency_source, category (fema_policy/state_procurement/cdbg_dr/hud/insurance/workforce), impact_level (critical/high/medium/low), affected_verticals, summary.\n\n' + (ram.observation || '').substring(0, 4000), 3000, { model: 'claude-haiku-4-5-20251001' });
+            var raMatch = raResp.match(/\[[\s\S]*\]/);
+            if (!raMatch) continue;
+            var raRegs = JSON.parse(raMatch[0]);
+            for (var rar = 0; rar < raRegs.length; rar++) {
+              var ra2 = raRegs[rar];
+              if (!ra2.regulation_name) continue;
+              var ra2Ex = await supabase.from('regulatory_changes').select('id').eq('regulation_name', ra2.regulation_name).limit(1);
+              var ra2Rec = { regulation_name: ra2.regulation_name, agency_source: ra2.agency_source, category: ra2.category, impact_level: ra2.impact_level || 'medium', affected_verticals: ra2.affected_verticals, summary: ra2.summary, source_agent: 'regulatory_auto_extract', updated_at: new Date().toISOString() };
+              if (ra2Ex.data && ra2Ex.data.length > 0) { await supabase.from('regulatory_changes').update(ra2Rec).eq('id', ra2Ex.data[0].id); }
+              else { ra2Rec.id = 'reg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6); ra2Rec.created_at = new Date().toISOString(); await supabase.from('regulatory_changes').insert(ra2Rec); }
+              regAutoTotal++;
+            }
+          } catch (rae) { log('REGULATORY AUTO-EXTRACT error: ' + rae.message); }
+        }
+        log('REGULATORY AUTO-EXTRACT: ' + regAutoTotal + ' changes from ' + recentReg.data.length + ' memories');
+      } else { log('REGULATORY AUTO-EXTRACT: No new memories in last 24h'); }
+    } catch (regAutoErr) { log('REGULATORY AUTO-EXTRACT failed: ' + regAutoErr.message); }
+
+    // === TEAMING AUTO-EXTRACT ===
+    try {
+      var recentTeam = await supabase.from('organism_memory').select('id,observation').in('agent',['teaming_agent','subcontractor_db']).gte('created_at', new Date(Date.now()-24*60*60*1000).toISOString()).order('created_at',{ascending:false}).limit(5);
+      if (recentTeam.data && recentTeam.data.length > 0) {
+        var teamAutoTotal = 0;
+        for (var tai = 0; tai < recentTeam.data.length; tai++) {
+          var tam = recentTeam.data[tai];
+          if (!tam.observation || tam.observation.length < 200) continue;
+          try {
+            var taResp = await claudeCall('Extract teaming partners. JSON array only.', 'Extract teaming partners and subcontractors. JSON array: partner_name, capability, location, certifications, verticals, fit_score (strong/medium/speculative), notes.\n\n' + (tam.observation || '').substring(0, 4000), 3000, { model: 'claude-haiku-4-5-20251001' });
+            var taMatch = taResp.match(/\[[\s\S]*\]/);
+            if (!taMatch) continue;
+            var taParts = JSON.parse(taMatch[0]);
+            for (var tap = 0; tap < taParts.length; tap++) {
+              var ta2 = taParts[tap];
+              if (!ta2.partner_name) continue;
+              var ta2Ex = await supabase.from('teaming_partners').select('id').eq('partner_name', ta2.partner_name).limit(1);
+              var ta2Rec = { partner_name: ta2.partner_name, capability: ta2.capability, location: ta2.location, certifications: ta2.certifications, verticals: ta2.verticals, fit_score: ta2.fit_score || 'medium', notes: ta2.notes, source_agent: 'teaming_auto_extract', updated_at: new Date().toISOString() };
+              if (ta2Ex.data && ta2Ex.data.length > 0) { await supabase.from('teaming_partners').update(ta2Rec).eq('id', ta2Ex.data[0].id); }
+              else { ta2Rec.id = 'team-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6); ta2Rec.created_at = new Date().toISOString(); await supabase.from('teaming_partners').insert(ta2Rec); }
+              teamAutoTotal++;
+            }
+          } catch (tae) { log('TEAMING AUTO-EXTRACT error: ' + tae.message); }
+        }
+        log('TEAMING AUTO-EXTRACT: ' + teamAutoTotal + ' partners from ' + recentTeam.data.length + ' memories');
+      } else { log('TEAMING AUTO-EXTRACT: No new memories in last 24h'); }
+    } catch (teamAutoErr) { log('TEAMING AUTO-EXTRACT failed: ' + teamAutoErr.message); }
+
+    // === AGENCY PROFILE AUTO-EXTRACT ===
+    try {
+      var recentAg = await supabase.from('organism_memory').select('id,observation').eq('agent','agency_profile_agent').gte('created_at', new Date(Date.now()-24*60*60*1000).toISOString()).order('created_at',{ascending:false}).limit(5);
+      if (recentAg.data && recentAg.data.length > 0) {
+        var agAutoTotal = 0;
+        for (var aai = 0; aai < recentAg.data.length; aai++) {
+          var aam = recentAg.data[aai];
+          if (!aam.observation || aam.observation.length < 200) continue;
+          try {
+            var aaResp = await claudeCall('Extract agency profiles. JSON array only.', 'Extract agency/client profiles. JSON array: agency_name, state, agency_type (parish/city/state_agency/housing_authority/school_board/federal), annual_budget, incumbent_contractors, hgi_relationship (active/warm/cold/none), hgi_history, verticals, notes.\n\n' + (aam.observation || '').substring(0, 4000), 3000, { model: 'claude-haiku-4-5-20251001' });
+            var aaMatch = aaResp.match(/\[[\s\S]*\]/);
+            if (!aaMatch) continue;
+            var aaAgs = JSON.parse(aaMatch[0]);
+            for (var aag = 0; aag < aaAgs.length; aag++) {
+              var ag2 = aaAgs[aag];
+              if (!ag2.agency_name) continue;
+              var ag2Ex = await supabase.from('agency_profiles').select('id').eq('agency_name', ag2.agency_name).limit(1);
+              var ag2Rec = { agency_name: ag2.agency_name, state: ag2.state, agency_type: ag2.agency_type, annual_budget: ag2.annual_budget, incumbent_contractors: ag2.incumbent_contractors, hgi_relationship: ag2.hgi_relationship || 'none', hgi_history: ag2.hgi_history, verticals: ag2.verticals, notes: ag2.notes, source_agent: 'agency_auto_extract', updated_at: new Date().toISOString() };
+              if (ag2Ex.data && ag2Ex.data.length > 0) { await supabase.from('agency_profiles').update(ag2Rec).eq('id', ag2Ex.data[0].id); }
+              else { ag2Rec.id = 'ag-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6); ag2Rec.created_at = new Date().toISOString(); await supabase.from('agency_profiles').insert(ag2Rec); }
+              agAutoTotal++;
+            }
+          } catch (aae) { log('AGENCY AUTO-EXTRACT error: ' + aae.message); }
+        }
+        log('AGENCY AUTO-EXTRACT: ' + agAutoTotal + ' profiles from ' + recentAg.data.length + ' memories');
+      } else { log('AGENCY AUTO-EXTRACT: No new memories in last 24h'); }
+    } catch (agAutoErr) { log('AGENCY AUTO-EXTRACT failed: ' + agAutoErr.message); }
 
   } catch (e) {
     log('SESSION ERROR: ' + e.message);
