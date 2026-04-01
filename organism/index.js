@@ -496,7 +496,10 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         '- Document must look like it came from the President with no visible AI involvement\n' +
         '- HGI was established in 1931 (not 1929). SAM UEI: DL4SJEVKZ6H4 (verify exact characters)\n' +
         '- Do NOT impose section numbering (1.0, 2.0) unless the RFP specifically uses numbered sections. Match the RFP structure exactly.\n' +
-        '- Do NOT include a Table of Contents unless the RFP requires one. If included, build it as real content with section names and approximate page numbers — not a placeholder.';
+        '- Do NOT include a Table of Contents unless the RFP requires one. If included, build it as real content with section names and approximate page numbers — not a placeholder.\n' +
+        '- Do NOT generate ASCII art org charts or text-based organizational diagrams in the proposal body. Instead write "See Organizational Chart (Appendix A)" — the system generates a professional graphic separately.\n' +
+        '- HGI phone: (504) 681-6135. Email: info@hgi-global.com. Use these when contact info is needed — do NOT use placeholder numbers like 000-0000.\n' +
+        '- HGI has approximately 50 team members across offices in Kenner (HQ), Shreveport, Alexandria, and New Orleans. Do NOT cite "67 full-time employees and 43 contractors" — that is outdated.';
 
       log('PROPOSAL ENGINE: Calling Claude Opus 4.6 (128K max) with ' + proposalPrompt.length + ' char prompt');
 
@@ -865,7 +868,7 @@ if (url.startsWith('/api/proposal-doc')) {
                 appendixChildren.push(new Paragraph({
                   alignment: AlignmentType.CENTER,
                   spacing: { after: 200 },
-                  children: [new ImageRun({ data: orgPngBuf, transformation: { width: 550, height: 400 }, type: 'png' })]
+                  children: [new ImageRun({ data: orgPngBuf, transformation: { width: 620, height: 480 }, type: 'png' })]
                 }));
               }
             } catch(pngErr) { log('PROPOSAL DOC: Org chart PNG failed — ' + pngErr.message); }
@@ -894,7 +897,7 @@ if (url.startsWith('/api/proposal-doc')) {
                   appendixChildren.push(new Paragraph({
                     alignment: AlignmentType.CENTER,
                     spacing: { after: 200 },
-                    children: [new ImageRun({ data: methPngBuf, transformation: { width: 600, height: 350 }, type: 'png' })]
+                    children: [new ImageRun({ data: methPngBuf, transformation: { width: 640, height: 380 }, type: 'png' })]
                   }));
                 }
               } catch(methErr) { log('PROPOSAL DOC: Methodology PNG failed — ' + methErr.message); }
