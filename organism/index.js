@@ -1197,6 +1197,106 @@ if (url.startsWith('/api/org-chart')) {
   return;
 }
 
+// === PROPOSAL BUNDLE — /api/proposal-bundle ===
+// One call to generate EVERYTHING: compliance matrix, rate table, org chart, proposal content, Word doc
+if (url.startsWith('/api/proposal-bundle')) {
+  var pbId = (req.url.split('?id=')[1]||'').split('&')[0];
+  if (!pbId) { res.writeHead(400); res.end(JSON.stringify({error:'id required'})); return; }
+
+  log('PROPOSAL BUNDLE: Starting full pipeline for ' + pbId);
+  res.writeHead(200, {'Content-Type':'application/json'});
+  res.end(JSON.stringify({started:true, id:pbId, steps:['compliance-matrix','rate-table','org-chart','produce-proposal','proposal-doc']}));
+
+  setImmediate(async () => {
+    var results = {};
+    try {
+      var pbOpp = await supabase.from('opportunities').select('*').eq('id', pbId).single();
+      var opp = pbOpp.data;
+      if (!opp) { log('PROPOSAL BUNDLE: Opp not found ' + pbId); return; }
+      log('PROPOSAL BUNDLE: Processing ' + (opp.title || '').slice(0, 50));
+
+      // Step 1: Compliance Matrix
+      log('PROPOSAL BUNDLE: Step 1/5 — Compliance Matrix');
+      try {
+        var cmResp = await fetch('http://localhost:' + (process.env.PORT || 8080) + '/api/compliance-matrix?id=' + pbId);
+        results.compliance_matrix = cmResp.ok ? 'OK' : 'FAILED (' + cmResp.status + ')';
+      } catch(e) { results.compliance_matrix = 'ERROR: ' + e.message; }
+
+      // Step 2: Rate Table
+      log('PROPOSAL BUNDLE: Step 2/5 — Rate Table');
+      try {
+        var rtResp = await fetch('http://localhost:' + (process.env.PORT || 8080) + '/api/rate-table?id=' + pbId);
+        results.rate_table = rtResp.ok ? 'OK' : 'FAILED (' + rtResp.status + ')';
+      } catch(e) { results.rate_table = 'ERROR: ' + e.message; }
+
+      // Step 3: Org Chart
+      log('PROPOSAL BUNDLE: Step 3/5 — Org Chart');
+      try {
+        var ocResp = await fetch('http://localhost:' + (process.env.PORT || 8080) + '/api/org-chart?id=' + pbId);
+        results.org_chart = ocResp.ok ? 'OK' : 'FAILED (' + ocResp.status + ')';
+      } catch(e) { results.org_chart = 'ERROR: ' + e.message; }
+
+      // Step 4: Produce Proposal (Opus — most expensive step)
+      log('PROPOSAL BUNDLE: Step 4/5 — Produce Proposal (Opus)');
+      try {
+        var ppResp = await fetch('http://localhost:' + (process.env.PORT || 8080) + '/api/produce-proposal?id=' + pbId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: pbId })
+        });
+        results.produce_proposal = ppResp.ok ? 'OK (async)' : 'FAILED (' + ppResp.status + ')';
+        // Wait for Opus to finish — check every 15 seconds for up to 5 minutes
+        log('PROPOSAL BUNDLE: Waiting for Opus to complete...');
+        var maxWait = 300000; // 5 min
+        var waited = 0;
+        var interval = 15000; // 15s
+        while (waited < maxWait) {
+          await new Promise(function(r) { setTimeout(r, interval); });
+          waited += interval;
+          var checkOpp = await supabase.from('opportunities').select('capture_action').eq('id', pbId).single();
+          var ca = (checkOpp.data || {}).capture_action || '';
+          if (ca.length > 1000 && ca.indexOf('PROPOSAL DRAFT') > -1) {
+            log('PROPOSAL BUNDLE: Opus complete (' + ca.length + ' chars after ' + (waited/1000) + 's)');
+            break;
+          }
+        }
+        if (waited >= maxWait) {
+          log('PROPOSAL BUNDLE: Opus timed out after 5 minutes');
+          results.produce_proposal = 'TIMEOUT';
+        }
+      } catch(e) { results.produce_proposal = 'ERROR: ' + e.message; }
+
+      // Step 5: Generate Word Doc
+      log('PROPOSAL BUNDLE: Step 5/5 — Word Document');
+      try {
+        var docResp = await fetch('http://localhost:' + (process.env.PORT || 8080) + '/api/proposal-doc?id=' + pbId);
+        if (docResp.ok) {
+          var docBuffer = Buffer.from(await docResp.arrayBuffer());
+          results.proposal_doc = 'OK (' + docBuffer.length + ' bytes)';
+          log('PROPOSAL BUNDLE: Word doc generated — ' + docBuffer.length + ' bytes');
+        } else {
+          results.proposal_doc = 'FAILED (' + docResp.status + ')';
+        }
+      } catch(e) { results.proposal_doc = 'ERROR: ' + e.message; }
+
+      // Write completion memory
+      await supabase.from('organism_memory').insert({
+        agent: 'proposal_bundle',
+        opportunity_id: pbId,
+        observation: 'Full proposal bundle completed for ' + (opp.title || '').slice(0, 50) + '. Results: ' + JSON.stringify(results),
+        memory_type: 'analysis',
+        created_at: new Date().toISOString()
+      });
+
+      log('PROPOSAL BUNDLE: Complete. Results: ' + JSON.stringify(results));
+
+    } catch(e) {
+      log('PROPOSAL BUNDLE ERROR: ' + e.message);
+    }
+  });
+  return;
+}
+
 // Fallthrough — unmatched routes
 if (!res.headersSent) {
   res.writeHead(404, { 'Content-Type': 'application/json' });
