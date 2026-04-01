@@ -599,9 +599,24 @@ if (url.startsWith('/api/proposal-doc')) {
       if (rows.length === 0) return null;
 
       var numCols = rows[0].length;
-      var colWidth = Math.floor(9360 / numCols);
-      var colWidths = [];
-      for (var c = 0; c < numCols; c++) colWidths.push(colWidth);
+      // Content-aware column widths: measure max content length per column
+      var maxLens = [];
+      for (var c = 0; c < numCols; c++) {
+        var maxLen = 0;
+        for (var r = 0; r < rows.length; r++) {
+          var cellLen = (rows[r][c] || '').length;
+          if (cellLen > maxLen) maxLen = cellLen;
+        }
+        maxLens.push(Math.max(maxLen, 5)); // min 5 chars
+      }
+      var totalLen = maxLens.reduce(function(a,b){ return a+b; }, 0);
+      var colWidths = maxLens.map(function(len) {
+        var w = Math.floor((len / totalLen) * 9360);
+        return Math.max(w, 800); // minimum 800 DXA (~0.55 inch)
+      });
+      // Adjust to sum to exactly 9360
+      var widthSum = colWidths.reduce(function(a,b){ return a+b; }, 0);
+      if (widthSum !== 9360) colWidths[colWidths.length - 1] += (9360 - widthSum);
 
       var border = { style: BorderStyle.SINGLE, size: 1, color: 'D1D5DB' };
       var borders = { top: border, bottom: border, left: border, right: border };
@@ -609,7 +624,7 @@ if (url.startsWith('/api/proposal-doc')) {
       var tableRows = rows.map(function(row, rowIdx) {
         var isHeader = rowIdx === 0;
         return new TableRow({
-          children: row.map(function(cell) {
+          children: row.map(function(cell, colIdx) {
             var cellChildren;
             if (isHeader) {
               cellChildren = [new Paragraph({ children: [new TextRun({ text: cell, bold: true, size: 20, font: 'Calibri', color: 'FFFFFF' })] })];
@@ -618,7 +633,7 @@ if (url.startsWith('/api/proposal-doc')) {
             }
             return new TableCell({
               borders: borders,
-              width: { size: colWidth, type: WidthType.DXA },
+              width: { size: colWidths[colIdx] || 1000, type: WidthType.DXA },
               shading: isHeader ? { fill: TABLE_HEADER, type: ShadingType.CLEAR } : (rowIdx % 2 === 0 ? { fill: TABLE_ALT, type: ShadingType.CLEAR } : { fill: 'FFFFFF', type: ShadingType.CLEAR }),
               margins: { top: 60, bottom: 60, left: 100, right: 100 },
               children: cellChildren
@@ -1877,7 +1892,7 @@ function getInterface() {
 }
 
 // === HGI COMPANY CONTEXT (cached across all agent calls) ===
-var HGI = 'SYSTEM CONTEXT: HGI Global (Hammerman & Gainer LLC) is a 95-year-old, 100% minority-owned program management firm in Kenner, Louisiana (2400 Veterans Memorial Blvd, Suite 510, 70062). 8 verticals: Disaster Recovery, TPA/Claims (full P&C), Property Tax Appeals, Workforce/WIOA, Construction Management, Program Administration, Housing/HUD, Grant Management. Past performance: Road Home ' + String.fromCharCode(36) + '67M direct/' + String.fromCharCode(36) + '13B+ program (2006-2015, zero misappropriation), HAP ' + String.fromCharCode(36) + '950M, Restore LA ' + String.fromCharCode(36) + '42.3M, Rebuild NJ ' + String.fromCharCode(36) + '67.7M, TPSD ' + String.fromCharCode(36) + '2.96M (completed 2022-2025), St. John Sheriff ' + String.fromCharCode(36) + '788K, BP GCCF ' + String.fromCharCode(36) + '1.65M. Key staff by role: President, Chairman, CEO, CAO, VP, SVP Claims, 1099 SME (~' + String.fromCharCode(36) + '1B grants/incentives). 67 FT + 43 contractors. SAM UEI: DL4SJEVKZ6H4. Insurance: ' + String.fromCharCode(36) + '5M fidelity/' + String.fromCharCode(36) + '5M E&O/' + String.fromCharCode(36) + '2M GL. Rate card (burdened/hr): Principal ' + String.fromCharCode(36) + '220, Prog Dir ' + String.fromCharCode(36) + '210, SME ' + String.fromCharCode(36) + '200, Sr Grant Mgr ' + String.fromCharCode(36) + '180, Grant Mgr ' + String.fromCharCode(36) + '175, Sr PM ' + String.fromCharCode(36) + '180, PM ' + String.fromCharCode(36) + '155, Grant Writer ' + String.fromCharCode(36) + '145, Arch/Eng ' + String.fromCharCode(36) + '135, Cost Est ' + String.fromCharCode(36) + '125, Appeals ' + String.fromCharCode(36) + '145, Sr Damage ' + String.fromCharCode(36) + '115, Damage ' + String.fromCharCode(36) + '105, Admin ' + String.fromCharCode(36) + '65. HGI has had ONE direct federal contract (PBGC). All other work through state/local agencies. RULES: (1) Every claim must cite source+date. Unverified = say so. (2) Set confidence:high only with source URL. Medium when extrapolating. Inferred when reasoning without sources. (3) Set source_url to specific URL or null. CRITICAL PERSONNEL UPDATE: Geoffrey Brien is NO LONGER with HGI — do not reference him in any proposals, staffing plans, or deliverables. The DR Manager position is currently unfilled. Any organism memories referencing Brien as current staff are OUTDATED. FOUNDING YEAR: HGI was founded in 1931, not 1929. Use 1931 in all documents.';
+var HGI = 'SYSTEM CONTEXT: HGI Global (Hammerman & Gainer LLC) is a 95-year-old, 100% minority-owned program management firm in Kenner, Louisiana (2400 Veterans Memorial Blvd, Suite 510, 70062). 8 verticals: Disaster Recovery, TPA/Claims (full P&C), Property Tax Appeals, Workforce/WIOA, Construction Management, Program Administration, Housing/HUD, Grant Management. Past performance: Road Home ' + String.fromCharCode(36) + '67M direct/' + String.fromCharCode(36) + '13B+ program (2006-2015, zero misappropriation), HAP ' + String.fromCharCode(36) + '950M, Restore LA ' + String.fromCharCode(36) + '42.3M, Rebuild NJ ' + String.fromCharCode(36) + '67.7M, TPSD ' + String.fromCharCode(36) + '2.96M (completed 2022-2025), St. John Sheriff ' + String.fromCharCode(36) + '788K, BP GCCF ' + String.fromCharCode(36) + '1.65M. Key staff by role: President, Chairman, CEO, CAO, VP, SVP Claims, 1099 SME (~' + String.fromCharCode(36) + '1B grants/incentives). ~50 team members across offices in Kenner (HQ), Shreveport, Alexandria, New Orleans. Phone: (504) 681-6135. Email: info@hgi-global.com. SAM UEI: DL4SJEVKZ6H4. Insurance: ' + String.fromCharCode(36) + '5M fidelity/' + String.fromCharCode(36) + '5M E&O/' + String.fromCharCode(36) + '2M GL. Rate card (burdened/hr): Principal ' + String.fromCharCode(36) + '220, Prog Dir ' + String.fromCharCode(36) + '210, SME ' + String.fromCharCode(36) + '200, Sr Grant Mgr ' + String.fromCharCode(36) + '180, Grant Mgr ' + String.fromCharCode(36) + '175, Sr PM ' + String.fromCharCode(36) + '180, PM ' + String.fromCharCode(36) + '155, Grant Writer ' + String.fromCharCode(36) + '145, Arch/Eng ' + String.fromCharCode(36) + '135, Cost Est ' + String.fromCharCode(36) + '125, Appeals ' + String.fromCharCode(36) + '145, Sr Damage ' + String.fromCharCode(36) + '115, Damage ' + String.fromCharCode(36) + '105, Admin ' + String.fromCharCode(36) + '65. HGI has NEVER had a direct federal contract. All work flows through state agencies, local governments, housing authorities, and insurance entities. Do NOT list PBGC or Orleans Parish School Board as past performance without explicit President confirmation. RULES: (1) Every claim must cite source+date. Unverified = say so. (2) Set confidence:high only with source URL. Medium when extrapolating. Inferred when reasoning without sources. (3) Set source_url to specific URL or null. CRITICAL PERSONNEL UPDATE: Geoffrey Brien is NO LONGER with HGI — do not reference him in any proposals, staffing plans, or deliverables. The DR Manager position is currently unfilled. Any organism memories referencing Brien as current staff are OUTDATED. FOUNDING YEAR: HGI was founded in 1931, not 1929. Use 1931 in all documents.';
 
 
 // ============================================================
