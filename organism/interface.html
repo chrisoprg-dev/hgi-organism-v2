@@ -64,7 +64,7 @@ var state={tab:'cop',pipe:[],mems:[],comps:[],cts:[],p3:null,regs:[],teams:[],ag
 async function loadData(){
   state.loading=true;render();
   var p=await sb('/opportunities?status=eq.active&opi_score=gte.60&select=id,title,agency,opi_score,stage,due_date,rfp_document_retrieved&order=opi_score.desc&limit=15');
-  var m=await sb('/organism_memory?memory_type=neq.decision_point&memory_type=neq.compliance_matrix_data&memory_type=neq.rate_table_data&memory_type=neq.org_chart_data&select=agent,observation,created_at,memory_type,opportunity_id&order=created_at.desc&limit=25');
+  var m=await sb('/organism_memory?memory_type=neq.decision_point&memory_type=neq.compliance_matrix_data&memory_type=neq.rate_table_data&memory_type=neq.org_chart_data&select=agent,observation,created_at,memory_type,opportunity_id&order=created_at.desc&limit=50');
   var c=await sb('/competitive_intelligence?select=competitor_name,threat_level,hq_location,strengths&limit=50');
   var ct=await sb('/relationship_graph?select=contact_name,title,organization,contact_type,priority&order=priority.asc&limit=50');
   state.pipe=p||[];state.mems=m||[];state.comps=c||[];state.cts=ct||[];
@@ -89,7 +89,7 @@ async function loadData(){
 
 async function loadOppDetail(idx){
   var opp=state.pipe[idx];state.sel=opp;state.selMems=[];state.selPc=null;state.selReview=null;render();
-  var mems=await sb('/organism_memory?opportunity_id=eq.'+opp.id+'&memory_type=neq.decision_point&memory_type=neq.compliance_matrix_data&memory_type=neq.rate_table_data&memory_type=neq.org_chart_data&select=agent,observation,created_at,memory_type&order=created_at.desc&limit=30');
+  var mems=await sb('/organism_memory?opportunity_id=eq.'+opp.id+'&memory_type=neq.decision_point&memory_type=neq.compliance_matrix_data&memory_type=neq.rate_table_data&memory_type=neq.org_chart_data&select=agent,observation,created_at,memory_type&order=created_at.desc&limit=50');
   var det=await sb('/opportunities?id=eq.'+opp.id+'&select=proposal_content,proposal_review&limit=1');
   state.selMems=mems||[];
   state.selPc=det&&det[0]&&det[0].proposal_content?det[0].proposal_content.length:0;
