@@ -950,6 +950,250 @@ if (url.startsWith('/api/proposal-doc')) {
   }
   return;
 }
+// === COMPLIANCE MATRIX GENERATOR — /api/compliance-matrix ===
+if (url.startsWith('/api/compliance-matrix')) {
+  var cmId = (req.url.split('?id=')[1]||'').split('&')[0];
+  if (!cmId) { res.writeHead(400); res.end(JSON.stringify({error:'id required'})); return; }
+
+  try {
+    log('COMPLIANCE MATRIX: Generating for ' + cmId);
+    var cmOpp = await supabase.from('opportunities').select('*').eq('id', cmId).single();
+    var opp = cmOpp.data;
+    if (!opp) { res.writeHead(404); res.end(JSON.stringify({error:'not found'})); return; }
+
+    var rfpSource = (opp.rfp_text && opp.rfp_text.trim().length > 200) ? opp.rfp_text : (opp.scope_analysis || opp.description || '');
+    if (rfpSource.length < 100) {
+      res.writeHead(400); res.end(JSON.stringify({error:'No RFP text available. Upload the RFP first.'})); return;
+    }
+
+    var D = String.fromCharCode(36);
+    var cmPrompt = 'Extract EVERY requirement from this RFP/SOQ and produce a compliance matrix.\n\n' +
+      '## RFP TEXT\n' + rfpSource.slice(0, 40000) + '\n\n' +
+      '## INSTRUCTIONS\n' +
+      'For each requirement found in the RFP:\n' +
+      '1. Requirement ID (RFP section number if available, otherwise sequential R-001, R-002)\n' +
+      '2. Requirement description (exact text or close paraphrase)\n' +
+      '3. Category: MANDATORY | DESIRABLE | INFORMATIONAL\n' +
+      '4. Response location: which section of the proposal addresses it\n' +
+      '5. Compliance status: COMPLIANT | PARTIAL | ACTION_REQUIRED\n' +
+      '6. Notes: what HGI needs to do or provide\n\n' +
+      'Also extract:\n' +
+      '- All required exhibits, attachments, and forms\n' +
+      '- Submission format requirements (font, spacing, page limits)\n' +
+      '- Required certifications or insurance docs\n' +
+      '- Evaluation criteria with point values\n\n' +
+      'Return as JSON with this structure:\n' +
+      '{"requirements":[{"id":"","description":"","category":"","response_section":"","status":"","notes":""}],' +
+      '"exhibits":[{"name":"","required":true,"notes":""}],' +
+      '"format_requirements":{"font":"","spacing":"","page_limit":"","copies":""},' +
+      '"eval_criteria":[{"criterion":"","points":0,"weight":""}],' +
+      '"submission_deadline":"","submission_method":""}' +
+      '\n\nReturn ONLY valid JSON. No markdown, no preamble.';
+
+    var cmResp = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 8000,
+      system: 'You extract compliance requirements from government RFPs. Return only valid JSON.',
+      messages: [{role:'user', content: cmPrompt}]
+    });
+    var cmText = (cmResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
+    
+    // Clean and parse
+    cmText = cmText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    var cmData;
+    try { cmData = JSON.parse(cmText); } catch(pe) { cmData = { raw: cmText, parse_error: pe.message }; }
+
+    // Store in opportunity
+    await supabase.from('opportunities').update({
+      last_updated: new Date().toISOString()
+    }).eq('id', cmId);
+
+    await supabase.from('organism_memory').insert({
+      agent: 'compliance_matrix',
+      opportunity_id: cmId,
+      observation: 'Compliance matrix generated: ' + (cmData.requirements ? cmData.requirements.length : 0) + ' requirements, ' + (cmData.exhibits ? cmData.exhibits.length : 0) + ' exhibits, ' + (cmData.eval_criteria ? cmData.eval_criteria.length : 0) + ' eval criteria.',
+      memory_type: 'analysis',
+      created_at: new Date().toISOString()
+    });
+
+    log('COMPLIANCE MATRIX: ' + (cmData.requirements ? cmData.requirements.length : 0) + ' requirements extracted');
+    res.writeHead(200, {'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*'});
+    res.end(JSON.stringify({ opportunity: opp.title, matrix: cmData }));
+
+  } catch(e) {
+    log('COMPLIANCE MATRIX ERROR: ' + e.message);
+    if (!res.headersSent) { res.writeHead(500); res.end(JSON.stringify({error: e.message})); }
+  }
+  return;
+}
+
+// === RATE TABLE GENERATOR — /api/rate-table ===
+if (url.startsWith('/api/rate-table')) {
+  var rtId = (req.url.split('?id=')[1]||'').split('&')[0];
+  if (!rtId) { res.writeHead(400); res.end(JSON.stringify({error:'id required'})); return; }
+
+  try {
+    log('RATE TABLE: Generating for ' + rtId);
+    var rtOpp = await supabase.from('opportunities').select('*').eq('id', rtId).single();
+    var opp = rtOpp.data;
+    if (!opp) { res.writeHead(404); res.end(JSON.stringify({error:'not found'})); return; }
+
+    var rfpSource = (opp.rfp_text && opp.rfp_text.trim().length > 200) ? opp.rfp_text : (opp.scope_analysis || opp.description || '');
+    
+    // Load organism financial memories
+    var finMems = await supabase.from('organism_memory').select('agent,observation')
+      .eq('opportunity_id', rtId)
+      .or('agent.ilike.%financial%,agent.ilike.%price%,agent.ilike.%cost%')
+      .order('created_at', {ascending:false}).limit(5);
+    var finIntel = (finMems.data || []).map(function(m) { return m.observation; }).join('\n').slice(0, 4000);
+
+    var D = String.fromCharCode(36);
+    var rtPrompt = 'Build a rate table for this RFP based on the positions/roles it requires.\n\n' +
+      '## RFP TEXT\n' + rfpSource.slice(0, 30000) + '\n\n' +
+      '## HGI RATE CARD (fully burdened, per hour)\n' +
+      'Principal ' + D + '220 | Program Director ' + D + '210 | SME ' + D + '200\n' +
+      'Sr Grant Manager ' + D + '180 | Grant Manager ' + D + '175 | Sr PM ' + D + '180 | PM ' + D + '155\n' +
+      'Grant Writer ' + D + '145 | Architect/Engineer ' + D + '135 | Cost Estimator ' + D + '125\n' +
+      'Appeals Specialist ' + D + '145 | Sr Damage Assessor ' + D + '115 | Damage Assessor ' + D + '105\n' +
+      'Admin Support ' + D + '65\n\n' +
+      '## FINANCIAL INTELLIGENCE\n' + finIntel + '\n\n' +
+      '## INSTRUCTIONS\n' +
+      '1. Extract every position/role the RFP requires\n' +
+      '2. Map each to the closest HGI rate card position\n' +
+      '3. Determine estimated hours per year based on RFP scope\n' +
+      '4. Calculate annual cost per position\n' +
+      '5. If multi-year, show base period + option years\n' +
+      '6. Apply any competitive pricing adjustments based on financial intelligence\n' +
+      '7. Include travel/ODC estimates if applicable\n\n' +
+      'RULES:\n' +
+      '- Rates are FULLY BURDENED — no separate overhead/profit/G&A lines\n' +
+      '- Never show a rate below HGI rate card minimums\n' +
+      '- If the RFP specifies rate format, match it exactly\n' +
+      '- Show all math — evaluators want to see how totals are derived\n' +
+      '- Flag any positions not on HGI rate card as [CUSTOM RATE NEEDED]\n\n' +
+      'Return as JSON:\n' +
+      '{"positions":[{"rfp_title":"","hgi_mapping":"","hourly_rate":0,"est_annual_hours":0,"annual_cost":0}],' +
+      '"period":{"base_years":0,"option_years":0},' +
+      '"annual_total":0,"base_period_total":0,"total_with_options":0,' +
+      '"travel_odc":0,"notes":""}' +
+      '\n\nReturn ONLY valid JSON.';
+
+    var rtResp = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 6000,
+      system: 'You build government contract pricing tables. Return only valid JSON with realistic, competitive pricing.',
+      messages: [{role:'user', content: rtPrompt}]
+    });
+    var rtText = (rtResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
+    rtText = rtText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    var rtData;
+    try { rtData = JSON.parse(rtText); } catch(pe) { rtData = { raw: rtText, parse_error: pe.message }; }
+
+    await supabase.from('organism_memory').insert({
+      agent: 'rate_table_engine',
+      opportunity_id: rtId,
+      observation: 'Rate table generated: ' + (rtData.positions ? rtData.positions.length : 0) + ' positions, total ' + D + (rtData.total_with_options || rtData.base_period_total || 'TBD'),
+      memory_type: 'pricing_benchmark',
+      created_at: new Date().toISOString()
+    });
+
+    log('RATE TABLE: ' + (rtData.positions ? rtData.positions.length : 0) + ' positions priced');
+    res.writeHead(200, {'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*'});
+    res.end(JSON.stringify({ opportunity: opp.title, rate_table: rtData }));
+
+  } catch(e) {
+    log('RATE TABLE ERROR: ' + e.message);
+    if (!res.headersSent) { res.writeHead(500); res.end(JSON.stringify({error: e.message})); }
+  }
+  return;
+}
+
+// === ORG CHART GENERATOR — /api/org-chart ===
+if (url.startsWith('/api/org-chart')) {
+  var ocId = (req.url.split('?id=')[1]||'').split('&')[0];
+  if (!ocId) { res.writeHead(400); res.end(JSON.stringify({error:'id required'})); return; }
+
+  try {
+    log('ORG CHART: Generating for ' + ocId);
+    var ocOpp = await supabase.from('opportunities').select('*').eq('id', ocId).single();
+    var opp = ocOpp.data;
+    if (!opp) { res.writeHead(404); res.end(JSON.stringify({error:'not found'})); return; }
+
+    var rfpSource = (opp.rfp_text && opp.rfp_text.trim().length > 200) ? opp.rfp_text : (opp.scope_analysis || opp.description || '');
+    
+    // Load staffing memories
+    var staffMems = await supabase.from('organism_memory').select('agent,observation')
+      .eq('opportunity_id', ocId)
+      .or('agent.ilike.%staffing%,agent.ilike.%recruiting%,agent.ilike.%bench%')
+      .order('created_at', {ascending:false}).limit(5);
+    var staffIntel = (staffMems.data || []).map(function(m) { return m.observation; }).join('\n').slice(0, 3000);
+
+    var ocPrompt = 'Create a Mermaid.js org chart diagram for this project team based on the RFP requirements.\n\n' +
+      '## RFP TEXT\n' + rfpSource.slice(0, 20000) + '\n\n' +
+      '## STAFFING INTELLIGENCE\n' + staffIntel + '\n\n' +
+      '## INSTRUCTIONS\n' +
+      'Create a Mermaid flowchart (top-down) showing the project organizational structure.\n' +
+      'Use role titles ONLY — no names.\n' +
+      'Include: reporting lines, functional groupings, key relationships.\n' +
+      'Use subgraphs for functional areas.\n' +
+      'Keep it clean — max 15 nodes.\n\n' +
+      'Also create a second Mermaid diagram showing the methodology/approach flow.\n' +
+      'This should be a left-to-right flowchart showing the key phases and steps.\n\n' +
+      'Return as JSON:\n' +
+      '{"org_chart":"graph TD\\n  ...","methodology_flow":"graph LR\\n  ...","description":"Brief description of the team structure"}' +
+      '\n\nReturn ONLY valid JSON. Use \\n for newlines in the Mermaid code.';
+
+    var ocResp = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 4000,
+      system: 'You create professional project organizational charts and methodology flow diagrams using Mermaid.js syntax. Return only valid JSON.',
+      messages: [{role:'user', content: ocPrompt}]
+    });
+    var ocText = (ocResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
+    ocText = ocText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    var ocData;
+    try { ocData = JSON.parse(ocText); } catch(pe) { ocData = { raw: ocText, parse_error: pe.message }; }
+
+    // Try to render via Kroki
+    var svgResults = {};
+    for (var diagramType of ['org_chart', 'methodology_flow']) {
+      if (ocData[diagramType]) {
+        try {
+          var mermaidCode = ocData[diagramType];
+          var encoded = Buffer.from(mermaidCode).toString('base64');
+          var krokiUrl = 'https://kroki.io/mermaid/svg/' + encoded;
+          var krokiResp = await fetch(krokiUrl);
+          if (krokiResp.ok) {
+            svgResults[diagramType] = await krokiResp.text();
+            log('ORG CHART: ' + diagramType + ' rendered via Kroki (' + svgResults[diagramType].length + ' bytes SVG)');
+          } else {
+            svgResults[diagramType + '_error'] = 'Kroki returned ' + krokiResp.status;
+          }
+        } catch(ke) {
+          svgResults[diagramType + '_error'] = ke.message;
+        }
+      }
+    }
+
+    await supabase.from('organism_memory').insert({
+      agent: 'graphics_engine',
+      opportunity_id: ocId,
+      observation: 'Org chart and methodology flow generated for ' + (opp.title || '').slice(0, 50) + '. Diagrams: ' + Object.keys(svgResults).join(', '),
+      memory_type: 'analysis',
+      created_at: new Date().toISOString()
+    });
+
+    log('ORG CHART: Complete');
+    res.writeHead(200, {'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*'});
+    res.end(JSON.stringify({ opportunity: opp.title, diagrams: ocData, svg: svgResults }));
+
+  } catch(e) {
+    log('ORG CHART ERROR: ' + e.message);
+    if (!res.headersSent) { res.writeHead(500); res.end(JSON.stringify({error: e.message})); }
+  }
+  return;
+}
+
 // Fallthrough — unmatched routes
 if (!res.headersSent) {
   res.writeHead(404, { 'Content-Type': 'application/json' });
