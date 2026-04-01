@@ -889,6 +889,49 @@ if (url.startsWith('/api/contacts')) {
   return;
 }
 
+
+// === PHASE 3 INTELLIGENCE SUMMARY — /api/phase3 ===
+if (url.startsWith('/api/phase3')) {
+  res.writeHead(200, corsJ);
+  try {
+    var p3agents = ['disaster_monitor','contract_expiration','budget_cycle','regulatory_monitor',
+      'teaming_agent','loss_analysis','win_rate_analytics','recompete_agent','agency_profile_agent',
+      'subcontractor_db','entrepreneurial_agent','source_expansion','learning_loop'];
+    var p3data = await supabase.from('organism_memory')
+      .select('agent,observation,created_at,memory_type')
+      .in('agent', p3agents)
+      .not('memory_type','in','("compliance_matrix_data","rate_table_data","org_chart_data")')
+      .order('created_at', { ascending: false })
+      .limit(50);
+    var p3mems = p3data.data || [];
+    // Group by agent
+    var grouped = {};
+    p3mems.forEach(function(m) {
+      if (!grouped[m.agent]) grouped[m.agent] = [];
+      grouped[m.agent].push({ obs: (m.observation||'').substring(0,500), at: m.created_at, type: m.memory_type });
+    });
+    // Build category summaries
+    var categories = {
+      disaster: { label: 'Disaster Declarations', agents: ['disaster_monitor'], data: [] },
+      contracts: { label: 'Contract Expirations', agents: ['contract_expiration','recompete_agent'], data: [] },
+      budget: { label: 'Budget Cycles', agents: ['budget_cycle'], data: [] },
+      regulatory: { label: 'Regulatory Changes', agents: ['regulatory_monitor'], data: [] },
+      teaming: { label: 'Teaming Partners', agents: ['teaming_agent','subcontractor_db'], data: [] },
+      analytics: { label: 'Win Rate & Loss Analysis', agents: ['win_rate_analytics','loss_analysis'], data: [] },
+      agencies: { label: 'Agency Profiles', agents: ['agency_profile_agent'], data: [] },
+      growth: { label: 'Growth & Expansion', agents: ['entrepreneurial_agent','source_expansion','learning_loop'], data: [] }
+    };
+    Object.keys(categories).forEach(function(k) {
+      categories[k].agents.forEach(function(a) {
+        if (grouped[a]) categories[k].data = categories[k].data.concat(grouped[a]);
+      });
+      categories[k].count = categories[k].data.length;
+    });
+    res.end(JSON.stringify({ total: p3mems.length, categories: categories }));
+  } catch(e) { res.end(JSON.stringify({ error: e.message })); }
+  return;
+}
+
 // === PROPOSAL DOCUMENT GENERATOR — /api/proposal-doc ===
 if (url.startsWith('/api/proposal-doc')) {
   var docId = (req.url.split('?id=')[1]||'').split('&')[0];
