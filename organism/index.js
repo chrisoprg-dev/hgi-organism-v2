@@ -597,7 +597,9 @@ if (url.startsWith('/api/extract-ci')) {
         'Intelligence brief:\n' + combined;
       
       try {
-        var ciResp = await claudeCall(extractPrompt, { model: 'claude-haiku-4-5-20251001', max_tokens: 4000 });
+        var ciResp = await claudeCall('Extract structured competitor data from intelligence briefs. Return ONLY valid JSON arrays.', extractPrompt, 4000, { model: 'claude-haiku-4-5-20251001' });
+        
+        log('CI EXTRACT: Haiku response length=' + ciResp.length + ' for opp ' + oppId.slice(0, 30));
         
         // Parse JSON from response
         var jsonMatch = ciResp.match(/\[[\s\S]*\]/);
