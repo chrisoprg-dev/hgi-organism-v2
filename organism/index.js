@@ -532,6 +532,53 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         created_at: new Date().toISOString()
       });
 
+      // 8. RED TEAM AUTO-REVIEW — Haiku reads proposal against RFP and flags gaps
+      try {
+        log('RED TEAM: Starting auto-review for ' + (opp.title||'').slice(0,40));
+        var rfpRef = (opp.rfp_text && opp.rfp_text.trim().length > 200) ? opp.rfp_text.slice(0, 20000) : (opp.scope_analysis || opp.description || '');
+        var reviewPrompt = 'You are a ruthless government proposal red team reviewer. Your job is to find every weakness, gap, and compliance failure BEFORE the proposal reaches evaluators.\n\n' +
+          '## RFP/SOQ REQUIREMENTS\n' + rfpRef.slice(0, 20000) + '\n\n' +
+          '## PROPOSAL TEXT (first 30K chars)\n' + proposalText.slice(0, 30000) + '\n\n' +
+          '## REVIEW CHECKLIST — Flag every issue you find:\n\n' +
+          '1. COMPLIANCE GAPS: Does the proposal address every section the RFP requires? List any missing sections or exhibits.\n' +
+          '2. PERSONNEL: Is Geoffrey Brien mentioned anywhere? (He should NOT be — he left HGI.) Are staff names used correctly?\n' +
+          '3. EVIDENCE: Does every capability claim have specific backing data (dollar amounts, dates, project names)? Flag any "extensive experience" or "proven track record" without specifics.\n' +
+          '4. WIN THEMES: Are there clear win themes? Are they repeated excessively across sections? (Should appear once each, where they naturally belong.)\n' +
+          '5. FILLER: Flag any sentences that add no evaluator value — vague commitments, generic language, or padding.\n' +
+          '6. FORMAT: Does the proposal match the RFP structure? Wrong section order? Missing page numbers or headers the RFP requires?\n' +
+          '7. FACTS: Any incorrect HGI data? (Founded 1931, ~50 employees, Kenner HQ, UEI DL4SJEVKZ6H4, phone (504) 681-6135)\n' +
+          '8. ACTION ITEMS: List specific items that need human attention before submission (forms to sign, refs to confirm, etc.)\n' +
+          '9. SCORING RISK: Which sections would lose the most points with evaluators as written? What specific improvements would close the gap?\n\n' +
+          'Be specific. Cite section names and page references. Do not praise — only identify problems and specific fixes.\n' +
+          'Format: For each issue, write CATEGORY | SEVERITY (critical/major/minor) | DESCRIPTION | FIX';
+        var reviewResp = await claudeCall('Red team proposal review', reviewPrompt, 6000, { model: 'claude-haiku-4-5-20251001' });
+        
+        // Count issues by severity
+        var critCount = (reviewResp.match(/critical/gi) || []).length;
+        var majCount = (reviewResp.match(/major/gi) || []).length;
+        var minCount = (reviewResp.match(/minor/gi) || []).length;
+        var summary = 'RED TEAM REVIEW: ' + critCount + ' critical, ' + majCount + ' major, ' + minCount + ' minor issues found.';
+        
+        // Store review
+        await supabase.from('opportunities').update({
+          proposal_review: summary + '\n\n' + reviewResp,
+          last_updated: new Date().toISOString()
+        }).eq('id', ppId);
+        
+        // Write memory
+        await supabase.from('organism_memory').insert({
+          agent: 'red_team_reviewer',
+          opportunity_id: ppId,
+          observation: summary + '\n\nTop issues:\n' + reviewResp.slice(0, 2000),
+          memory_type: 'analysis',
+          created_at: new Date().toISOString()
+        });
+        
+        log('RED TEAM: ' + summary);
+      } catch(rtErr) {
+        log('RED TEAM ERROR: ' + rtErr.message);
+      }
+
       log('PROPOSAL ENGINE: Complete for ' + (opp.title||'').slice(0,40));
 
     } catch(e) {
@@ -1242,6 +1289,26 @@ if (url.startsWith('/api/phase3')) {
       structuredCounts = { disaster_alerts: dcnt.count || 0, budget_cycles: bcnt.count || 0, recompete_tracker: rcnt.count || 0, regulatory_changes: rgcnt.count || 0, teaming_partners: tcnt.count || 0, agency_profiles: acnt.count || 0, pipeline_analytics: pancnt.count || 0 };
     } catch(sc) { structuredCounts = { error: sc.message }; }
     res.end(JSON.stringify({ total: p3mems.length, categories: categories, structured_tables: structuredCounts }));
+  } catch(e) { res.end(JSON.stringify({ error: e.message })); }
+  return;
+}
+
+// === PROPOSAL RED TEAM REVIEW — /api/proposal-review ===
+if (url.startsWith('/api/proposal-review')) {
+  var rvId = (req.url.split('?id=')[1]||'').split('&')[0];
+  if (!rvId) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({error:'id required'})); return; }
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  try {
+    var rvOpp = await supabase.from('opportunities').select('id,title,proposal_review').eq('id', rvId).single();
+    if (!rvOpp.data || !rvOpp.data.proposal_review) {
+      res.end(JSON.stringify({ id: rvId, review: null, message: 'No review found. Run produce-proposal first — red team review runs automatically after generation.' }));
+    } else {
+      var rv = rvOpp.data.proposal_review;
+      var critC = (rv.match(/critical/gi) || []).length;
+      var majC = (rv.match(/major/gi) || []).length;
+      var minC = (rv.match(/minor/gi) || []).length;
+      res.end(JSON.stringify({ id: rvId, title: rvOpp.data.title, summary: { critical: critC, major: majC, minor: minC }, review: rv }));
+    }
   } catch(e) { res.end(JSON.stringify({ error: e.message })); }
   return;
 }
