@@ -485,14 +485,16 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         'Do NOT allocate depth based on evaluation scoring weights. A 10-point section written poorly loses those 10 points. Write every section as if the evaluator reads only that section to make their decision.\n' +
         'Write to the specifics of what THIS RFP asks for in each section. Use confirmed HGI data — real dollar amounts, real project names, real timelines, real outcomes. Never use filler language like "extensive experience" or "proven track record" without immediately following it with the specific evidence. If you cannot back it with data from the context above, cut it.\n\n' +
         'CRITICAL PERSONNEL EXCLUSION:\n' +
-        '- Geoffrey Brien is NO LONGER WITH HGI. Do not include him in any staffing, personnel, org charts, or team descriptions. If organism intelligence references Brien, IGNORE those references. Replace his role assignments with [TO BE DETERMINED — DR/PA SME] or redistribute to other confirmed staff.\n' +
-        '- Confirmed current HGI staff: President (Christopher Oney), CEO (Lou Resweber), VP (Dillon Truax), CAO (Candy Dottolo), SVP Claims (Vanessa James), 1099 SME (Chris Feduccia). No other named individuals unless confirmed in the organism intelligence as current HGI employees.\n\n' +
+        '- Geoffrey Brien is NO LONGER WITH HGI. Do not include him in any staffing, personnel, org charts, or team descriptions.\n' +
+        '- CRITICAL STAFFING RULE: Do NOT auto-assign specific HGI leadership (President, CEO, VP, CAO, etc.) to proposal positions. ALL positions in every proposal are OPEN positions that HGI will staff through recruitment and internal assignment. The proposal should describe the ROLE REQUIREMENTS and qualifications needed — not pre-fill names. For Key Personnel sections, write "[TO BE ASSIGNED — role title]" with the qualifications and experience required. HGI leadership will make staffing decisions after contract award. The only exception is if Christopher explicitly assigns someone in the RFP text or organism intelligence.\n' +
+        '- HGI has approximately 50 team members with deep institutional experience across all 8 verticals. Staffing plans should emphasize the firm depth, recruitment pipeline, and ability to mobilize qualified personnel — not slot the same 5 executives into every project.\n' +
+        '- For the cover letter signature line, use: Christopher J. Oney, President, HGI Global (Hammerman & Gainer LLC)\n\n' +
         'RULES:\n' +
         '- Produce ONLY what the solicitation asks for — nothing more, nothing less\n' +
         '- Every claim must be backed by real HGI data from the company profile and organism intelligence above\n' +
         '- MINIMIZE [ACTION REQUIRED] flags — use them ONLY for items that genuinely cannot be completed without human action: wet signatures, notarizations, insurance certificates, contact info the system truly does not have. If the data exists anywhere in the context above, USE IT instead of flagging it.\n' +
         '- Use ONLY confirmed HGI past performance. Never fabricate projects, dollar amounts, or references.\n' +
-        '- Include specific dollar amounts, dates, and confirmed staff names from HGI data\n' +
+        '- Include specific dollar amounts, dates, and project details from HGI data\n' +
         '- Professional, confident tone — this goes directly to evaluators. No hedging, no "we believe" or "we feel" — state capabilities as facts.\n' +
         '- No mention of AI, organism, agents, confidence levels, or the capture system\n' +
         '- Document must look like it came from the President with no visible AI involvement\n' +
@@ -510,7 +512,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       var stream = await anthropic.messages.stream({
         model: 'claude-opus-4-6',
         max_tokens: 128000,
-        system: 'You are a senior government proposal writer at HGI Global (Hammerman & Gainer LLC), a 95-year-old Louisiana-based firm. You produce submission-ready documents that WIN — not average drafts. Every word earns points with evaluators. You match the exact format each solicitation requires (questionnaire forms filled field-by-field, narrative proposals with specified sections, exhibits completed). You are specific, factual, direct, and persuasive. You use only confirmed company data. You write like the firm President would write — authoritative, zero filler, zero hedging. IMPORTANT: Geoffrey Brien no longer works at HGI. Never include him.',
+        system: 'You are a senior government proposal writer at HGI Global (Hammerman & Gainer LLC), a 95-year-old Louisiana-based firm. You produce submission-ready documents that WIN — not average drafts. Every word earns points with evaluators. You match the exact format each solicitation requires (questionnaire forms filled field-by-field, narrative proposals with specified sections, exhibits completed). You are specific, factual, direct, and persuasive. You use only confirmed company data. You write like the firm President would write — authoritative, zero filler, zero hedging. CRITICAL: Geoffrey Brien no longer works at HGI. Never include him. CRITICAL: Do NOT auto-assign HGI leadership (CEO, VP, CAO, etc.) to project roles. All positions are OPEN — describe role requirements and qualifications needed, not pre-filled names. Use [TO BE ASSIGNED] for Key Personnel unless explicitly instructed otherwise.',
         messages: [{role:'user', content: proposalPrompt}]
       });
       var finalMessage = await stream.finalMessage();
@@ -541,7 +543,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
           '## PROPOSAL TEXT (first 30K chars)\n' + proposalText.slice(0, 30000) + '\n\n' +
           '## REVIEW CHECKLIST — Flag every issue you find:\n\n' +
           '1. COMPLIANCE GAPS: Does the proposal address every section the RFP requires? List any missing sections or exhibits.\n' +
-          '2. PERSONNEL: Is Geoffrey Brien mentioned anywhere? (He should NOT be — he left HGI.) Are staff names used correctly?\n' +
+          '2. PERSONNEL: Is Geoffrey Brien mentioned anywhere? (He should NOT be — he left HGI.) Are HGI leadership names (Lou Resweber, Dillon Truax, Candy Dottolo, Chris Feduccia, Vanessa James) auto-assigned to project roles? They should NOT be — all positions should be listed as [TO BE ASSIGNED] with role requirements. The only name that should appear is Christopher J. Oney on the cover letter signature.\n' +
           '3. EVIDENCE: Does every capability claim have specific backing data (dollar amounts, dates, project names)? Flag any "extensive experience" or "proven track record" without specifics.\n' +
           '4. WIN THEMES: Are there clear win themes? Are they repeated excessively across sections? (Should appear once each, where they naturally belong.)\n' +
           '5. FILLER: Flag any sentences that add no evaluator value — vague commitments, generic language, or padding.\n' +
