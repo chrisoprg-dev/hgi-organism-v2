@@ -565,6 +565,22 @@ if (url.startsWith('/api/proposal-doc')) {
       cleanLines.push(line);
     });
     proposalText = cleanLines.join('\n');
+
+    // Post-process: fix common Opus hallucinations
+    // UEI correction — Opus sometimes scrambles characters
+    proposalText = proposalText.replace(/DL4S[A-Z0-9]{3,8}(?!JEVKZ6H4)/g, function(match) {
+      if (match === 'DL4SJEVKZ6H4') return match;
+      return 'DL4SJEVKZ6H4';
+    });
+    // Founding year — enforce 1931
+    proposalText = proposalText.replace(/\b(Est(?:ablished)?\.?\s*)1929\b/gi, '$11931');
+    // Phone correction
+    proposalText = proposalText.replace(/\(504\)\s*000-0000/g, '(504) 681-6135');
+    // Email placeholder
+    proposalText = proposalText.replace(/info@hgi\.com/gi, 'info@hgi-global.com');
+    // Geoffrey Brien removal — catch any that slip through
+    proposalText = proposalText.replace(/Geoffrey\s+Brien/gi, '[DR Manager — Position Open]');
+
     if (!proposalText || proposalText.length < 500) {
       res.writeHead(400); res.end(JSON.stringify({
         error: 'No proposal content found. Run /api/produce-proposal first to generate submission-ready content.',
