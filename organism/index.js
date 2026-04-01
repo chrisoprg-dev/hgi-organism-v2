@@ -3242,6 +3242,50 @@ async function runSession(trigger) {
     log('=== SESSION COMPLETE: ' + id + ' | ' + allResults.length + ' agent outputs ===');
     log('Completed: ' + allResults.map(function(r) { return r.agent + '(' + r.chars + ')'; }).join(', '));
 
+    // Auto-extract structured CI from new competitive_intel memories
+    try {
+      log('CI AUTO-EXTRACT: Mining new competitive intel into structured database...');
+      var ciMems2 = await supabase.from('organism_memory')
+        .select('id,agent,observation,opportunity_id,created_at')
+        .eq('memory_type', 'competitive_intel')
+        .gte('created_at', new Date(Date.now() - 24*60*60*1000).toISOString())
+        .order('created_at', { ascending: false })
+        .limit(50);
+      var recentCI = ciMems2.data || [];
+      if (recentCI.length > 0) {
+        var ciByOpp2 = {};
+        recentCI.forEach(function(m) { var o = m.opportunity_id || 'global'; if (!ciByOpp2[o]) ciByOpp2[o] = []; ciByOpp2[o].push(m); });
+        var ciTotal = 0;
+        var ciOppIds = Object.keys(ciByOpp2);
+        for (var coi = 0; coi < ciOppIds.length; coi++) {
+          var coId = ciOppIds[coi];
+          var coMems = ciByOpp2[coId];
+          var coCombined = coMems.slice(0,2).map(function(m){ return (m.observation||'').substring(0,3000); }).join('\n---\n');
+          if (coCombined.length < 200) continue;
+          try {
+            var coResp = await claudeCall('Extract competitor data. Return ONLY a JSON array.', 
+              'Extract ALL competitors. Return JSON array with: competitor_name, hq_location, hq_state, strengths, weaknesses, threat_level (primary/secondary/emerging/watch), contract_value, active_verticals (array), active_states (array), certifications (array), key_personnel, price_intelligence, strategic_notes.\n\n' + coCombined, 
+              4000, { model: 'claude-haiku-4-5-20251001' });
+            var coMatch = coResp.match(/\[[\s\S]*\]/);
+            if (!coMatch) continue;
+            var coComps = JSON.parse(coMatch[0]);
+            for (var cci = 0; cci < coComps.length; cci++) {
+              var cc = coComps[cci];
+              if (!cc.competitor_name) continue;
+              var ccEx = await supabase.from('competitive_intelligence').select('id').eq('competitor_name', cc.competitor_name).eq('opportunity_id', coId === 'global' ? null : coId).limit(1);
+              var ccRec = { competitor_name: cc.competitor_name, opportunity_id: coId === 'global' ? null : coId, hq_location: cc.hq_location, hq_state: cc.hq_state, strengths: cc.strengths, weaknesses: cc.weaknesses, threat_level: cc.threat_level || 'watch', contract_value: cc.contract_value, active_verticals: cc.active_verticals || [], active_states: cc.active_states || [], certifications: cc.certifications || [], key_personnel: cc.key_personnel, price_intelligence: cc.price_intelligence, strategic_notes: cc.strategic_notes, source_agent: 'ci_auto_extractor', updated_at: new Date().toISOString() };
+              if (ccEx.data && ccEx.data.length > 0) { await supabase.from('competitive_intelligence').update(ccRec).eq('id', ccEx.data[0].id); }
+              else { ccRec.id = 'ci-' + Date.now() + '-' + Math.random().toString(36).slice(2,6); ccRec.created_at = new Date().toISOString(); await supabase.from('competitive_intelligence').insert(ccRec); }
+              ciTotal++;
+            }
+          } catch(ciErr) { log('CI AUTO-EXTRACT error: ' + ciErr.message); }
+        }
+        log('CI AUTO-EXTRACT: ' + ciTotal + ' records upserted from ' + recentCI.length + ' recent memories');
+      } else {
+        log('CI AUTO-EXTRACT: No new competitive intel memories in last 24h');
+      }
+    } catch(ciAutoErr) { log('CI AUTO-EXTRACT failed: ' + ciAutoErr.message); }
+
   } catch (e) {
     log('SESSION ERROR: ' + e.message);
     try {
