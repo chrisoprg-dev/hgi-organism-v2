@@ -660,13 +660,13 @@ document.getElementById('dive-back').addEventListener('click', showDiveList);
 
 // === TALENT ===
 var TEAM = [
-  {name:'Christopher Oney',title:'President',rate:220,verticals:['DR','TPA','CDBG-DR','Federal'],type:'FT'},
-  {name:'Lou Resweber',title:'CEO',rate:220,verticals:['DR','Program Admin'],type:'FT'},
-  {name:'Candy Dottolo',title:'CAO',rate:200,verticals:['Operations','Compliance'],type:'FT'},
-  {name:'Vanessa James',title:'SVP Claims',rate:200,verticals:['TPA','Claims','P&C'],type:'FT'},
-  {name:'Dillon Truax',title:'VP',rate:200,verticals:['DR','CDBG-DR','Housing'],type:'FT'},
-  {name:'Geoffrey Brien',title:'DR Manager',rate:180,verticals:['DR','FEMA PA','HMGP'],type:'FT'},
-  {name:'Chris Feduccia',title:'SME (1099)',rate:200,verticals:['Grants','Incentives','DR','Federal'],type:'1099'}
+  {name:'President',title:'President',rate:220,verticals:['DR','TPA','CDBG-DR','Federal'],type:'FT'},
+  {name:'CEO',title:'CEO',rate:220,verticals:['DR','Program Admin'],type:'FT'},
+  {name:'CAO',title:'CAO',rate:200,verticals:['Operations','Compliance'],type:'FT'},
+  {name:'SVP Claims',title:'SVP Claims',rate:200,verticals:['TPA','Claims','P&C'],type:'FT'},
+  {name:'VP',title:'VP',rate:200,verticals:['DR','CDBG-DR','Housing'],type:'FT'},
+  {name:'DR Manager',title:'DR Manager',rate:180,verticals:['DR','FEMA PA','HMGP'],type:'FT'},
+  {name:'SME (1099)',title:'SME (1099)',rate:200,verticals:['Grants','Incentives','DR','Federal'],type:'1099'}
 ];
 var GAPS = [
   {role:'FEMA PA Specialist (PW Cat C-G)',priority:'Critical',pursuits:['DR-4900 LA','DR-4899 MS','NOLA Water']},
@@ -754,7 +754,7 @@ var SUGGESTIONS = [
   "What's our PWIN on NOLA Water?",
   'Who are top competitors for DR-4900?',
   'Summarize the pipeline risk picture',
-  'What should Christopher focus on this week?'
+  'What should the President focus on this week?'
 ];
 function renderSuggestions(){
   document.getElementById('cmd-suggestions').innerHTML = SUGGESTIONS.map(function(s){
