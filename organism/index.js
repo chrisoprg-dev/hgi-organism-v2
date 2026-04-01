@@ -890,6 +890,91 @@ if (url.startsWith('/api/contacts')) {
 }
 
 
+
+// === EXTRACT DISASTERS — /api/extract-disasters ===
+if (url.startsWith('/api/extract-disasters')) {
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  try {
+    var dMems = await supabase.from('organism_memory')
+      .select('id,agent,observation,created_at')
+      .eq('agent', 'disaster_monitor')
+      .order('created_at', { ascending: false })
+      .limit(10);
+    var dRecords = dMems.data || [];
+    var total = 0;
+    for (var di = 0; di < dRecords.length; di++) {
+      var dm = dRecords[di];
+      if (!dm.observation || dm.observation.length < 200) continue;
+      try {
+        var dResp = await claudeCall('Extract disaster declarations. Return ONLY JSON array.',
+          'Extract ALL disaster declarations mentioned. JSON array with: disaster_number, disaster_name, state, declaration_date, incident_type, counties, fema_programs, procurement_window, hgi_recommendation, hgi_vertical, threat_level (critical/high/medium/low).\n\n' + (dm.observation || '').substring(0, 6000),
+          4000, { model: 'claude-haiku-4-5-20251001' });
+        var dMatch = dResp.match(/\[[\s\S]*\]/);
+        if (!dMatch) continue;
+        var disasters = JSON.parse(dMatch[0]);
+        for (var dd = 0; dd < disasters.length; dd++) {
+          var dis = disasters[dd];
+          if (!dis.disaster_name || dis.disaster_name.length < 3) continue;
+          var dId = 'dis-' + (dis.disaster_number || Date.now()) + '-' + Math.random().toString(36).slice(2, 6);
+          var dEx = await supabase.from('disaster_alerts').select('id').eq('disaster_number', dis.disaster_number || '').limit(1);
+          var dRec = { disaster_number: dis.disaster_number, disaster_name: dis.disaster_name, state: dis.state, declaration_date: dis.declaration_date, incident_type: dis.incident_type, counties: dis.counties, fema_programs: dis.fema_programs, procurement_window: dis.procurement_window, hgi_recommendation: dis.hgi_recommendation, hgi_vertical: dis.hgi_vertical, threat_level: dis.threat_level || 'medium', source_agent: 'disaster_extract', updated_at: new Date().toISOString() };
+          if (dEx.data && dEx.data.length > 0) {
+            await supabase.from('disaster_alerts').update(dRec).eq('id', dEx.data[0].id);
+          } else {
+            dRec.id = dId; dRec.created_at = new Date().toISOString();
+            await supabase.from('disaster_alerts').insert(dRec);
+          }
+          total++;
+        }
+      } catch (de) { log('Disaster extract error: ' + de.message); }
+    }
+    res.end(JSON.stringify({ extracted: total, from_memories: dRecords.length }));
+  } catch (e) { res.end(JSON.stringify({ error: e.message })); }
+  return;
+}
+
+// === EXTRACT BUDGET CYCLES — /api/extract-budgets ===
+if (url.startsWith('/api/extract-budgets')) {
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  try {
+    var bMems = await supabase.from('organism_memory')
+      .select('id,agent,observation,created_at')
+      .eq('agent', 'budget_cycle')
+      .order('created_at', { ascending: false })
+      .limit(10);
+    var bRecords = bMems.data || [];
+    var bTotal = 0;
+    for (var bi = 0; bi < bRecords.length; bi++) {
+      var bm = bRecords[bi];
+      if (!bm.observation || bm.observation.length < 200) continue;
+      try {
+        var bResp = await claudeCall('Extract budget cycle data. Return ONLY JSON array.',
+          'Extract ALL agency budget cycles. JSON array with: agency, state, fiscal_year_start, fiscal_year_end, budget_amount, procurement_window, rfp_timing, hgi_vertical, notes.\n\n' + (bm.observation || '').substring(0, 6000),
+          4000, { model: 'claude-haiku-4-5-20251001' });
+        var bMatch = bResp.match(/\[[\s\S]*\]/);
+        if (!bMatch) continue;
+        var budgets = JSON.parse(bMatch[0]);
+        for (var bb = 0; bb < budgets.length; bb++) {
+          var bud = budgets[bb];
+          if (!bud.agency || bud.agency.length < 3) continue;
+          var bId = 'bud-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+          var bEx = await supabase.from('budget_cycles').select('id').eq('agency', bud.agency).limit(1);
+          var bRec = { agency: bud.agency, state: bud.state, fiscal_year_start: bud.fiscal_year_start, fiscal_year_end: bud.fiscal_year_end, budget_amount: bud.budget_amount, procurement_window: bud.procurement_window, rfp_timing: bud.rfp_timing, hgi_vertical: bud.hgi_vertical, notes: bud.notes, source_agent: 'budget_extract', updated_at: new Date().toISOString() };
+          if (bEx.data && bEx.data.length > 0) {
+            await supabase.from('budget_cycles').update(bRec).eq('id', bEx.data[0].id);
+          } else {
+            bRec.id = bId; bRec.created_at = new Date().toISOString();
+            await supabase.from('budget_cycles').insert(bRec);
+          }
+          bTotal++;
+        }
+      } catch (be) { log('Budget extract error: ' + be.message); }
+    }
+    res.end(JSON.stringify({ extracted: bTotal, from_memories: bRecords.length }));
+  } catch (e) { res.end(JSON.stringify({ error: e.message })); }
+  return;
+}
+
 // === PHASE 3 INTELLIGENCE SUMMARY — /api/phase3 ===
 if (url.startsWith('/api/phase3')) {
   res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -3538,6 +3623,39 @@ async function runSession(trigger) {
           } catch(crErr) { log('CRM AUTO-EXTRACT error: '+crErr.message); }
         }
         log('CRM AUTO-EXTRACT: '+crmTotal+' contacts upserted from '+recentCRM.length+' recent memories');
+    // Auto-extract disaster alerts from recent disaster_monitor memories
+    try {
+      log('DISASTER AUTO-EXTRACT: Mining disaster declarations...');
+      var disAutoMems = await supabase.from('organism_memory')
+        .select('id,observation').eq('agent', 'disaster_monitor')
+        .gte('created_at', new Date(Date.now() - 24*60*60*1000).toISOString())
+        .order('created_at', { ascending: false }).limit(3);
+      var recentDis = disAutoMems.data || [];
+      if (recentDis.length > 0) {
+        var disTotal = 0;
+        for (var dri = 0; dri < recentDis.length; dri++) {
+          var drm = recentDis[dri];
+          if (!drm.observation || drm.observation.length < 200) continue;
+          try {
+            var drResp = await claudeCall('Extract disasters. JSON array only.', 'Extract disaster declarations. JSON array: disaster_number, disaster_name, state, incident_type, threat_level.\n\n' + (drm.observation || '').substring(0, 4000), 3000, { model: 'claude-haiku-4-5-20251001' });
+            var drMatch = drResp.match(/\[[\s\S]*\]/);
+            if (!drMatch) continue;
+            var drDis = JSON.parse(drMatch[0]);
+            for (var drd = 0; drd < drDis.length; drd++) {
+              var dd2 = drDis[drd];
+              if (!dd2.disaster_name) continue;
+              var dd2Ex = await supabase.from('disaster_alerts').select('id').eq('disaster_number', dd2.disaster_number || '').limit(1);
+              var dd2Rec = { disaster_number: dd2.disaster_number, disaster_name: dd2.disaster_name, state: dd2.state, incident_type: dd2.incident_type, threat_level: dd2.threat_level || 'medium', source_agent: 'disaster_auto_extract', updated_at: new Date().toISOString() };
+              if (dd2Ex.data && dd2Ex.data.length > 0) { await supabase.from('disaster_alerts').update(dd2Rec).eq('id', dd2Ex.data[0].id); }
+              else { dd2Rec.id = 'dis-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6); dd2Rec.created_at = new Date().toISOString(); await supabase.from('disaster_alerts').insert(dd2Rec); }
+              disTotal++;
+            }
+          } catch (dre) { log('DISASTER AUTO-EXTRACT error: ' + dre.message); }
+        }
+        log('DISASTER AUTO-EXTRACT: ' + disTotal + ' alerts from ' + recentDis.length + ' memories');
+      } else { log('DISASTER AUTO-EXTRACT: No new disaster memories in last 24h'); }
+    } catch (disAutoErr) { log('DISASTER AUTO-EXTRACT failed: ' + disAutoErr.message); }
+
       } else { log('CRM AUTO-EXTRACT: No new relationship memories in last 24h'); }
     } catch(crmAutoErr) { log('CRM AUTO-EXTRACT failed: '+crmAutoErr.message); }
 
