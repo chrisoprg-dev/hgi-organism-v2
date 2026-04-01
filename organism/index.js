@@ -552,6 +552,19 @@ if (url.startsWith('/api/proposal-doc')) {
 
     // Get proposal text from proposal_content (NOT capture_action — that's internal analysis)
     var proposalText = (opp.proposal_content || '').replace(/^# PROPOSAL DRAFT.*?\n\n/, '');
+
+    // Post-process: strip ASCII box-drawing art (org charts Opus sometimes generates despite instructions)
+    var cleanLines = [];
+    var skipBlock = false;
+    proposalText.split('\n').forEach(function(line) {
+      var boxChars = (line.match(/[\u2500-\u257F\u250C\u2510\u2514\u2518\u251C\u2524\u252C\u2534\u253C\u2502\u2550-\u256C\u25BC\u25B2\u25B6\u25C0]/g) || []).length;
+      if (boxChars >= 3) { skipBlock = true; return; }
+      if (skipBlock && line.trim() === '') { skipBlock = false; return; }
+      if (skipBlock && boxChars >= 1) return;
+      if (skipBlock) skipBlock = false;
+      cleanLines.push(line);
+    });
+    proposalText = cleanLines.join('\n');
     if (!proposalText || proposalText.length < 500) {
       res.writeHead(400); res.end(JSON.stringify({
         error: 'No proposal content found. Run /api/produce-proposal first to generate submission-ready content.',
