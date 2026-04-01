@@ -581,7 +581,7 @@ if (url.startsWith('/api/proposal-doc')) {
     function parseTable(lines) {
       var rows = [];
       for (var i = 0; i < lines.length; i++) {
-        if (lines[i].match(/^\|[\s-:|]+\|String.fromCharCode(36)/)) continue; // skip separator
+        if (lines[i].match(/^\|[\s-:|]+\|/)) continue; // skip separator
         var cells = lines[i].split('|').filter(function(c, idx) { return idx > 0 && idx < lines[i].split('|').length - 1; });
         rows.push(cells.map(function(c) { return c.trim(); }));
       }
@@ -599,17 +599,18 @@ if (url.startsWith('/api/proposal-doc')) {
         var isHeader = rowIdx === 0;
         return new TableRow({
           children: row.map(function(cell) {
+            var cellChildren;
+            if (isHeader) {
+              cellChildren = [new Paragraph({ children: [new TextRun({ text: cell, bold: true, size: 20, font: 'Calibri', color: 'FFFFFF' })] })];
+            } else {
+              cellChildren = [new Paragraph({ children: parseInline(cell) })];
+            }
             return new TableCell({
               borders: borders,
               width: { size: colWidth, type: WidthType.DXA },
               shading: isHeader ? { fill: TABLE_HEADER, type: ShadingType.CLEAR } : (rowIdx % 2 === 0 ? { fill: TABLE_ALT, type: ShadingType.CLEAR } : { fill: 'FFFFFF', type: ShadingType.CLEAR }),
               margins: { top: 60, bottom: 60, left: 100, right: 100 },
-              children: [new Paragraph({
-                children: parseInline(cell).map(function(r) {
-                  if (isHeader) return new TextRun({ text: r.options ? r.options.text || '' : '', bold: true, size: 20, font: 'Calibri', color: 'FFFFFF' });
-                  return r;
-                })
-              })]
+              children: cellChildren
             });
           })
         });
@@ -687,7 +688,7 @@ if (url.startsWith('/api/proposal-doc')) {
       }
 
       // Horizontal rule → gold accent line
-      if (line.match(/^---+String.fromCharCode(36)/) || line.match(/^\*\*\*+String.fromCharCode(36)/) || line.match(/^___+String.fromCharCode(36)/)) {
+      if (line.match(/^---+/) || line.match(/^\*\*\*+/) || line.match(/^___+/)) {
         docChildren.push(new Paragraph({
           spacing: { before: 200, after: 200 },
           border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: GOLD, space: 4 } },
@@ -765,7 +766,7 @@ if (url.startsWith('/api/proposal-doc')) {
 
       // Regular paragraph — collect consecutive non-empty, non-special lines
       var paraLines = [];
-      while (lineIdx < allLines.length && allLines[lineIdx].trim() && !allLines[lineIdx].startsWith('#') && !allLines[lineIdx].startsWith('|') && !allLines[lineIdx].startsWith('> ') && !allLines[lineIdx].startsWith('- ') && !allLines[lineIdx].startsWith('* ') && !allLines[lineIdx].match(/^\d+\.\s/) && !allLines[lineIdx].match(/^---+String.fromCharCode(36)/) && !allLines[lineIdx].match(/^\*\*\*+String.fromCharCode(36)/)) {
+      while (lineIdx < allLines.length && allLines[lineIdx].trim() && !allLines[lineIdx].startsWith('#') && !allLines[lineIdx].startsWith('|') && !allLines[lineIdx].startsWith('> ') && !allLines[lineIdx].startsWith('- ') && !allLines[lineIdx].startsWith('* ') && !allLines[lineIdx].match(/^\d+\.\s/) && !allLines[lineIdx].match(/^---+/) && !allLines[lineIdx].match(/^\*\*\*+/)) {
         paraLines.push(allLines[lineIdx]);
         lineIdx++;
       }
