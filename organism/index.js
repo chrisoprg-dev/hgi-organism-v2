@@ -1167,7 +1167,7 @@ if (url.startsWith('/api/regulatory')) {
 if (url.startsWith('/api/teaming')) {
   res.writeHead(200, { 'Content-Type': 'application/json' });
   try {
-    var teamData = await supabase.from('teaming_partners').select('*').order('updated_at', { ascending: false }).limit(100);
+    var teamData = await supabase.from('teaming_partners').select('*').order('updated_at', { ascending: false }).limit(200);
     res.end(JSON.stringify(teamData.data || []));
   } catch(e) { res.end(JSON.stringify({ error: e.message })); }
   return;
