@@ -539,6 +539,186 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
   return;
 }
 
+// === COMPETITIVE INTELLIGENCE EXTRACTION — /api/extract-ci ===
+if (url.startsWith('/api/extract-ci')) {
+  res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
+  
+  try {
+    log('CI EXTRACT: Starting competitive intelligence extraction');
+    
+    // Get all competitive_intel memories not yet processed
+    var ciMems = await supabase.from('organism_memory')
+      .select('id,agent,observation,opportunity_id,created_at')
+      .eq('memory_type', 'competitive_intel')
+      .order('created_at', { ascending: false })
+      .limit(200);
+    
+    var mems = ciMems.data || [];
+    log('CI EXTRACT: Found ' + mems.length + ' competitive intel memories');
+    
+    // Group by opportunity
+    var byOpp = {};
+    mems.forEach(function(m) {
+      var oid = m.opportunity_id || 'global';
+      if (!byOpp[oid]) byOpp[oid] = [];
+      byOpp[oid].push(m);
+    });
+    
+    var totalExtracted = 0;
+    var oppIds = Object.keys(byOpp);
+    
+    for (var oi = 0; oi < oppIds.length; oi++) {
+      var oppId = oppIds[oi];
+      var oppMems = byOpp[oppId];
+      
+      // Combine observations (take most recent, cap at 8000 chars to fit Haiku context)
+      var combined = oppMems.slice(0, 3).map(function(m) {
+        return (m.observation || '').substring(0, 3000);
+      }).join('\n\n---\n\n');
+      
+      if (combined.length < 200) continue;
+      
+      // Extract structured competitor data via Haiku
+      var extractPrompt = 'Extract ALL competitors mentioned in this competitive intelligence brief. For each competitor, provide a JSON array.\n\n' +
+        'Return ONLY a JSON array, no other text. Each object must have these fields:\n' +
+        '- competitor_name: string (official company name)\n' +
+        '- hq_location: string or null (city, state)\n' +
+        '- hq_state: string or null (2-letter state code)\n' +
+        '- strengths: string (key competitive advantages, comma separated)\n' +
+        '- weaknesses: string (known weaknesses, comma separated)\n' +
+        '- threat_level: "primary" | "secondary" | "emerging" | "watch"\n' +
+        '- contract_value: string or null (any known contract values)\n' +
+        '- active_verticals: array of strings (e.g. ["Disaster Recovery","Grant Management"])\n' +
+        '- active_states: array of strings (e.g. ["LA","MS","TX"])\n' +
+        '- certifications: array of strings or empty array\n' +
+        '- key_personnel: string or null (any named individuals)\n' +
+        '- price_intelligence: string or null (any pricing data found)\n' +
+        '- strategic_notes: string (1-2 sentence summary of competitive position vs HGI)\n\n' +
+        'Intelligence brief:\n' + combined;
+      
+      try {
+        var ciResp = await claudeCall(extractPrompt, { model: 'claude-haiku-4-5-20251001', max_tokens: 4000 });
+        
+        // Parse JSON from response
+        var jsonMatch = ciResp.match(/\[[\s\S]*\]/);
+        if (!jsonMatch) continue;
+        
+        var competitors = JSON.parse(jsonMatch[0]);
+        
+        for (var ci = 0; ci < competitors.length; ci++) {
+          var comp = competitors[ci];
+          if (!comp.competitor_name || comp.competitor_name.length < 2) continue;
+          
+          // Upsert — check if this competitor already exists for this opportunity
+          var existing = await supabase.from('competitive_intelligence')
+            .select('id')
+            .eq('competitor_name', comp.competitor_name)
+            .eq('opportunity_id', oppId === 'global' ? null : oppId)
+            .limit(1);
+          
+          var record = {
+            competitor_name: comp.competitor_name,
+            opportunity_id: oppId === 'global' ? null : oppId,
+            hq_location: comp.hq_location || null,
+            hq_state: comp.hq_state || null,
+            strengths: comp.strengths || null,
+            weaknesses: comp.weaknesses || null,
+            threat_level: comp.threat_level || 'watch',
+            contract_value: comp.contract_value || null,
+            active_verticals: comp.active_verticals || [],
+            active_states: comp.active_states || [],
+            certifications: comp.certifications || [],
+            key_personnel: comp.key_personnel || null,
+            price_intelligence: comp.price_intelligence || null,
+            strategic_notes: comp.strategic_notes || null,
+            source_agent: 'ci_extractor',
+            updated_at: new Date().toISOString()
+          };
+          
+          if (existing.data && existing.data.length > 0) {
+            await supabase.from('competitive_intelligence')
+              .update(record)
+              .eq('id', existing.data[0].id);
+          } else {
+            record.id = 'ci-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+            record.created_at = new Date().toISOString();
+            await supabase.from('competitive_intelligence').insert(record);
+          }
+          totalExtracted++;
+        }
+      } catch(parseErr) {
+        log('CI EXTRACT: Parse error for opp ' + oppId.slice(0, 30) + ': ' + parseErr.message);
+      }
+    }
+    
+    log('CI EXTRACT: Complete — ' + totalExtracted + ' competitor records upserted from ' + oppIds.length + ' opportunities');
+    res.end(JSON.stringify({ success: true, records_upserted: totalExtracted, opportunities_processed: oppIds.length }));
+    
+  } catch(e) {
+    log('CI EXTRACT ERROR: ' + e.message);
+    res.end(JSON.stringify({ error: e.message }));
+  }
+  return;
+}
+
+// === CI DASHBOARD — /api/competitors ===
+if (url.startsWith('/api/competitors')) {
+  res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
+  try {
+    var ciData = await supabase.from('competitive_intelligence')
+      .select('*')
+      .neq('competitor_name', 'market_research')
+      .order('updated_at', { ascending: false });
+    
+    var records = ciData.data || [];
+    
+    // Build competitor profiles — merge records for same competitor across opportunities
+    var profiles = {};
+    records.forEach(function(r) {
+      var name = r.competitor_name;
+      if (!profiles[name]) {
+        profiles[name] = {
+          name: name,
+          hq_location: r.hq_location,
+          hq_state: r.hq_state,
+          threat_level: r.threat_level,
+          strengths: r.strengths,
+          weaknesses: r.weaknesses,
+          active_verticals: r.active_verticals || [],
+          active_states: r.active_states || [],
+          certifications: r.certifications || [],
+          key_personnel: r.key_personnel,
+          price_intelligence: r.price_intelligence,
+          opportunities_competing: [],
+          total_records: 0,
+          last_updated: r.updated_at || r.created_at
+        };
+      }
+      profiles[name].total_records++;
+      if (r.opportunity_id) profiles[name].opportunities_competing.push(r.opportunity_id);
+      // Merge arrays
+      (r.active_states || []).forEach(function(s) {
+        if (profiles[name].active_states.indexOf(s) === -1) profiles[name].active_states.push(s);
+      });
+      (r.active_verticals || []).forEach(function(v) {
+        if (profiles[name].active_verticals.indexOf(v) === -1) profiles[name].active_verticals.push(v);
+      });
+    });
+    
+    res.end(JSON.stringify({
+      total_competitors: Object.keys(profiles).length,
+      total_records: records.length,
+      profiles: Object.values(profiles).sort(function(a, b) {
+        var order = { primary: 0, secondary: 1, emerging: 2, watch: 3 };
+        return (order[a.threat_level] || 4) - (order[b.threat_level] || 4);
+      })
+    }));
+  } catch(e) {
+    res.end(JSON.stringify({ error: e.message }));
+  }
+  return;
+}
+
 // === PROPOSAL DOCUMENT GENERATOR — /api/proposal-doc ===
 if (url.startsWith('/api/proposal-doc')) {
   var docId = (req.url.split('?id=')[1]||'').split('&')[0];
