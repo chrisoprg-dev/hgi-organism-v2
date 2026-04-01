@@ -232,16 +232,17 @@ const server = http.createServer(async (req, res) => {
       var ppId = (req.url.split('?id=')[1]||'').split('&')[0];
       if (!ppId) { res.writeHead(400, {'Content-Type':'application/json'}); res.end('{"error":"id required"}'); return; }
       try {
-        var ppOpp = await supabase.from('opportunities').select('title,agency,opi_score,stage,due_date,scope_analysis,financial_analysis,research_brief,staffing_plan,capture_action,rfp_document_retrieved').eq('id', decodeURIComponent(ppId)).single();
+        var ppOpp = await supabase.from('opportunities').select('title,agency,opi_score,stage,due_date,scope_analysis,financial_analysis,research_brief,staffing_plan,capture_action,proposal_content,rfp_document_retrieved').eq('id', decodeURIComponent(ppId)).single();
         var ppMems = await supabase.from('organism_memory').select('agent,observation,memory_type,created_at').eq('opportunity_id', decodeURIComponent(ppId)).neq('memory_type','decision_point').order('created_at', { ascending: false }).limit(50);
         var o = ppOpp.data || {};
         var mems = ppMems.data || [];
         var sections = [
+          { title: 'PROPOSAL CONTENT (Submission-Ready)', content: o.proposal_content },
           { title: 'Scope Analysis', content: o.scope_analysis },
           { title: 'Financial Analysis', content: o.financial_analysis },
           { title: 'Research Brief', content: o.research_brief },
           { title: 'Staffing Plan', content: o.staffing_plan },
-          { title: 'Capture Action / GO Decision', content: o.capture_action }
+          { title: 'Capture Action / GO Decision (Internal Only)', content: o.capture_action }
         ].filter(function(s){ return s.content; });
         var memsByAgent = {};
         mems.forEach(function(m){ if(!memsByAgent[m.agent]) memsByAgent[m.agent]=[]; memsByAgent[m.agent].push(m); });
@@ -506,9 +507,9 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       proposalText = (finalMessage.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
       log('PROPOSAL ENGINE: Generated ' + proposalText.length + ' chars');
 
-      // 6. Store the proposal
+      // 6. Store the proposal in dedicated column (NOT capture_action — that's the organism's internal analysis)
       await supabase.from('opportunities').update({
-        capture_action: '# PROPOSAL DRAFT — READY FOR REVIEW\n\n' + proposalText,
+        proposal_content: '# PROPOSAL DRAFT — READY FOR REVIEW\n\n' + proposalText,
         last_updated: new Date().toISOString()
       }).eq('id', ppId);
 
@@ -516,7 +517,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       await supabase.from('organism_memory').insert({
         agent: 'proposal_engine',
         opportunity_id: ppId,
-        observation: 'PROPOSAL PRODUCED: ' + (opp.title||'').slice(0,50) + ' — ' + proposalText.length + ' chars generated. Stored in capture_action field. Ready for President review.',
+        observation: 'PROPOSAL PRODUCED: ' + (opp.title||'').slice(0,50) + ' — ' + proposalText.length + ' chars generated. Stored in proposal_content field. Ready for President review.',
         memory_type: 'analysis',
         created_at: new Date().toISOString()
       });
@@ -541,10 +542,14 @@ if (url.startsWith('/api/proposal-doc')) {
     var opp = docOpp.data;
     if (!opp) { res.writeHead(404); res.end(JSON.stringify({error:'not found'})); return; }
 
-    // Get proposal text from capture_action
-    var proposalText = (opp.capture_action || '').replace(/^# PROPOSAL DRAFT.*?\n\n/, '');
+    // Get proposal text from proposal_content (NOT capture_action — that's internal analysis)
+    var proposalText = (opp.proposal_content || '').replace(/^# PROPOSAL DRAFT.*?\n\n/, '');
     if (!proposalText || proposalText.length < 500) {
-      res.writeHead(400); res.end(JSON.stringify({error:'No proposal draft found. Run /api/produce-proposal first.'})); return;
+      res.writeHead(400); res.end(JSON.stringify({
+        error: 'No proposal content found. Run /api/produce-proposal first to generate submission-ready content.',
+        has_capture_action: !!(opp.capture_action && opp.capture_action.length > 500),
+        note: 'capture_action contains the organism internal analysis (GO/NO-GO brief), not proposal content.'
+      })); return;
     }
 
     // --- MARKDOWN → DOCX PARSER (UPGRADED SESSION 69) ---
@@ -1621,10 +1626,10 @@ if (url.startsWith('/api/proposal-bundle')) {
         while (waited < maxWait) {
           await new Promise(function(r) { setTimeout(r, interval); });
           waited += interval;
-          var checkOpp = await supabase.from('opportunities').select('capture_action').eq('id', pbId).single();
-          var ca = (checkOpp.data || {}).capture_action || '';
-          if (ca.length > 1000 && ca.indexOf('PROPOSAL DRAFT') > -1) {
-            log('PROPOSAL BUNDLE: Opus complete (' + ca.length + ' chars after ' + (waited/1000) + 's)');
+          var checkOpp = await supabase.from('opportunities').select('proposal_content').eq('id', pbId).single();
+          var pc = (checkOpp.data || {}).proposal_content || '';
+          if (pc.length > 1000 && pc.indexOf('PROPOSAL DRAFT') > -1) {
+            log('PROPOSAL BUNDLE: Opus complete (' + pc.length + ' chars after ' + (waited/1000) + 's)');
             break;
           }
         }
