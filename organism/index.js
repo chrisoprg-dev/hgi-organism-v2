@@ -892,7 +892,7 @@ if (url.startsWith('/api/contacts')) {
 
 // === PHASE 3 INTELLIGENCE SUMMARY — /api/phase3 ===
 if (url.startsWith('/api/phase3')) {
-  res.writeHead(200, corsJ);
+  res.writeHead(200, { 'Content-Type': 'application/json' });
   try {
     var p3agents = ['disaster_monitor','contract_expiration','budget_cycle','regulatory_monitor',
       'teaming_agent','loss_analysis','win_rate_analytics','recompete_agent','agency_profile_agent',
