@@ -481,17 +481,22 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         'Extract the exact evaluation criteria and point values from the RFP.\n' +
         'Organize your response to maximize points on the highest-weighted criteria.\n' +
         'Address every criterion explicitly — do not leave points on the table.\n\n' +
+        'CRITICAL PERSONNEL EXCLUSION:\n' +
+        '- Geoffrey Brien is NO LONGER WITH HGI. Do not include him in any staffing, personnel, org charts, or team descriptions. If organism intelligence references Brien, IGNORE those references. Replace his role assignments with [TO BE DETERMINED — DR/PA SME] or redistribute to other confirmed staff.\n' +
+        '- Confirmed current HGI staff: President (Christopher Oney), CEO (Lou Resweber), VP (Dillon Truax), CAO (Candy Dottolo), SVP Claims (Vanessa James), 1099 SME (Chris Feduccia). No other named individuals unless confirmed in the organism intelligence as current HGI employees.\n\n' +
         'RULES:\n' +
         '- Produce ONLY what the solicitation asks for — nothing more, nothing less\n' +
         '- Every claim must be backed by real HGI data from the company profile and organism intelligence above\n' +
-        '- No placeholder text — every field, section, and exhibit must be complete\n' +
+        '- MINIMIZE [ACTION REQUIRED] flags — use them ONLY for items that genuinely cannot be completed without human action: wet signatures, notarizations, insurance certificates, contact info the system truly does not have. If the data exists anywhere in the context above, USE IT instead of flagging it.\n' +
         '- Use ONLY confirmed HGI past performance. Never fabricate projects, dollar amounts, or references.\n' +
-        '- Include specific dollar amounts, dates, staff names from confirmed HGI data\n' +
-        '- Professional tone — this goes directly to the evaluators\n' +
-        '- No mention of AI, organism, agents, or the capture system\n' +
+        '- Include specific dollar amounts, dates, and confirmed staff names from HGI data\n' +
+        '- Write to WIN — not to fill space. Every sentence should earn points with evaluators. Cut filler, cut repetition, be direct and specific.\n' +
+        '- Professional, confident tone — this goes directly to evaluators. No hedging, no qualifications, no "we believe" or "we feel" — state capabilities as facts.\n' +
+        '- No mention of AI, organism, agents, confidence levels, or the capture system\n' +
         '- Document must look like it came from the President with no visible AI involvement\n' +
-        '- Flag any items that require manual action (notarized signatures, insurance certificates, forms that must be wet-signed)\n' +
-        '- If the RFP requires information HGI does not have, flag it clearly as [ACTION REQUIRED: description] rather than inventing data';
+        '- HGI was established in 1931 (not 1929). SAM UEI: DL4SJEVKZ6H4 (verify exact characters)\n' +
+        '- Do NOT impose section numbering (1.0, 2.0) unless the RFP specifically uses numbered sections. Match the RFP structure exactly.\n' +
+        '- Do NOT include a Table of Contents unless the RFP requires one. If included, build it as real content with section names and approximate page numbers — not a placeholder.';
 
       log('PROPOSAL ENGINE: Calling Claude Opus 4.6 (128K max) with ' + proposalPrompt.length + ' char prompt');
 
@@ -500,7 +505,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       var stream = await anthropic.messages.stream({
         model: 'claude-opus-4-6',
         max_tokens: 128000,
-        system: 'You are a senior government proposal writer at HGI Global. You produce submission-ready documents that EXACTLY match what each solicitation requires — questionnaire forms filled field-by-field when forms are required, narrative proposals when narratives are required, exhibits and attachments as specified. Be specific, factual, and persuasive. Use only confirmed company data. Never produce a generic proposal format when the solicitation specifies a different format.',
+        system: 'You are a senior government proposal writer at HGI Global (Hammerman & Gainer LLC), a 95-year-old Louisiana-based firm. You produce submission-ready documents that WIN — not average drafts. Every word earns points with evaluators. You match the exact format each solicitation requires (questionnaire forms filled field-by-field, narrative proposals with specified sections, exhibits completed). You are specific, factual, direct, and persuasive. You use only confirmed company data. You write like the firm President would write — authoritative, zero filler, zero hedging. IMPORTANT: Geoffrey Brien no longer works at HGI. Never include him.',
         messages: [{role:'user', content: proposalPrompt}]
       });
       var finalMessage = await stream.finalMessage();
@@ -629,15 +634,6 @@ if (url.startsWith('/api/proposal-doc')) {
       });
     }
 
-    // Section numbering tracker
-    var sectionNum = { h1: 0, h2: 0, h3: 0 };
-    function getSectionNumber(level) {
-      if (level === 1) { sectionNum.h1++; sectionNum.h2 = 0; sectionNum.h3 = 0; return sectionNum.h1 + '.0'; }
-      if (level === 2) { sectionNum.h2++; sectionNum.h3 = 0; return sectionNum.h1 + '.' + sectionNum.h2; }
-      if (level === 3) { sectionNum.h3++; return sectionNum.h1 + '.' + sectionNum.h2 + '.' + sectionNum.h3; }
-      return '';
-    }
-
     // Parse full markdown to docx children
     var allLines = proposalText.split('\n');
     var docChildren = [];
@@ -648,12 +644,10 @@ if (url.startsWith('/api/proposal-doc')) {
 
       // Headings
       if (line.startsWith('### ')) {
-        var num = getSectionNumber(3);
         docChildren.push(new Paragraph({
           heading: HeadingLevel.HEADING_3,
           spacing: { before: 200, after: 100 },
           children: [
-            new TextRun({ text: num + '  ', size: 24, font: 'Calibri', color: GRAY }),
             new TextRun({ text: line.slice(4).trim(), bold: true, size: 24, font: 'Calibri', color: '4B5563' })
           ]
         }));
@@ -661,12 +655,10 @@ if (url.startsWith('/api/proposal-doc')) {
         continue;
       }
       if (line.startsWith('## ')) {
-        var num = getSectionNumber(2);
         docChildren.push(new Paragraph({
           heading: HeadingLevel.HEADING_2,
           spacing: { before: 300, after: 150 },
           children: [
-            new TextRun({ text: num + '  ', size: 28, font: 'Calibri', color: GOLD }),
             new TextRun({ text: line.slice(3).trim(), bold: true, size: 28, font: 'Calibri', color: NAVY })
           ]
         }));
@@ -674,7 +666,6 @@ if (url.startsWith('/api/proposal-doc')) {
         continue;
       }
       if (line.startsWith('# ')) {
-        var num = getSectionNumber(1);
         // Add gold accent bar before H1
         docChildren.push(new Paragraph({
           spacing: { before: 400, after: 0 },
@@ -685,7 +676,6 @@ if (url.startsWith('/api/proposal-doc')) {
           heading: HeadingLevel.HEADING_1,
           spacing: { before: 100, after: 200 },
           children: [
-            new TextRun({ text: num + '  ', size: 32, font: 'Calibri', color: GOLD }),
             new TextRun({ text: line.slice(2).trim(), bold: true, size: 32, font: 'Calibri', color: NAVY })
           ]
         }));
@@ -1086,6 +1076,21 @@ if (url.startsWith('/api/proposal-doc')) {
       log('PROPOSAL DOC: Appendix generation error — ' + appendixErr.message);
     }
 
+    // Format due date for cover page
+    var coverDate = 'TBD';
+    if (opp.due_date) {
+      try {
+        var d = new Date(opp.due_date);
+        if (!isNaN(d.getTime())) {
+          var months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+          coverDate = months[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
+        } else {
+          // Try parsing common formats like "24-Apr-2026 2:00:00 PM CST"
+          coverDate = opp.due_date.replace(/T\d{2}:\d{2}:\d{2}.*$/, '').replace(/(\d+)-(\w+)-(\d+).*/, function(m,day,mon,yr) { return mon + ' ' + day + ', ' + yr; });
+        }
+      } catch(e) { coverDate = opp.due_date; }
+    }
+
     // --- BUILD THE DOCUMENT ---
     var doc = new Document({
       numbering: {
@@ -1142,7 +1147,7 @@ if (url.startsWith('/api/proposal-doc')) {
             }),
             new Paragraph({
               alignment: AlignmentType.CENTER, spacing: { after: 100 },
-              children: [new TextRun({ text: 'Due: ' + (opp.due_date || 'TBD'), size: 22, font: 'Calibri', color: GRAY })]
+              children: [new TextRun({ text: 'Due: ' + coverDate, size: 22, font: 'Calibri', color: GRAY })]
             }),
             // Gold accent bar
             new Paragraph({ spacing: { before: 400 }, border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: GOLD, space: 8 } }, children: [] }),
@@ -1156,52 +1161,10 @@ if (url.startsWith('/api/proposal-doc')) {
               children: [new TextRun({ text: '2400 Veterans Memorial Blvd, Suite 510, Kenner, LA 70062', size: 20, font: 'Calibri', color: GRAY })]
             }),
             new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 100 },
-              children: [new TextRun({ text: '100% Minority-Owned | Est. 1929 | SAM UEI: DL4SJEVKZ6H4', size: 20, font: 'Calibri', color: GRAY })]
+              children: [new TextRun({ text: '100% Minority-Owned | Est. 1931 | SAM UEI: DL4SJEVKZ6H4', size: 20, font: 'Calibri', color: GRAY })]
             }),
             // Bottom gold bar
             new Paragraph({ spacing: { before: 2000 }, border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: GOLD, space: 8 } }, children: [] }),
-          ]
-        },
-        // TABLE OF CONTENTS
-        {
-          properties: {
-            page: {
-              size: { width: 12240, height: 15840 },
-              margin: { top: 1440, bottom: 1440, left: 1440, right: 1440 }
-            }
-          },
-          headers: {
-            default: new Header({
-              children: [new Paragraph({
-                alignment: AlignmentType.RIGHT,
-                children: [new TextRun({ text: 'HGI Global \u2014 ' + (opp.title || '').slice(0, 50), size: 16, font: 'Calibri', color: '9CA3AF', italics: true })]
-              })]
-            })
-          },
-          footers: {
-            default: new Footer({
-              children: [
-                new Paragraph({
-                  spacing: { before: 0 },
-                  border: { top: { style: BorderStyle.SINGLE, size: 2, color: GOLD, space: 4 } },
-                  alignment: AlignmentType.CENTER,
-                  children: [
-                    new TextRun({ text: 'CONFIDENTIAL \u2014 HGI Global (Hammerman & Gainer LLC)  |  Page ', size: 16, font: 'Calibri', color: '9CA3AF' }),
-                    new TextRun({ children: [PageNumber.CURRENT], size: 16, font: 'Calibri', color: '9CA3AF' })
-                  ]
-                })
-              ]
-            })
-          },
-          children: [
-            new Paragraph({
-              spacing: { after: 400 },
-              children: [new TextRun({ text: 'TABLE OF CONTENTS', bold: true, size: 32, font: 'Calibri', color: NAVY })]
-            }),
-            new TableOfContents('Table of Contents', {
-              hyperlink: true,
-              headingStyleRange: '1-3'
-            })
           ]
         },
         // BODY
@@ -1228,7 +1191,7 @@ if (url.startsWith('/api/proposal-doc')) {
                   border: { top: { style: BorderStyle.SINGLE, size: 2, color: GOLD, space: 4 } },
                   alignment: AlignmentType.CENTER,
                   children: [
-                    new TextRun({ text: 'CONFIDENTIAL \u2014 HGI Global (Hammerman & Gainer LLC)  |  Page ', size: 16, font: 'Calibri', color: '9CA3AF' }),
+                    new TextRun({ text: 'HGI Global (Hammerman & Gainer LLC)  |  Page ', size: 16, font: 'Calibri', color: '9CA3AF' }),
                     new TextRun({ children: [PageNumber.CURRENT], size: 16, font: 'Calibri', color: '9CA3AF' })
                   ]
                 })
@@ -1260,7 +1223,7 @@ if (url.startsWith('/api/proposal-doc')) {
                 border: { top: { style: BorderStyle.SINGLE, size: 2, color: GOLD, space: 4 } },
                 alignment: AlignmentType.CENTER,
                 children: [
-                  new TextRun({ text: 'CONFIDENTIAL \u2014 HGI Global (Hammerman & Gainer LLC)  |  Page ', size: 16, font: 'Calibri', color: '9CA3AF' }),
+                  new TextRun({ text: 'HGI Global (Hammerman & Gainer LLC)  |  Page ', size: 16, font: 'Calibri', color: '9CA3AF' }),
                   new TextRun({ children: [PageNumber.CURRENT], size: 16, font: 'Calibri', color: '9CA3AF' })
                 ]
               })
