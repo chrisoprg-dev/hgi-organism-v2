@@ -6,7 +6,7 @@ import http from 'http';
 import { createClient } from '@supabase/supabase-js';
 import fs from 'fs';
 import path from 'path';
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, BorderStyle, Tab, TabStopType, Header, Footer, Table, TableRow, TableCell, ShadingType, LevelFormat, WidthType, PageBreak, PageNumber, TableOfContents } from 'docx';
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, BorderStyle, Tab, TabStopType, Header, Footer, Table, TableRow, TableCell, ShadingType, LevelFormat, WidthType, PageBreak, PageNumber, TableOfContents, ImageRun } from 'docx';
 
 process.on('unhandledRejection', (r) => log('UNHANDLED: ' + (r instanceof Error ? r.message : String(r)).slice(0,150)));
 process.on('uncaughtException', (e) => log('UNCAUGHT: ' + e.message.slice(0,150)));
@@ -779,6 +779,282 @@ if (url.startsWith('/api/proposal-doc')) {
       }
     }
 
+    // --- BUILD APPENDICES FROM ORGANISM MEMORY ---
+    var appendixChildren = [];
+    var D = String.fromCharCode(36);
+    var border = { style: BorderStyle.SINGLE, size: 1, color: 'D1D5DB' };
+    var borders = { top: border, bottom: border, left: border, right: border };
+
+    try {
+      // Query for compliance matrix, rate table, and org chart data
+      var cmMem = await supabase.from('organism_memory').select('observation')
+        .eq('opportunity_id', docId).eq('memory_type', 'compliance_matrix_data')
+        .order('created_at', {ascending:false}).limit(1);
+      var rtMem = await supabase.from('organism_memory').select('observation')
+        .eq('opportunity_id', docId).eq('memory_type', 'rate_table_data')
+        .order('created_at', {ascending:false}).limit(1);
+      var ocMem = await supabase.from('organism_memory').select('observation')
+        .eq('opportunity_id', docId).eq('memory_type', 'org_chart_data')
+        .order('created_at', {ascending:false}).limit(1);
+
+      // APPENDIX A: ORGANIZATIONAL CHART (embedded PNG from Kroki)
+      if (ocMem.data && ocMem.data.length > 0) {
+        try {
+          var ocData = JSON.parse(ocMem.data[0].observation);
+          if (ocData.org_chart) {
+            appendixChildren.push(new Paragraph({
+              spacing: { before: 400 }, border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: GOLD, space: 4 } }, children: []
+            }));
+            appendixChildren.push(new Paragraph({
+              heading: HeadingLevel.HEADING_1,
+              spacing: { before: 100, after: 200 },
+              children: [new TextRun({ text: 'APPENDIX A: ORGANIZATIONAL CHART', bold: true, size: 32, font: 'Calibri', color: NAVY })]
+            }));
+
+            // Render org chart as PNG via Kroki
+            try {
+              var orgPngResp = await fetch('https://kroki.io/mermaid/png', {
+                method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: ocData.org_chart
+              });
+              if (orgPngResp.ok) {
+                var orgPngBuf = Buffer.from(await orgPngResp.arrayBuffer());
+                log('PROPOSAL DOC: Org chart PNG — ' + orgPngBuf.length + ' bytes');
+                appendixChildren.push(new Paragraph({
+                  alignment: AlignmentType.CENTER,
+                  spacing: { after: 200 },
+                  children: [new ImageRun({ data: orgPngBuf, transformation: { width: 550, height: 400 }, type: 'png' })]
+                }));
+              }
+            } catch(pngErr) { log('PROPOSAL DOC: Org chart PNG failed — ' + pngErr.message); }
+
+            if (ocData.description) {
+              appendixChildren.push(new Paragraph({
+                spacing: { after: 200 },
+                children: [new TextRun({ text: ocData.description, size: 22, font: 'Calibri', italics: true, color: GRAY })]
+              }));
+            }
+
+            // Methodology flow if available
+            if (ocData.methodology_flow) {
+              appendixChildren.push(new Paragraph({
+                heading: HeadingLevel.HEADING_2,
+                spacing: { before: 300, after: 150 },
+                children: [new TextRun({ text: 'Methodology Flow', bold: true, size: 28, font: 'Calibri', color: NAVY })]
+              }));
+              try {
+                var methPngResp = await fetch('https://kroki.io/mermaid/png', {
+                  method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: ocData.methodology_flow
+                });
+                if (methPngResp.ok) {
+                  var methPngBuf = Buffer.from(await methPngResp.arrayBuffer());
+                  log('PROPOSAL DOC: Methodology flow PNG — ' + methPngBuf.length + ' bytes');
+                  appendixChildren.push(new Paragraph({
+                    alignment: AlignmentType.CENTER,
+                    spacing: { after: 200 },
+                    children: [new ImageRun({ data: methPngBuf, transformation: { width: 600, height: 350 }, type: 'png' })]
+                  }));
+                }
+              } catch(methErr) { log('PROPOSAL DOC: Methodology PNG failed — ' + methErr.message); }
+            }
+          }
+        } catch(ocParseErr) { log('PROPOSAL DOC: Org chart parse failed — ' + ocParseErr.message); }
+      }
+
+      // APPENDIX B: COMPLIANCE MATRIX
+      if (cmMem.data && cmMem.data.length > 0) {
+        try {
+          var cmData = JSON.parse(cmMem.data[0].observation);
+          if (cmData.requirements && cmData.requirements.length > 0) {
+            appendixChildren.push(new Paragraph({ children: [new PageBreak()] }));
+            appendixChildren.push(new Paragraph({
+              spacing: { before: 400 }, border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: GOLD, space: 4 } }, children: []
+            }));
+            appendixChildren.push(new Paragraph({
+              heading: HeadingLevel.HEADING_1,
+              spacing: { before: 100, after: 200 },
+              children: [new TextRun({ text: 'APPENDIX B: COMPLIANCE MATRIX', bold: true, size: 32, font: 'Calibri', color: NAVY })]
+            }));
+
+            // Compliance matrix table
+            var cmColWidths = [1000, 3500, 1200, 1400, 1200, 1060];
+            var cmHeaderRow = new TableRow({
+              children: ['ID', 'Requirement', 'Category', 'Status', 'Response Section', 'Notes'].map(function(h, ci) {
+                return new TableCell({
+                  borders: borders, width: { size: cmColWidths[ci], type: WidthType.DXA },
+                  shading: { fill: TABLE_HEADER, type: ShadingType.CLEAR },
+                  margins: { top: 40, bottom: 40, left: 80, right: 80 },
+                  children: [new Paragraph({ children: [new TextRun({ text: h, bold: true, size: 18, font: 'Calibri', color: 'FFFFFF' })] })]
+                });
+              })
+            });
+            var cmRows = [cmHeaderRow];
+            cmData.requirements.forEach(function(req, ri) {
+              cmRows.push(new TableRow({
+                children: [
+                  req.id || '', req.description || '', req.category || '', req.status || '', req.response_section || '', req.notes || ''
+                ].map(function(val, ci) {
+                  return new TableCell({
+                    borders: borders, width: { size: cmColWidths[ci], type: WidthType.DXA },
+                    shading: ri % 2 === 0 ? { fill: TABLE_ALT, type: ShadingType.CLEAR } : { fill: 'FFFFFF', type: ShadingType.CLEAR },
+                    margins: { top: 40, bottom: 40, left: 80, right: 80 },
+                    children: [new Paragraph({ children: [new TextRun({ text: val, size: 18, font: 'Calibri' })] })]
+                  });
+                })
+              }));
+            });
+            appendixChildren.push(new Table({ width: { size: 9360, type: WidthType.DXA }, columnWidths: cmColWidths, rows: cmRows }));
+
+            // Evaluation criteria sub-table if available
+            if (cmData.eval_criteria && cmData.eval_criteria.length > 0) {
+              appendixChildren.push(new Paragraph({
+                heading: HeadingLevel.HEADING_2,
+                spacing: { before: 300, after: 150 },
+                children: [new TextRun({ text: 'Evaluation Criteria', bold: true, size: 28, font: 'Calibri', color: NAVY })]
+              }));
+              var ecColWidths = [4000, 1500, 3860];
+              var ecHeaderRow = new TableRow({
+                children: ['Criterion', 'Points', 'Weight'].map(function(h, ci) {
+                  return new TableCell({
+                    borders: borders, width: { size: ecColWidths[ci], type: WidthType.DXA },
+                    shading: { fill: TABLE_HEADER, type: ShadingType.CLEAR },
+                    margins: { top: 40, bottom: 40, left: 80, right: 80 },
+                    children: [new Paragraph({ children: [new TextRun({ text: h, bold: true, size: 20, font: 'Calibri', color: 'FFFFFF' })] })]
+                  });
+                })
+              });
+              var ecRows = [ecHeaderRow];
+              cmData.eval_criteria.forEach(function(ec, ri) {
+                ecRows.push(new TableRow({
+                  children: [ec.criterion || '', String(ec.points || ''), ec.weight || ''].map(function(val, ci) {
+                    return new TableCell({
+                      borders: borders, width: { size: ecColWidths[ci], type: WidthType.DXA },
+                      shading: ri % 2 === 0 ? { fill: TABLE_ALT, type: ShadingType.CLEAR } : { fill: 'FFFFFF', type: ShadingType.CLEAR },
+                      margins: { top: 40, bottom: 40, left: 80, right: 80 },
+                      children: [new Paragraph({ children: [new TextRun({ text: val, size: 20, font: 'Calibri' })] })]
+                    });
+                  })
+                }));
+              });
+              appendixChildren.push(new Table({ width: { size: 9360, type: WidthType.DXA }, columnWidths: ecColWidths, rows: ecRows }));
+            }
+
+            // Exhibits sub-table if available
+            if (cmData.exhibits && cmData.exhibits.length > 0) {
+              appendixChildren.push(new Paragraph({
+                heading: HeadingLevel.HEADING_2,
+                spacing: { before: 300, after: 150 },
+                children: [new TextRun({ text: 'Required Exhibits & Attachments', bold: true, size: 28, font: 'Calibri', color: NAVY })]
+              }));
+              var exColWidths = [4000, 1500, 3860];
+              var exHeaderRow = new TableRow({
+                children: ['Exhibit', 'Required', 'Notes'].map(function(h, ci) {
+                  return new TableCell({
+                    borders: borders, width: { size: exColWidths[ci], type: WidthType.DXA },
+                    shading: { fill: TABLE_HEADER, type: ShadingType.CLEAR },
+                    margins: { top: 40, bottom: 40, left: 80, right: 80 },
+                    children: [new Paragraph({ children: [new TextRun({ text: h, bold: true, size: 20, font: 'Calibri', color: 'FFFFFF' })] })]
+                  });
+                })
+              });
+              var exRows = [exHeaderRow];
+              cmData.exhibits.forEach(function(ex, ri) {
+                exRows.push(new TableRow({
+                  children: [ex.name || '', ex.required ? 'YES' : 'No', ex.notes || ''].map(function(val, ci) {
+                    return new TableCell({
+                      borders: borders, width: { size: exColWidths[ci], type: WidthType.DXA },
+                      shading: ri % 2 === 0 ? { fill: TABLE_ALT, type: ShadingType.CLEAR } : { fill: 'FFFFFF', type: ShadingType.CLEAR },
+                      margins: { top: 40, bottom: 40, left: 80, right: 80 },
+                      children: [new Paragraph({ children: [new TextRun({ text: val, size: 20, font: 'Calibri' })] })]
+                    });
+                  })
+                }));
+              });
+              appendixChildren.push(new Table({ width: { size: 9360, type: WidthType.DXA }, columnWidths: exColWidths, rows: exRows }));
+            }
+          }
+        } catch(cmParseErr) { log('PROPOSAL DOC: Compliance matrix parse failed — ' + cmParseErr.message); }
+      }
+
+      // APPENDIX C: FEE SCHEDULE / RATE TABLE
+      if (rtMem.data && rtMem.data.length > 0) {
+        try {
+          var rtData = JSON.parse(rtMem.data[0].observation);
+          if (rtData.positions && rtData.positions.length > 0) {
+            appendixChildren.push(new Paragraph({ children: [new PageBreak()] }));
+            appendixChildren.push(new Paragraph({
+              spacing: { before: 400 }, border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: GOLD, space: 4 } }, children: []
+            }));
+            appendixChildren.push(new Paragraph({
+              heading: HeadingLevel.HEADING_1,
+              spacing: { before: 100, after: 200 },
+              children: [new TextRun({ text: 'APPENDIX C: FEE SCHEDULE', bold: true, size: 32, font: 'Calibri', color: NAVY })]
+            }));
+
+            var rtColWidths = [2200, 2000, 1200, 1400, 1200, 1360];
+            var rtHeaderRow = new TableRow({
+              children: ['Position (RFP)', 'HGI Mapping', 'Rate/Hr', 'Est. Hours/Yr', 'Annual Cost', 'Notes'].map(function(h, ci) {
+                return new TableCell({
+                  borders: borders, width: { size: rtColWidths[ci], type: WidthType.DXA },
+                  shading: { fill: TABLE_HEADER, type: ShadingType.CLEAR },
+                  margins: { top: 40, bottom: 40, left: 80, right: 80 },
+                  children: [new Paragraph({ children: [new TextRun({ text: h, bold: true, size: 18, font: 'Calibri', color: 'FFFFFF' })] })]
+                });
+              })
+            });
+            var rtRows = [rtHeaderRow];
+            rtData.positions.forEach(function(pos, ri) {
+              rtRows.push(new TableRow({
+                children: [
+                  pos.rfp_title || '',
+                  pos.hgi_mapping || '',
+                  D + (pos.hourly_rate || 0).toLocaleString(),
+                  String(pos.est_annual_hours || 0),
+                  D + (pos.annual_cost || 0).toLocaleString(),
+                  pos.notes || ''
+                ].map(function(val, ci) {
+                  return new TableCell({
+                    borders: borders, width: { size: rtColWidths[ci], type: WidthType.DXA },
+                    shading: ri % 2 === 0 ? { fill: TABLE_ALT, type: ShadingType.CLEAR } : { fill: 'FFFFFF', type: ShadingType.CLEAR },
+                    margins: { top: 40, bottom: 40, left: 80, right: 80 },
+                    children: [new Paragraph({ children: [new TextRun({ text: val, size: 18, font: 'Calibri' })] })]
+                  });
+                })
+              }));
+            });
+            appendixChildren.push(new Table({ width: { size: 9360, type: WidthType.DXA }, columnWidths: rtColWidths, rows: rtRows }));
+
+            // Totals summary
+            appendixChildren.push(new Paragraph({ spacing: { before: 200 }, children: [] }));
+            var totalItems = [];
+            if (rtData.annual_total) totalItems.push('Annual Total: ' + D + rtData.annual_total.toLocaleString());
+            if (rtData.base_period_total) totalItems.push('Base Period Total: ' + D + rtData.base_period_total.toLocaleString());
+            if (rtData.total_with_options) totalItems.push('Total with Options: ' + D + rtData.total_with_options.toLocaleString());
+            if (rtData.travel_odc) totalItems.push('Travel/ODC: ' + D + rtData.travel_odc.toLocaleString());
+            if (rtData.period) totalItems.push('Period: ' + rtData.period.base_years + ' base + ' + rtData.period.option_years + ' option years');
+            totalItems.forEach(function(item) {
+              appendixChildren.push(new Paragraph({
+                spacing: { after: 60 },
+                indent: { left: 360 },
+                children: [new TextRun({ text: item, bold: true, size: 22, font: 'Calibri', color: NAVY })]
+              }));
+            });
+            if (rtData.notes) {
+              appendixChildren.push(new Paragraph({
+                spacing: { before: 120, after: 120 },
+                indent: { left: 360 },
+                border: { left: { style: BorderStyle.SINGLE, size: 12, color: GOLD, space: 8 } },
+                children: [new TextRun({ text: rtData.notes, size: 20, font: 'Calibri', italics: true, color: GRAY })]
+              }));
+            }
+          }
+        } catch(rtParseErr) { log('PROPOSAL DOC: Rate table parse failed — ' + rtParseErr.message); }
+      }
+
+      log('PROPOSAL DOC: Appendix built — ' + appendixChildren.length + ' elements');
+    } catch(appendixErr) {
+      log('PROPOSAL DOC: Appendix generation error — ' + appendixErr.message);
+    }
+
     // --- BUILD THE DOCUMENT ---
     var doc = new Document({
       numbering: {
@@ -930,7 +1206,38 @@ if (url.startsWith('/api/proposal-doc')) {
           },
           children: docChildren
         }
-      ]
+      ].concat(appendixChildren.length > 0 ? [{
+        properties: {
+          page: {
+            size: { width: 12240, height: 15840 },
+            margin: { top: 1440, bottom: 1440, left: 1440, right: 1440 }
+          }
+        },
+        headers: {
+          default: new Header({
+            children: [new Paragraph({
+              alignment: AlignmentType.RIGHT,
+              children: [new TextRun({ text: 'HGI Global \u2014 ' + (opp.title || '').slice(0, 50) + ' \u2014 Appendices', size: 16, font: 'Calibri', color: '9CA3AF', italics: true })]
+            })]
+          })
+        },
+        footers: {
+          default: new Footer({
+            children: [
+              new Paragraph({
+                spacing: { before: 0 },
+                border: { top: { style: BorderStyle.SINGLE, size: 2, color: GOLD, space: 4 } },
+                alignment: AlignmentType.CENTER,
+                children: [
+                  new TextRun({ text: 'CONFIDENTIAL \u2014 HGI Global (Hammerman & Gainer LLC)  |  Page ', size: 16, font: 'Calibri', color: '9CA3AF' }),
+                  new TextRun({ children: [PageNumber.CURRENT], size: 16, font: 'Calibri', color: '9CA3AF' })
+                ]
+              })
+            ]
+          })
+        },
+        children: appendixChildren
+      }] : [])
     });
 
     var buffer = await Packer.toBuffer(doc);
@@ -1012,8 +1319,8 @@ if (url.startsWith('/api/compliance-matrix')) {
     await supabase.from('organism_memory').insert({
       agent: 'compliance_matrix',
       opportunity_id: cmId,
-      observation: 'Compliance matrix generated: ' + (cmData.requirements ? cmData.requirements.length : 0) + ' requirements, ' + (cmData.exhibits ? cmData.exhibits.length : 0) + ' exhibits, ' + (cmData.eval_criteria ? cmData.eval_criteria.length : 0) + ' eval criteria.',
-      memory_type: 'analysis',
+      observation: JSON.stringify(cmData),
+      memory_type: 'compliance_matrix_data',
       created_at: new Date().toISOString()
     });
 
@@ -1093,8 +1400,8 @@ if (url.startsWith('/api/rate-table')) {
     await supabase.from('organism_memory').insert({
       agent: 'rate_table_engine',
       opportunity_id: rtId,
-      observation: 'Rate table generated: ' + (rtData.positions ? rtData.positions.length : 0) + ' positions, total ' + D + (rtData.total_with_options || rtData.base_period_total || 'TBD'),
-      memory_type: 'pricing_benchmark',
+      observation: JSON.stringify(rtData),
+      memory_type: 'rate_table_data',
       created_at: new Date().toISOString()
     });
 
@@ -1182,8 +1489,8 @@ if (url.startsWith('/api/org-chart')) {
     await supabase.from('organism_memory').insert({
       agent: 'graphics_engine',
       opportunity_id: ocId,
-      observation: 'Org chart and methodology flow generated for ' + (opp.title || '').slice(0, 50) + '. Diagrams: ' + Object.keys(svgResults).join(', '),
-      memory_type: 'analysis',
+      observation: JSON.stringify(ocData),
+      memory_type: 'org_chart_data',
       created_at: new Date().toISOString()
     });
 
