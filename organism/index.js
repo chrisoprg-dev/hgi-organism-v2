@@ -1110,7 +1110,7 @@ if (url.startsWith('/api/extract-agencies')) {
 
 // === READ ENDPOINTS FOR PHASE 3 STRUCTURED TABLES ===
 if (url.startsWith('/api/regulatory')) {
-  res.writeHead(200, corsJ);
+  res.writeHead(200, { 'Content-Type': 'application/json' });
   try {
     var regData = await supabase.from('regulatory_changes').select('*').order('updated_at', { ascending: false }).limit(100);
     res.end(JSON.stringify(regData.data || []));
@@ -1118,7 +1118,7 @@ if (url.startsWith('/api/regulatory')) {
   return;
 }
 if (url.startsWith('/api/teaming')) {
-  res.writeHead(200, corsJ);
+  res.writeHead(200, { 'Content-Type': 'application/json' });
   try {
     var teamData = await supabase.from('teaming_partners').select('*').order('updated_at', { ascending: false }).limit(100);
     res.end(JSON.stringify(teamData.data || []));
@@ -1126,7 +1126,7 @@ if (url.startsWith('/api/teaming')) {
   return;
 }
 if (url.startsWith('/api/agencies')) {
-  res.writeHead(200, corsJ);
+  res.writeHead(200, { 'Content-Type': 'application/json' });
   try {
     var agData = await supabase.from('agency_profiles').select('*').order('updated_at', { ascending: false }).limit(100);
     res.end(JSON.stringify(agData.data || []));
@@ -1134,7 +1134,7 @@ if (url.startsWith('/api/agencies')) {
   return;
 }
 if (url.startsWith('/api/recompetes')) {
-  res.writeHead(200, corsJ);
+  res.writeHead(200, { 'Content-Type': 'application/json' });
   try {
     var rcData = await supabase.from('recompete_tracker').select('*').order('last_updated', { ascending: false }).limit(100);
     res.end(JSON.stringify(rcData.data || []));
@@ -1184,7 +1184,7 @@ if (url.startsWith('/api/extract-analytics')) {
   return;
 }
 if (url.startsWith('/api/analytics')) {
-  res.writeHead(200, corsJ);
+  res.writeHead(200, { 'Content-Type': 'application/json' });
   try {
     var anlData = await supabase.from('pipeline_analytics').select('*').order('updated_at', { ascending: false }).limit(100);
     res.end(JSON.stringify(anlData.data || []));
