@@ -541,7 +541,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
 
 // === COMPETITIVE INTELLIGENCE EXTRACTION — /api/extract-ci ===
 if (url.startsWith('/api/extract-ci')) {
-  res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
+  res.writeHead(200, { 'Content-Type': 'application/json' });
   
   try {
     log('CI EXTRACT: Starting competitive intelligence extraction');
@@ -663,7 +663,7 @@ if (url.startsWith('/api/extract-ci')) {
 
 // === CI DASHBOARD — /api/competitors ===
 if (url.startsWith('/api/competitors')) {
-  res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
+  res.writeHead(200, { 'Content-Type': 'application/json' });
   try {
     var ciData = await supabase.from('competitive_intelligence')
       .select('*')
