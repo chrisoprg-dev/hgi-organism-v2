@@ -6,7 +6,7 @@ import http from 'http';
 import { createClient } from '@supabase/supabase-js';
 import fs from 'fs';
 import path from 'path';
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, BorderStyle, Tab, TabStopType, Header, Footer } from 'docx';
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, BorderStyle, Tab, TabStopType, Header, Footer, Table, TableRow, TableCell, ShadingType, LevelFormat, WidthType, PageBreak, PageNumber, TableOfContents } from 'docx';
 
 process.on('unhandledRejection', (r) => log('UNHANDLED: ' + (r instanceof Error ? r.message : String(r)).slice(0,150)));
 process.on('uncaughtException', (e) => log('UNCAUGHT: ' + e.message.slice(0,150)));
@@ -487,7 +487,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         '- Include specific dollar amounts, dates, staff names from confirmed HGI data\n' +
         '- Professional tone — this goes directly to the evaluators\n' +
         '- No mention of AI, organism, agents, or the capture system\n' +
-        '- Document must look like it came from Christopher Oney with no visible AI involvement\n' +
+        '- Document must look like it came from the President with no visible AI involvement\n' +
         '- Flag any items that require manual action (notarized signatures, insurance certificates, forms that must be wet-signed)\n' +
         '- If the RFP requires information HGI does not have, flag it clearly as [ACTION REQUIRED: description] rather than inventing data';
 
@@ -515,7 +515,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       await supabase.from('organism_memory').insert({
         agent: 'proposal_engine',
         opportunity_id: ppId,
-        observation: 'PROPOSAL PRODUCED: ' + (opp.title||'').slice(0,50) + ' — ' + proposalText.length + ' chars generated. Stored in capture_action field. Ready for Christopher review.',
+        observation: 'PROPOSAL PRODUCED: ' + (opp.title||'').slice(0,50) + ' — ' + proposalText.length + ' chars generated. Stored in capture_action field. Ready for President review.',
         memory_type: 'analysis',
         created_at: new Date().toISOString()
       });
@@ -543,155 +543,396 @@ if (url.startsWith('/api/proposal-doc')) {
     // Get proposal text from capture_action
     var proposalText = (opp.capture_action || '').replace(/^# PROPOSAL DRAFT.*?\n\n/, '');
     if (!proposalText || proposalText.length < 500) {
-      res.writeHead(400); res.end(JSON.stringify({error:'No proposal draft found. Run /api/proposal-brief first.'})); return;
+      res.writeHead(400); res.end(JSON.stringify({error:'No proposal draft found. Run /api/produce-proposal first.'})); return;
     }
 
-    // Parse markdown into sections
-    var lines = proposalText.split('\n');
-    var sections = [];
-    var currentSection = null;
+    // --- MARKDOWN → DOCX PARSER (UPGRADED SESSION 69) ---
 
-    for (var li = 0; li < lines.length; li++) {
-      var line = lines[li];
-      if (line.startsWith('# ')) {
-        if (currentSection) sections.push(currentSection);
-        currentSection = { title: line.slice(2).trim(), level: 1, content: [] };
-      } else if (line.startsWith('## ')) {
-        if (currentSection) sections.push(currentSection);
-        currentSection = { title: line.slice(3).trim(), level: 2, content: [] };
-      } else if (line.startsWith('### ')) {
-        if (currentSection) sections.push(currentSection);
-        currentSection = { title: line.slice(4).trim(), level: 3, content: [] };
-      } else {
-        if (!currentSection) currentSection = { title: '', level: 0, content: [] };
-        currentSection.content.push(line);
+    // Colors
+    var NAVY = '1B2A4A';
+    var GOLD = 'C8962E';
+    var GRAY = '6B7280';
+    var LIGHT_GRAY = 'F3F4F6';
+    var TABLE_HEADER = '1B2A4A';
+    var TABLE_ALT = 'F9FAFB';
+
+    // Parse inline formatting: **bold**, *italic*, `code`
+    function parseInline(text) {
+      var runs = [];
+      // Split on bold, italic, and code patterns
+      var parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/);
+      for (var i = 0; i < parts.length; i++) {
+        var p = parts[i];
+        if (!p) continue;
+        if (p.startsWith('**') && p.endsWith('**')) {
+          runs.push(new TextRun({ text: p.slice(2,-2), bold: true, size: 22, font: 'Calibri' }));
+        } else if (p.startsWith('*') && p.endsWith('*')) {
+          runs.push(new TextRun({ text: p.slice(1,-1), italics: true, size: 22, font: 'Calibri' }));
+        } else if (p.startsWith('`') && p.endsWith('`')) {
+          runs.push(new TextRun({ text: p.slice(1,-1), font: 'Courier New', size: 20, color: '374151' }));
+        } else {
+          runs.push(new TextRun({ text: p, size: 22, font: 'Calibri' }));
+        }
       }
+      return runs.length > 0 ? runs : [new TextRun({ text: text, size: 22, font: 'Calibri' })];
     }
-    if (currentSection) sections.push(currentSection);
 
-    // Build Word document
+    // Parse markdown table
+    function parseTable(lines) {
+      var rows = [];
+      for (var i = 0; i < lines.length; i++) {
+        if (lines[i].match(/^\|[\s-:|]+\|String.fromCharCode(36)/)) continue; // skip separator
+        var cells = lines[i].split('|').filter(function(c, idx) { return idx > 0 && idx < lines[i].split('|').length - 1; });
+        rows.push(cells.map(function(c) { return c.trim(); }));
+      }
+      if (rows.length === 0) return null;
+
+      var numCols = rows[0].length;
+      var colWidth = Math.floor(9360 / numCols);
+      var colWidths = [];
+      for (var c = 0; c < numCols; c++) colWidths.push(colWidth);
+
+      var border = { style: BorderStyle.SINGLE, size: 1, color: 'D1D5DB' };
+      var borders = { top: border, bottom: border, left: border, right: border };
+
+      var tableRows = rows.map(function(row, rowIdx) {
+        var isHeader = rowIdx === 0;
+        return new TableRow({
+          children: row.map(function(cell) {
+            return new TableCell({
+              borders: borders,
+              width: { size: colWidth, type: WidthType.DXA },
+              shading: isHeader ? { fill: TABLE_HEADER, type: ShadingType.CLEAR } : (rowIdx % 2 === 0 ? { fill: TABLE_ALT, type: ShadingType.CLEAR } : { fill: 'FFFFFF', type: ShadingType.CLEAR }),
+              margins: { top: 60, bottom: 60, left: 100, right: 100 },
+              children: [new Paragraph({
+                children: parseInline(cell).map(function(r) {
+                  if (isHeader) return new TextRun({ text: r.options ? r.options.text || '' : '', bold: true, size: 20, font: 'Calibri', color: 'FFFFFF' });
+                  return r;
+                })
+              })]
+            });
+          })
+        });
+      });
+
+      return new Table({
+        width: { size: 9360, type: WidthType.DXA },
+        columnWidths: colWidths,
+        rows: tableRows
+      });
+    }
+
+    // Section numbering tracker
+    var sectionNum = { h1: 0, h2: 0, h3: 0 };
+    function getSectionNumber(level) {
+      if (level === 1) { sectionNum.h1++; sectionNum.h2 = 0; sectionNum.h3 = 0; return sectionNum.h1 + '.0'; }
+      if (level === 2) { sectionNum.h2++; sectionNum.h3 = 0; return sectionNum.h1 + '.' + sectionNum.h2; }
+      if (level === 3) { sectionNum.h3++; return sectionNum.h1 + '.' + sectionNum.h2 + '.' + sectionNum.h3; }
+      return '';
+    }
+
+    // Parse full markdown to docx children
+    var allLines = proposalText.split('\n');
     var docChildren = [];
+    var lineIdx = 0;
 
-    // Title page
-    docChildren.push(new Paragraph({ spacing: { before: 4000 }, alignment: AlignmentType.CENTER, children: [] }));
-    docChildren.push(new Paragraph({
-      alignment: AlignmentType.CENTER,
-      spacing: { after: 200 },
-      children: [new TextRun({ text: (opp.title || 'Proposal').toUpperCase(), bold: true, size: 36, font: 'Calibri', color: '1B2A4A' })]
-    }));
-    docChildren.push(new Paragraph({
-      alignment: AlignmentType.CENTER,
-      spacing: { after: 100 },
-      children: [new TextRun({ text: 'Submitted to: ' + (opp.agency || 'Agency'), size: 24, font: 'Calibri', color: '4B5563' })]
-    }));
-    docChildren.push(new Paragraph({
-      alignment: AlignmentType.CENTER,
-      spacing: { after: 600 },
-      children: [new TextRun({ text: 'Due: ' + (opp.due_date || 'TBD'), size: 22, font: 'Calibri', color: '6B7280' })]
-    }));
-    docChildren.push(new Paragraph({
-      alignment: AlignmentType.CENTER,
-      spacing: { before: 1000 },
-      children: [new TextRun({ text: 'Prepared by:', size: 22, font: 'Calibri', color: '6B7280' })]
-    }));
-    docChildren.push(new Paragraph({
-      alignment: AlignmentType.CENTER,
-      spacing: { after: 100 },
-      children: [new TextRun({ text: 'HGI Global — Hammerman & Gainer LLC', bold: true, size: 28, font: 'Calibri', color: '1B2A4A' })]
-    }));
-    docChildren.push(new Paragraph({
-      alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: '2400 Veterans Memorial Blvd, Suite 510, Kenner, LA 70062', size: 20, font: 'Calibri', color: '6B7280' })]
-    }));
-    docChildren.push(new Paragraph({
-      alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: '100% Minority-Owned | Est. 1929 | SAM UEI: DL4SJEVKZ6H4', size: 20, font: 'Calibri', color: '6B7280' })]
-    }));
+    while (lineIdx < allLines.length) {
+      var line = allLines[lineIdx];
 
-    // Page break
-    docChildren.push(new Paragraph({ pageBreakBefore: true, children: [] }));
-
-    // Sections
-    for (var si = 0; si < sections.length; si++) {
-      var sec = sections[si];
-      if (sec.title) {
-        var headingLevel = sec.level === 1 ? HeadingLevel.HEADING_1 : sec.level === 2 ? HeadingLevel.HEADING_2 : HeadingLevel.HEADING_3;
+      // Headings
+      if (line.startsWith('### ')) {
+        var num = getSectionNumber(3);
         docChildren.push(new Paragraph({
-          heading: headingLevel,
-          spacing: { before: 300, after: 120 },
-          children: [new TextRun({ text: sec.title, bold: true, font: 'Calibri', color: '1B2A4A' })]
+          heading: HeadingLevel.HEADING_3,
+          spacing: { before: 200, after: 100 },
+          children: [
+            new TextRun({ text: num + '  ', size: 24, font: 'Calibri', color: GRAY }),
+            new TextRun({ text: line.slice(4).trim(), bold: true, size: 24, font: 'Calibri', color: '4B5563' })
+          ]
+        }));
+        lineIdx++;
+        continue;
+      }
+      if (line.startsWith('## ')) {
+        var num = getSectionNumber(2);
+        docChildren.push(new Paragraph({
+          heading: HeadingLevel.HEADING_2,
+          spacing: { before: 300, after: 150 },
+          children: [
+            new TextRun({ text: num + '  ', size: 28, font: 'Calibri', color: GOLD }),
+            new TextRun({ text: line.slice(3).trim(), bold: true, size: 28, font: 'Calibri', color: NAVY })
+          ]
+        }));
+        lineIdx++;
+        continue;
+      }
+      if (line.startsWith('# ')) {
+        var num = getSectionNumber(1);
+        // Add gold accent bar before H1
+        docChildren.push(new Paragraph({
+          spacing: { before: 400, after: 0 },
+          border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: GOLD, space: 4 } },
+          children: []
+        }));
+        docChildren.push(new Paragraph({
+          heading: HeadingLevel.HEADING_1,
+          spacing: { before: 100, after: 200 },
+          children: [
+            new TextRun({ text: num + '  ', size: 32, font: 'Calibri', color: GOLD }),
+            new TextRun({ text: line.slice(2).trim(), bold: true, size: 32, font: 'Calibri', color: NAVY })
+          ]
+        }));
+        lineIdx++;
+        continue;
+      }
+
+      // Horizontal rule → gold accent line
+      if (line.match(/^---+String.fromCharCode(36)/) || line.match(/^\*\*\*+String.fromCharCode(36)/) || line.match(/^___+String.fromCharCode(36)/)) {
+        docChildren.push(new Paragraph({
+          spacing: { before: 200, after: 200 },
+          border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: GOLD, space: 4 } },
+          children: []
+        }));
+        lineIdx++;
+        continue;
+      }
+
+      // Table detection
+      if (line.startsWith('|') && lineIdx + 1 < allLines.length && allLines[lineIdx + 1].match(/^\|[\s-:|]+\|/)) {
+        var tableLines = [];
+        while (lineIdx < allLines.length && allLines[lineIdx].startsWith('|')) {
+          tableLines.push(allLines[lineIdx]);
+          lineIdx++;
+        }
+        var table = parseTable(tableLines);
+        if (table) {
+          docChildren.push(new Paragraph({ spacing: { before: 120 }, children: [] }));
+          docChildren.push(table);
+          docChildren.push(new Paragraph({ spacing: { after: 120 }, children: [] }));
+        }
+        continue;
+      }
+
+      // Blockquote → gold left border
+      if (line.startsWith('> ')) {
+        var quoteLines = [];
+        while (lineIdx < allLines.length && allLines[lineIdx].startsWith('> ')) {
+          quoteLines.push(allLines[lineIdx].slice(2));
+          lineIdx++;
+        }
+        docChildren.push(new Paragraph({
+          spacing: { before: 120, after: 120 },
+          indent: { left: 720 },
+          border: { left: { style: BorderStyle.SINGLE, size: 12, color: GOLD, space: 8 } },
+          children: parseInline(quoteLines.join(' '))
+        }));
+        continue;
+      }
+
+      // Numbered list
+      if (line.match(/^\d+\.\s/)) {
+        while (lineIdx < allLines.length && allLines[lineIdx].match(/^\d+\.\s/)) {
+          var text = allLines[lineIdx].replace(/^\d+\.\s*/, '').trim();
+          docChildren.push(new Paragraph({
+            numbering: { reference: 'hgi-numbers', level: 0 },
+            spacing: { after: 60 },
+            children: parseInline(text)
+          }));
+          lineIdx++;
+        }
+        continue;
+      }
+
+      // Bullet list
+      if (line.startsWith('- ') || line.startsWith('* ')) {
+        while (lineIdx < allLines.length && (allLines[lineIdx].startsWith('- ') || allLines[lineIdx].startsWith('* '))) {
+          var text = allLines[lineIdx].replace(/^[\-\*]\s*/, '').trim();
+          docChildren.push(new Paragraph({
+            numbering: { reference: 'hgi-bullets', level: 0 },
+            spacing: { after: 60 },
+            children: parseInline(text)
+          }));
+          lineIdx++;
+        }
+        continue;
+      }
+
+      // Empty line
+      if (!line.trim()) {
+        lineIdx++;
+        continue;
+      }
+
+      // Regular paragraph — collect consecutive non-empty, non-special lines
+      var paraLines = [];
+      while (lineIdx < allLines.length && allLines[lineIdx].trim() && !allLines[lineIdx].startsWith('#') && !allLines[lineIdx].startsWith('|') && !allLines[lineIdx].startsWith('> ') && !allLines[lineIdx].startsWith('- ') && !allLines[lineIdx].startsWith('* ') && !allLines[lineIdx].match(/^\d+\.\s/) && !allLines[lineIdx].match(/^---+String.fromCharCode(36)/) && !allLines[lineIdx].match(/^\*\*\*+String.fromCharCode(36)/)) {
+        paraLines.push(allLines[lineIdx]);
+        lineIdx++;
+      }
+      if (paraLines.length > 0) {
+        docChildren.push(new Paragraph({
+          spacing: { after: 120 },
+          children: parseInline(paraLines.join(' '))
         }));
       }
-      // Process content lines
-      var contentText = sec.content.join('\n').trim();
-      if (contentText) {
-        // Split into paragraphs on double newlines
-        var paragraphs = contentText.split(/\n\n+/);
-        for (var pi = 0; pi < paragraphs.length; pi++) {
-          var para = paragraphs[pi].trim();
-          if (!para) continue;
-
-          // Check if it's a bullet point
-          if (para.startsWith('- ') || para.startsWith('* ')) {
-            var bullets = para.split('\n').filter(function(b) { return b.trim(); });
-            for (var bi = 0; bi < bullets.length; bi++) {
-              var bulletText = bullets[bi].replace(/^[\-\*]\s*/, '').trim();
-              // Handle bold within bullets
-              var bRuns = [];
-              var bParts = bulletText.split(/\*\*(.+?)\*\*/);
-              for (var bpi = 0; bpi < bParts.length; bpi++) {
-                if (bpi % 2 === 1) {
-                  bRuns.push(new TextRun({ text: bParts[bpi], bold: true, size: 22, font: 'Calibri' }));
-                } else if (bParts[bpi]) {
-                  bRuns.push(new TextRun({ text: bParts[bpi], size: 22, font: 'Calibri' }));
-                }
-              }
-              docChildren.push(new Paragraph({
-                bullet: { level: 0 },
-                spacing: { after: 60 },
-                children: bRuns
-              }));
-            }
-          } else {
-            // Regular paragraph — handle bold
-            var runs = [];
-            var parts = para.replace(/\n/g, ' ').split(/\*\*(.+?)\*\*/);
-            for (var ppi = 0; ppi < parts.length; ppi++) {
-              if (ppi % 2 === 1) {
-                runs.push(new TextRun({ text: parts[ppi], bold: true, size: 22, font: 'Calibri' }));
-              } else if (parts[ppi]) {
-                runs.push(new TextRun({ text: parts[ppi], size: 22, font: 'Calibri' }));
-              }
-            }
-            docChildren.push(new Paragraph({
-              spacing: { after: 120 },
-              children: runs
-            }));
-          }
-        }
-      }
     }
 
+    // --- BUILD THE DOCUMENT ---
     var doc = new Document({
+      numbering: {
+        config: [
+          {
+            reference: 'hgi-bullets',
+            levels: [{ level: 0, format: LevelFormat.BULLET, text: '\u2022', alignment: AlignmentType.LEFT,
+              style: { paragraph: { indent: { left: 720, hanging: 360 } } } }]
+          },
+          {
+            reference: 'hgi-numbers',
+            levels: [{ level: 0, format: LevelFormat.DECIMAL, text: '%1.', alignment: AlignmentType.LEFT,
+              style: { paragraph: { indent: { left: 720, hanging: 360 } } } }]
+          }
+        ]
+      },
       styles: {
         default: {
-          heading1: { run: { size: 32, bold: true, color: '1B2A4A', font: 'Calibri' }, paragraph: { spacing: { before: 400, after: 200 } } },
-          heading2: { run: { size: 28, bold: true, color: '1B2A4A', font: 'Calibri' }, paragraph: { spacing: { before: 300, after: 150 } } },
-          heading3: { run: { size: 24, bold: true, color: '4B5563', font: 'Calibri' }, paragraph: { spacing: { before: 200, after: 100 } } },
-        }
-      },
-      sections: [{
-        properties: {
-          page: { margin: { top: 1440, bottom: 1440, left: 1440, right: 1440 } }
+          document: { run: { font: 'Calibri', size: 22 } },
         },
-        headers: { default: new Header({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: 'HGI Global — ' + (opp.title || '').slice(0, 50), size: 16, font: 'Calibri', color: '9CA3AF', italics: true })] })] }) },
-        footers: { default: new Footer({ children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'CONFIDENTIAL — Prepared by HGI Global (Hammerman & Gainer LLC)', size: 16, font: 'Calibri', color: '9CA3AF' })] })] }) },
-        children: docChildren
-      }]
+        paragraphStyles: [
+          { id: 'Heading1', name: 'Heading 1', basedOn: 'Normal', next: 'Normal', quickFormat: true,
+            run: { size: 32, bold: true, color: NAVY, font: 'Calibri' },
+            paragraph: { spacing: { before: 400, after: 200 }, outlineLevel: 0 } },
+          { id: 'Heading2', name: 'Heading 2', basedOn: 'Normal', next: 'Normal', quickFormat: true,
+            run: { size: 28, bold: true, color: NAVY, font: 'Calibri' },
+            paragraph: { spacing: { before: 300, after: 150 }, outlineLevel: 1 } },
+          { id: 'Heading3', name: 'Heading 3', basedOn: 'Normal', next: 'Normal', quickFormat: true,
+            run: { size: 24, bold: true, color: '4B5563', font: 'Calibri' },
+            paragraph: { spacing: { before: 200, after: 100 }, outlineLevel: 2 } },
+        ]
+      },
+      sections: [
+        // COVER PAGE
+        {
+          properties: {
+            page: {
+              size: { width: 12240, height: 15840 },
+              margin: { top: 1440, bottom: 1440, left: 1440, right: 1440 }
+            }
+          },
+          children: [
+            // Gold accent bar at top
+            new Paragraph({ spacing: { before: 400 }, border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: GOLD, space: 8 } }, children: [] }),
+            new Paragraph({ spacing: { before: 3000 }, alignment: AlignmentType.CENTER, children: [] }),
+            new Paragraph({
+              alignment: AlignmentType.CENTER,
+              spacing: { after: 200 },
+              children: [new TextRun({ text: (opp.title || 'Proposal').toUpperCase(), bold: true, size: 40, font: 'Calibri', color: NAVY })]
+            }),
+            new Paragraph({
+              alignment: AlignmentType.CENTER, spacing: { after: 100 },
+              children: [new TextRun({ text: 'Submitted to: ' + (opp.agency || 'Agency'), size: 24, font: 'Calibri', color: GRAY })]
+            }),
+            new Paragraph({
+              alignment: AlignmentType.CENTER, spacing: { after: 100 },
+              children: [new TextRun({ text: 'Due: ' + (opp.due_date || 'TBD'), size: 22, font: 'Calibri', color: GRAY })]
+            }),
+            // Gold accent bar
+            new Paragraph({ spacing: { before: 400 }, border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: GOLD, space: 8 } }, children: [] }),
+            new Paragraph({ spacing: { before: 1200 }, alignment: AlignmentType.CENTER,
+              children: [new TextRun({ text: 'Prepared by:', size: 20, font: 'Calibri', color: GRAY })]
+            }),
+            new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 100 },
+              children: [new TextRun({ text: 'HGI Global \u2014 Hammerman & Gainer LLC', bold: true, size: 30, font: 'Calibri', color: NAVY })]
+            }),
+            new Paragraph({ alignment: AlignmentType.CENTER,
+              children: [new TextRun({ text: '2400 Veterans Memorial Blvd, Suite 510, Kenner, LA 70062', size: 20, font: 'Calibri', color: GRAY })]
+            }),
+            new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 100 },
+              children: [new TextRun({ text: '100% Minority-Owned | Est. 1929 | SAM UEI: DL4SJEVKZ6H4', size: 20, font: 'Calibri', color: GRAY })]
+            }),
+            // Bottom gold bar
+            new Paragraph({ spacing: { before: 2000 }, border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: GOLD, space: 8 } }, children: [] }),
+          ]
+        },
+        // TABLE OF CONTENTS
+        {
+          properties: {
+            page: {
+              size: { width: 12240, height: 15840 },
+              margin: { top: 1440, bottom: 1440, left: 1440, right: 1440 }
+            }
+          },
+          headers: {
+            default: new Header({
+              children: [new Paragraph({
+                alignment: AlignmentType.RIGHT,
+                children: [new TextRun({ text: 'HGI Global \u2014 ' + (opp.title || '').slice(0, 50), size: 16, font: 'Calibri', color: '9CA3AF', italics: true })]
+              })]
+            })
+          },
+          footers: {
+            default: new Footer({
+              children: [
+                new Paragraph({
+                  spacing: { before: 0 },
+                  border: { top: { style: BorderStyle.SINGLE, size: 2, color: GOLD, space: 4 } },
+                  alignment: AlignmentType.CENTER,
+                  children: [
+                    new TextRun({ text: 'CONFIDENTIAL \u2014 HGI Global (Hammerman & Gainer LLC)  |  Page ', size: 16, font: 'Calibri', color: '9CA3AF' }),
+                    new TextRun({ children: [PageNumber.CURRENT], size: 16, font: 'Calibri', color: '9CA3AF' })
+                  ]
+                })
+              ]
+            })
+          },
+          children: [
+            new Paragraph({
+              spacing: { after: 400 },
+              children: [new TextRun({ text: 'TABLE OF CONTENTS', bold: true, size: 32, font: 'Calibri', color: NAVY })]
+            }),
+            new TableOfContents('Table of Contents', {
+              hyperlink: true,
+              headingStyleRange: '1-3'
+            })
+          ]
+        },
+        // BODY
+        {
+          properties: {
+            page: {
+              size: { width: 12240, height: 15840 },
+              margin: { top: 1440, bottom: 1440, left: 1440, right: 1440 }
+            }
+          },
+          headers: {
+            default: new Header({
+              children: [new Paragraph({
+                alignment: AlignmentType.RIGHT,
+                children: [new TextRun({ text: 'HGI Global \u2014 ' + (opp.title || '').slice(0, 50), size: 16, font: 'Calibri', color: '9CA3AF', italics: true })]
+              })]
+            })
+          },
+          footers: {
+            default: new Footer({
+              children: [
+                new Paragraph({
+                  spacing: { before: 0 },
+                  border: { top: { style: BorderStyle.SINGLE, size: 2, color: GOLD, space: 4 } },
+                  alignment: AlignmentType.CENTER,
+                  children: [
+                    new TextRun({ text: 'CONFIDENTIAL \u2014 HGI Global (Hammerman & Gainer LLC)  |  Page ', size: 16, font: 'Calibri', color: '9CA3AF' }),
+                    new TextRun({ children: [PageNumber.CURRENT], size: 16, font: 'Calibri', color: '9CA3AF' })
+                  ]
+                })
+              ]
+            })
+          },
+          children: docChildren
+        }
+      ]
     });
 
     var buffer = await Packer.toBuffer(doc);
-    log('PROPOSAL DOC: Generated ' + buffer.length + ' bytes');
+    log('PROPOSAL DOC: Generated ' + buffer.length + ' bytes (' + docChildren.length + ' elements)');
 
     var filename = 'HGI_' + (opp.title || 'Proposal').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 60) + '.docx';
     res.writeHead(200, {
@@ -708,7 +949,6 @@ if (url.startsWith('/api/proposal-doc')) {
   }
   return;
 }
-
 // Fallthrough — unmatched routes
 if (!res.headersSent) {
   res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -953,7 +1193,7 @@ function getInterface() {
 }
 
 // === HGI COMPANY CONTEXT (cached across all agent calls) ===
-var HGI = 'SYSTEM CONTEXT: HGI Global (Hammerman & Gainer LLC) is a 95-year-old, 100% minority-owned program management firm in Kenner, Louisiana (2400 Veterans Memorial Blvd, Suite 510, 70062). 8 verticals: Disaster Recovery, TPA/Claims (full P&C), Property Tax Appeals, Workforce/WIOA, Construction Management, Program Administration, Housing/HUD, Grant Management. Past performance: Road Home ' + String.fromCharCode(36) + '67M direct/' + String.fromCharCode(36) + '13B+ program (2006-2015, zero misappropriation), HAP ' + String.fromCharCode(36) + '950M, Restore LA ' + String.fromCharCode(36) + '42.3M, Rebuild NJ ' + String.fromCharCode(36) + '67.7M, TPSD ' + String.fromCharCode(36) + '2.96M (completed 2022-2025), St. John Sheriff ' + String.fromCharCode(36) + '788K, BP GCCF ' + String.fromCharCode(36) + '1.65M. Key staff: Christopher Oney (President), Larry Oney (Chairman), Lou Resweber (CEO), Candy Dottolo (CAO), Dillon Truax (VP), Vanessa James (SVP Claims), Geoffrey Brien (DR Manager, FEMA PA), Chris Feduccia (1099 SME, ~' + String.fromCharCode(36) + '1B grants/incentives). 67 FT + 43 contractors. SAM UEI: DL4SJEVKZ6H4. Insurance: ' + String.fromCharCode(36) + '5M fidelity/' + String.fromCharCode(36) + '5M E&O/' + String.fromCharCode(36) + '2M GL. Rate card (burdened/hr): Principal ' + String.fromCharCode(36) + '220, Prog Dir ' + String.fromCharCode(36) + '210, SME ' + String.fromCharCode(36) + '200, Sr Grant Mgr ' + String.fromCharCode(36) + '180, Grant Mgr ' + String.fromCharCode(36) + '175, Sr PM ' + String.fromCharCode(36) + '180, PM ' + String.fromCharCode(36) + '155, Grant Writer ' + String.fromCharCode(36) + '145, Arch/Eng ' + String.fromCharCode(36) + '135, Cost Est ' + String.fromCharCode(36) + '125, Appeals ' + String.fromCharCode(36) + '145, Sr Damage ' + String.fromCharCode(36) + '115, Damage ' + String.fromCharCode(36) + '105, Admin ' + String.fromCharCode(36) + '65. HGI has had ONE direct federal contract (PBGC). All other work through state/local agencies. RULES: (1) Every claim must cite source+date. Unverified = say so. (2) Set confidence:high only with source URL. Medium when extrapolating. Inferred when reasoning without sources. (3) Set source_url to specific URL or null.';
+var HGI = 'SYSTEM CONTEXT: HGI Global (Hammerman & Gainer LLC) is a 95-year-old, 100% minority-owned program management firm in Kenner, Louisiana (2400 Veterans Memorial Blvd, Suite 510, 70062). 8 verticals: Disaster Recovery, TPA/Claims (full P&C), Property Tax Appeals, Workforce/WIOA, Construction Management, Program Administration, Housing/HUD, Grant Management. Past performance: Road Home ' + String.fromCharCode(36) + '67M direct/' + String.fromCharCode(36) + '13B+ program (2006-2015, zero misappropriation), HAP ' + String.fromCharCode(36) + '950M, Restore LA ' + String.fromCharCode(36) + '42.3M, Rebuild NJ ' + String.fromCharCode(36) + '67.7M, TPSD ' + String.fromCharCode(36) + '2.96M (completed 2022-2025), St. John Sheriff ' + String.fromCharCode(36) + '788K, BP GCCF ' + String.fromCharCode(36) + '1.65M. Key staff by role: President, Chairman, CEO, CAO, VP, SVP Claims, DR Manager (FEMA PA), 1099 SME (~' + String.fromCharCode(36) + '1B grants/incentives). 67 FT + 43 contractors. SAM UEI: DL4SJEVKZ6H4. Insurance: ' + String.fromCharCode(36) + '5M fidelity/' + String.fromCharCode(36) + '5M E&O/' + String.fromCharCode(36) + '2M GL. Rate card (burdened/hr): Principal ' + String.fromCharCode(36) + '220, Prog Dir ' + String.fromCharCode(36) + '210, SME ' + String.fromCharCode(36) + '200, Sr Grant Mgr ' + String.fromCharCode(36) + '180, Grant Mgr ' + String.fromCharCode(36) + '175, Sr PM ' + String.fromCharCode(36) + '180, PM ' + String.fromCharCode(36) + '155, Grant Writer ' + String.fromCharCode(36) + '145, Arch/Eng ' + String.fromCharCode(36) + '135, Cost Est ' + String.fromCharCode(36) + '125, Appeals ' + String.fromCharCode(36) + '145, Sr Damage ' + String.fromCharCode(36) + '115, Damage ' + String.fromCharCode(36) + '105, Admin ' + String.fromCharCode(36) + '65. HGI has had ONE direct federal contract (PBGC). All other work through state/local agencies. RULES: (1) Every claim must cite source+date. Unverified = say so. (2) Set confidence:high only with source URL. Medium when extrapolating. Inferred when reasoning without sources. (3) Set source_url to specific URL or null.';
 
 
 // ============================================================
@@ -1110,8 +1350,8 @@ async function agentCRM(opp, state, cycleBrief) {
     '1. Named individuals with titles — search "[agency] organizational chart" and "[agency] procurement contact"\n' +
     '2. Contracting officer from procurement portal or award notices\n' +
     '3. For each person: name, title, role in this procurement, source URL\n' +
-    '4. Does HGI have any existing relationship? Check known contacts: Geoffrey Brien, Nikita Gilton (HTHA), Melinda Kyzar (St. George)\n' +
-    '5. Specific outreach plan Christopher can execute this week\n\n' +
+    '4. Does HGI have any existing relationship? Check known contacts by agency (HTHA, St. George, JP, NOLA)\n' +
+    '5. Specific outreach plan the President can execute this week\n\n' +
     'RULES:\n' +
     '- Never create contacts with no name. If you cannot find a name, document what you searched.\n' +
     '- confidence:high when name+title confirmed from official source\n' +
@@ -1163,12 +1403,12 @@ async function agentStaffingPlan(opp, state, cycleBrief) {
 
   var taskInstructions = 'TASK: Map HGI personnel to this opportunity\'s requirements.\n' +
     'KNOWN HGI PERSONNEL:\n' +
-    '- Lou Resweber (CEO/Program Director, burdened rate see rate card)\n' +
-    '- Geoffrey Brien (DR Manager, FEMA PA expertise)\n' +
-    '- Dillon Truax (VP)\n' +
-    '- Chris Feduccia (1099 SME, grants/tax credits/loans/incentives)\n' +
-    '- Candy Dottolo (CAO)\n' +
-    '- Vanessa James (SVP Claims)\n\n' +
+    '- CEO/Program Director (burdened rate see rate card)\n' +
+    '- DR Manager (FEMA PA expertise)\n' +
+    '- VP\n' +
+    '- 1099 SME (grants/tax credits/loans/incentives)\n' +
+    '- CAO\n' +
+    '- SVP Claims\n\n' +
     'REQUIRED OUTPUTS:\n' +
     '1. Staffing matrix: position | named person | qualifications | rate | availability\n' +
     '2. Gaps requiring recruitment or teaming\n' +
@@ -1446,7 +1686,7 @@ var HAIKU = 'claude-haiku-4-5-20251001';
 async function agentPipelineScanner(state) {
   log('PIPELINE SCANNER...');
   var ctx = buildAgentCtx(state, 'pipeline_scanner', null);
-  var task = 'TASK: (1) Deadlines within 14 days (2) Stale pursuits >14 days no activity (3) OPI/stage inconsistencies (4) Missing critical fields (5) Priority order for Christopher this week.';
+  var task = 'TASK: (1) Deadlines within 14 days (2) Stale pursuits >14 days no activity (3) OPI/stage inconsistencies (4) Missing critical fields (5) Priority order for the President this week.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
   var out = await claudeCall(task, prompt, 1200, { model: HAIKU });
   if (!out || out.length < 100) return null;
@@ -1490,7 +1730,7 @@ async function agentRecruiting(state) {
 async function agentKnowledgeBase(state) {
   log('KB AGENT...');
   var ctx = buildAgentCtx(state, 'knowledge_base_agent', null);
-  var task = 'TASK: KB gap analysis. What documents strengthen proposals? Prioritized: doc needed, who provides, which opp it helps. NOTE: Lou Resweber KB doc request outstanding since March 18 2026.';
+  var task = 'TASK: KB gap analysis. What documents strengthen proposals? Prioritized: doc needed, who provides, which opp it helps. NOTE: CEO KB doc request outstanding since March 18 2026.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
   var out = await claudeCall(task, prompt, 1200, { model: HAIKU });
   if (!out || out.length < 100) return null;
@@ -1523,7 +1763,7 @@ async function agentDesignVisual(state) {
 async function agentTeaming(state) {
   log('TEAMING...');
   var ctx = buildAgentCtx(state, 'teaming_agent', null);
-  var task = 'TASK: Teaming needs. Chris Feduccia model: 1099 SME (grants/tax credits/loans) under HGI brand, teaming on JP SOQ and NOLA. For each staffing gap: potential partner type, arrangement (sub, 1099, JV), capability rationale.';
+  var task = 'TASK: Teaming needs. 1099 SME model: grants/tax credits/loans under HGI brand, teaming on JP SOQ and NOLA. For each staffing gap: potential partner type, arrangement (sub, 1099, JV), capability rationale.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
   var out = await claudeCall(task, prompt, 1200, { model: HAIKU });
   if (!out || out.length < 100) return null;
@@ -1566,7 +1806,7 @@ async function agentWinRateAnalytics(state) {
 async function agentOutreachAutomation(state) {
   log('OUTREACH...');
   var ctx = buildAgentCtx(state, 'outreach_automation', null);
-  var task = 'TASK: Outreach recommendations for pursuing-stage opps. Who to contact, what to say, channel, outcome to drive. Draft text. NOTHING goes outbound without Christopher approval.';
+  var task = 'TASK: Outreach recommendations for pursuing-stage opps. Who to contact, what to say, channel, outcome to drive. Draft text. NOTHING goes outbound without President approval.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
   var out = await claudeCall(task, prompt, 1200, { model: HAIKU });
   if (!out || out.length < 100) return null;
@@ -1601,7 +1841,7 @@ async function agentSubcontractorDB(state) {
 async function agentExecutiveBrief(state) {
   log('EXECUTIVE BRIEF...');
   var ctx = buildAgentCtx(state, 'executive_brief_agent', null);
-  var task = 'TASK: Weekly digest for Lou Resweber and Larry Oney. (1) Pipeline: new/active/won/lost (2) Top 3 priority actions (3) Risk alerts (4) Competitive intel highlights (5) Resource needs. 1 page. Decision-oriented.';
+  var task = 'TASK: Weekly digest for CEO and Chairman. (1) Pipeline: new/active/won/lost (2) Top 3 priority actions (3) Risk alerts (4) Competitive intel highlights (5) Resource needs. 1 page. Decision-oriented.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
   var out = await claudeCall(task, prompt, 2000);
   if (!out || out.length < 100) return null;
@@ -1612,7 +1852,7 @@ async function agentExecutiveBrief(state) {
 async function agentDashboard(state) {
   log('DASHBOARD...');
   var ctx = buildAgentCtx(state, 'dashboard_agent', null);
-  var task = 'TASK: Morning briefing for Christopher. Top 3 things to know. Top 3 actions needed. Alerts. Concise. Decision-oriented. No fluff.';
+  var task = 'TASK: Morning briefing for the President. Top 3 things to know. Top 3 actions needed. Alerts. Concise. Decision-oriented. No fluff.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
   var out = await claudeCall(task, prompt, 1500);
   if (!out || out.length < 100) return null;
@@ -1694,7 +1934,7 @@ async function agentSelfAwareness(state, sessionResults, evalScores) {
       (failing.length > 0 ? 'Failing: ' + failing.map(function(e) { return e.agent; }).join(', ') : '');
   }
   
-  var task = 'TASK: You see everything. (1) Patterns across opps individual agents missed (2) Which agents produced highest-value intelligence (3) SINGLE improvement to most raise next proposal score (4) Costliest data gaps (5) ONE thing Christopher must do this week.' + evalSummary;
+  var task = 'TASK: You see everything. (1) Patterns across opps individual agents missed (2) Which agents produced highest-value intelligence (3) SINGLE improvement to most raise next proposal score (4) Costliest data gaps (5) ONE thing the President must do this week.' + evalSummary;
   var prompt = 'SESSION RESULTS:\n' + resultsSummary + '\n\nPIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
   var out = await claudeCall(task, prompt, 3000);
   if (!out || out.length < 100) return null;
