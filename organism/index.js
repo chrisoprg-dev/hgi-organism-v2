@@ -627,12 +627,17 @@ if (url.startsWith('/api/proposal-doc')) {
       }
       var totalLen = maxLens.reduce(function(a,b){ return a+b; }, 0);
       var colWidths = maxLens.map(function(len) {
-        var w = Math.floor((len / totalLen) * 9360);
-        return Math.max(w, 800); // minimum 800 DXA (~0.55 inch)
+        return Math.floor((len / totalLen) * 9360);
       });
-      // Adjust to sum to exactly 9360
+      // Ensure minimum 500 DXA per column, then scale to sum to 9360
+      colWidths = colWidths.map(function(w) { return Math.max(w, 500); });
       var widthSum = colWidths.reduce(function(a,b){ return a+b; }, 0);
-      if (widthSum !== 9360) colWidths[colWidths.length - 1] += (9360 - widthSum);
+      if (widthSum !== 9360) {
+        var scale = 9360 / widthSum;
+        colWidths = colWidths.map(function(w) { return Math.max(Math.floor(w * scale), 400); });
+        widthSum = colWidths.reduce(function(a,b){ return a+b; }, 0);
+        if (widthSum !== 9360) colWidths[colWidths.length - 1] += (9360 - widthSum);
+      }
 
       var border = { style: BorderStyle.SINGLE, size: 1, color: 'D1D5DB' };
       var borders = { top: border, bottom: border, left: border, right: border };
