@@ -786,22 +786,55 @@ if (url.startsWith('/api/proposal-doc')) {
     var borders = { top: border, bottom: border, left: border, right: border };
 
     try {
-      // Query for compliance matrix, rate table, and org chart data
-      var cmMem = await supabase.from('organism_memory').select('observation')
-        .eq('opportunity_id', docId).eq('memory_type', 'compliance_matrix_data')
-        .order('created_at', {ascending:false}).limit(1);
-      var rtMem = await supabase.from('organism_memory').select('observation')
-        .eq('opportunity_id', docId).eq('memory_type', 'rate_table_data')
-        .order('created_at', {ascending:false}).limit(1);
-      var ocMem = await supabase.from('organism_memory').select('observation')
-        .eq('opportunity_id', docId).eq('memory_type', 'org_chart_data')
-        .order('created_at', {ascending:false}).limit(1);
+      // Call endpoints directly to get appendix data (bypasses memory storage)
+      var localPort = process.env.PORT || 8080;
+      var localBase = 'http://localhost:' + localPort;
+      var cmData = null, rtData = null, ocData = null;
+
+      // Check if this opp has an actual RFP (determines which appendices to generate)
+      var oppHasRfp = opp.rfp_document_retrieved === true && opp.rfp_text && opp.rfp_text.trim().length > 200;
+
+      // Compliance Matrix (only for solicited opps)
+      if (oppHasRfp) {
+        try {
+          var cmResp = await fetch(localBase + '/api/compliance-matrix?id=' + docId);
+          if (cmResp.ok) {
+            var cmJson = await cmResp.json();
+            cmData = cmJson.matrix || null;
+            log('PROPOSAL DOC: Compliance matrix loaded — ' + (cmData && cmData.requirements ? cmData.requirements.length : 0) + ' requirements');
+          }
+        } catch(cmErr) { log('PROPOSAL DOC: Compliance matrix call failed — ' + cmErr.message); }
+      } else {
+        log('PROPOSAL DOC: Skipping compliance matrix — unsolicited opportunity');
+      }
+
+      // Rate Table (only for solicited opps)
+      if (oppHasRfp) {
+        try {
+          var rtResp = await fetch(localBase + '/api/rate-table?id=' + docId);
+          if (rtResp.ok) {
+            var rtJson = await rtResp.json();
+            rtData = rtJson.rate_table || null;
+            log('PROPOSAL DOC: Rate table loaded — ' + (rtData && rtData.positions ? rtData.positions.length : 0) + ' positions');
+          }
+        } catch(rtErr) { log('PROPOSAL DOC: Rate table call failed — ' + rtErr.message); }
+      } else {
+        log('PROPOSAL DOC: Skipping rate table — unsolicited opportunity');
+      }
+
+      // Org Chart (always — team structure is useful for any proposal)
+      try {
+        var ocResp = await fetch(localBase + '/api/org-chart?id=' + docId);
+        if (ocResp.ok) {
+          var ocJson = await ocResp.json();
+          ocData = ocJson.diagrams || null;
+          log('PROPOSAL DOC: Org chart loaded — ' + (ocData ? 'org_chart + methodology_flow' : 'none'));
+        }
+      } catch(ocErr) { log('PROPOSAL DOC: Org chart call failed — ' + ocErr.message); }
 
       // APPENDIX A: ORGANIZATIONAL CHART (embedded PNG from Kroki)
-      if (ocMem.data && ocMem.data.length > 0) {
+      if (ocData && ocData.org_chart) {
         try {
-          var ocData = JSON.parse(ocMem.data[0].observation);
-          if (ocData.org_chart) {
             appendixChildren.push(new Paragraph({
               spacing: { before: 400 }, border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: GOLD, space: 4 } }, children: []
             }));
@@ -856,15 +889,12 @@ if (url.startsWith('/api/proposal-doc')) {
                 }
               } catch(methErr) { log('PROPOSAL DOC: Methodology PNG failed — ' + methErr.message); }
             }
-          }
-        } catch(ocParseErr) { log('PROPOSAL DOC: Org chart parse failed — ' + ocParseErr.message); }
+        } catch(ocParseErr) { log('PROPOSAL DOC: Org chart render failed — ' + ocParseErr.message); }
       }
 
       // APPENDIX B: COMPLIANCE MATRIX
-      if (cmMem.data && cmMem.data.length > 0) {
+      if (cmData && cmData.requirements && cmData.requirements.length > 0) {
         try {
-          var cmData = JSON.parse(cmMem.data[0].observation);
-          if (cmData.requirements && cmData.requirements.length > 0) {
             appendixChildren.push(new Paragraph({ children: [new PageBreak()] }));
             appendixChildren.push(new Paragraph({
               spacing: { before: 400 }, border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: GOLD, space: 4 } }, children: []
@@ -971,15 +1001,12 @@ if (url.startsWith('/api/proposal-doc')) {
               });
               appendixChildren.push(new Table({ width: { size: 9360, type: WidthType.DXA }, columnWidths: exColWidths, rows: exRows }));
             }
-          }
-        } catch(cmParseErr) { log('PROPOSAL DOC: Compliance matrix parse failed — ' + cmParseErr.message); }
+        } catch(cmParseErr) { log('PROPOSAL DOC: Compliance matrix render failed — ' + cmParseErr.message); }
       }
 
       // APPENDIX C: FEE SCHEDULE / RATE TABLE
-      if (rtMem.data && rtMem.data.length > 0) {
+      if (rtData && rtData.positions && rtData.positions.length > 0) {
         try {
-          var rtData = JSON.parse(rtMem.data[0].observation);
-          if (rtData.positions && rtData.positions.length > 0) {
             appendixChildren.push(new Paragraph({ children: [new PageBreak()] }));
             appendixChildren.push(new Paragraph({
               spacing: { before: 400 }, border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: GOLD, space: 4 } }, children: []
@@ -1046,8 +1073,7 @@ if (url.startsWith('/api/proposal-doc')) {
                 children: [new TextRun({ text: rtData.notes, size: 20, font: 'Calibri', italics: true, color: GRAY })]
               }));
             }
-          }
-        } catch(rtParseErr) { log('PROPOSAL DOC: Rate table parse failed — ' + rtParseErr.message); }
+        } catch(rtParseErr) { log('PROPOSAL DOC: Rate table render failed — ' + rtParseErr.message); }
       }
 
       log('PROPOSAL DOC: Appendix built — ' + appendixChildren.length + ' elements');
@@ -1325,10 +1351,13 @@ if (url.startsWith('/api/compliance-matrix')) {
     }).eq('id', cmId);
 
     await supabase.from('organism_memory').insert({
+      id: 'compliance_matrix-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
       agent: 'compliance_matrix',
       opportunity_id: cmId,
+      entity_tags: 'compliance,rfp,requirements',
       observation: JSON.stringify(cmData),
       memory_type: 'compliance_matrix_data',
+      source_url: null, confidence: 'high', status: 'scratch',
       created_at: new Date().toISOString()
     });
 
@@ -1415,10 +1444,13 @@ if (url.startsWith('/api/rate-table')) {
     try { rtData = JSON.parse(rtText); } catch(pe) { rtData = { raw: rtText, parse_error: pe.message }; }
 
     await supabase.from('organism_memory').insert({
+      id: 'rate_table_engine-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
       agent: 'rate_table_engine',
       opportunity_id: rtId,
+      entity_tags: 'pricing,rates,staffing',
       observation: JSON.stringify(rtData),
       memory_type: 'rate_table_data',
+      source_url: null, confidence: 'high', status: 'scratch',
       created_at: new Date().toISOString()
     });
 
@@ -1504,10 +1536,13 @@ if (url.startsWith('/api/org-chart')) {
     }
 
     await supabase.from('organism_memory').insert({
+      id: 'graphics_engine-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
       agent: 'graphics_engine',
       opportunity_id: ocId,
+      entity_tags: 'orgchart,methodology,graphics',
       observation: JSON.stringify(ocData),
       memory_type: 'org_chart_data',
+      source_url: null, confidence: 'high', status: 'scratch',
       created_at: new Date().toISOString()
     });
 
