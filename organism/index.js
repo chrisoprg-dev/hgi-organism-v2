@@ -1269,10 +1269,17 @@ if (url.startsWith('/api/compliance-matrix')) {
     var opp = cmOpp.data;
     if (!opp) { res.writeHead(404); res.end(JSON.stringify({error:'not found'})); return; }
 
-    var rfpSource = (opp.rfp_text && opp.rfp_text.trim().length > 200) ? opp.rfp_text : (opp.scope_analysis || opp.description || '');
-    if (rfpSource.length < 100) {
-      res.writeHead(400); res.end(JSON.stringify({error:'No RFP text available. Upload the RFP first.'})); return;
+    // RFP GATE: compliance matrix requires actual solicitation text
+    var hasRfp = (opp.rfp_text && opp.rfp_text.trim().length > 200) || opp.rfp_document_retrieved === true;
+    if (!hasRfp) {
+      res.writeHead(400); res.end(JSON.stringify({
+        error: 'No RFP/SOQ document available. Compliance matrix requires an actual solicitation to extract requirements from.',
+        opportunity: opp.title,
+        suggestion: opp.stage === 'pursuing' ? 'Upload the RFP document first, or mark as unsolicited.' : 'This appears to be an unsolicited opportunity — compliance matrix is not applicable.'
+      })); return;
     }
+
+    var rfpSource = (opp.rfp_text && opp.rfp_text.trim().length > 200) ? opp.rfp_text : (opp.scope_analysis || opp.description || '');
 
     var D = String.fromCharCode(36);
     var cmPrompt = 'Extract EVERY requirement from this RFP/SOQ and produce a compliance matrix.\n\n' +
@@ -1346,9 +1353,17 @@ if (url.startsWith('/api/rate-table')) {
     var opp = rtOpp.data;
     if (!opp) { res.writeHead(404); res.end(JSON.stringify({error:'not found'})); return; }
 
+    // RFP GATE: rate table requires actual solicitation to map positions
+    var hasRfp = (opp.rfp_text && opp.rfp_text.trim().length > 200) || opp.rfp_document_retrieved === true;
+    if (!hasRfp) {
+      res.writeHead(400); res.end(JSON.stringify({
+        error: 'No RFP/SOQ document available. Rate table requires an actual solicitation to map required positions.',
+        opportunity: opp.title,
+        suggestion: 'Upload the RFP document first. For unsolicited proposals, staffing is defined by HGI, not extracted from a solicitation.'
+      })); return;
+    }
+
     var rfpSource = (opp.rfp_text && opp.rfp_text.trim().length > 200) ? opp.rfp_text : (opp.scope_analysis || opp.description || '');
-    
-    // Load organism financial memories
     var finMems = await supabase.from('organism_memory').select('agent,observation')
       .eq('opportunity_id', rtId)
       .or('agent.ilike.%financial%,agent.ilike.%price%,agent.ilike.%cost%')
@@ -1523,21 +1538,29 @@ if (url.startsWith('/api/proposal-bundle')) {
       if (!opp) { log('PROPOSAL BUNDLE: Opp not found ' + pbId); return; }
       log('PROPOSAL BUNDLE: Processing ' + (opp.title || '').slice(0, 50));
 
-      // Step 1: Compliance Matrix
-      log('PROPOSAL BUNDLE: Step 1/5 — Compliance Matrix');
-      try {
-        var cmResp = await fetch('http://localhost:' + (process.env.PORT || 8080) + '/api/compliance-matrix?id=' + pbId);
-        results.compliance_matrix = cmResp.ok ? 'OK' : 'FAILED (' + cmResp.status + ')';
-      } catch(e) { results.compliance_matrix = 'ERROR: ' + e.message; }
+      // Check if RFP/SOQ is available — determines which steps to run
+      var hasRfp = (opp.rfp_text && opp.rfp_text.trim().length > 200) || opp.rfp_document_retrieved === true;
+      if (!hasRfp) {
+        log('PROPOSAL BUNDLE: No RFP — unsolicited opportunity. Skipping compliance matrix and rate table.');
+        results.compliance_matrix = 'SKIPPED (unsolicited — no RFP)';
+        results.rate_table = 'SKIPPED (unsolicited — no RFP)';
+      } else {
+        // Step 1: Compliance Matrix
+        log('PROPOSAL BUNDLE: Step 1/5 — Compliance Matrix');
+        try {
+          var cmResp = await fetch('http://localhost:' + (process.env.PORT || 8080) + '/api/compliance-matrix?id=' + pbId);
+          results.compliance_matrix = cmResp.ok ? 'OK' : 'FAILED (' + cmResp.status + ')';
+        } catch(e) { results.compliance_matrix = 'ERROR: ' + e.message; }
 
-      // Step 2: Rate Table
-      log('PROPOSAL BUNDLE: Step 2/5 — Rate Table');
-      try {
-        var rtResp = await fetch('http://localhost:' + (process.env.PORT || 8080) + '/api/rate-table?id=' + pbId);
-        results.rate_table = rtResp.ok ? 'OK' : 'FAILED (' + rtResp.status + ')';
-      } catch(e) { results.rate_table = 'ERROR: ' + e.message; }
+        // Step 2: Rate Table
+        log('PROPOSAL BUNDLE: Step 2/5 — Rate Table');
+        try {
+          var rtResp = await fetch('http://localhost:' + (process.env.PORT || 8080) + '/api/rate-table?id=' + pbId);
+          results.rate_table = rtResp.ok ? 'OK' : 'FAILED (' + rtResp.status + ')';
+        } catch(e) { results.rate_table = 'ERROR: ' + e.message; }
+      }
 
-      // Step 3: Org Chart
+      // Step 3: Org Chart (always runs — team structure is useful for any proposal)
       log('PROPOSAL BUNDLE: Step 3/5 — Org Chart');
       try {
         var ocResp = await fetch('http://localhost:' + (process.env.PORT || 8080) + '/api/org-chart?id=' + pbId);
