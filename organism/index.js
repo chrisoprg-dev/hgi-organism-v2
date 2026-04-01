@@ -286,10 +286,28 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (url === '/' || url === '/dashboard' || url === '/interface') {
+    if (url === '/' || url === '/dashboard' || url === '/interface' || url === '/interface.html') {
       const html = getInterface();
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache', 'Expires': '0' });
       res.end(html);
+      return;
+    }
+
+    if (url === '/manifest.json') {
+      res.writeHead(200, { 'Content-Type': 'application/manifest+json' });
+      res.end(JSON.stringify({
+        name: 'HGI Organism',
+        short_name: 'HGI',
+        description: 'HGI Capture Intelligence Platform',
+        start_url: '/',
+        display: 'standalone',
+        background_color: '#080a0e',
+        theme_color: '#eab308',
+        icons: [
+          { src: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192"><rect width="192" height="192" rx="32" fill="#1B2A4A"/><text x="96" y="120" text-anchor="middle" font-family="Arial Black" font-size="80" font-weight="900" fill="#eab308">H</text></svg>'), sizes: '192x192', type: 'image/svg+xml' },
+          { src: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="80" fill="#1B2A4A"/><text x="256" y="320" text-anchor="middle" font-family="Arial Black" font-size="220" font-weight="900" fill="#eab308">H</text></svg>'), sizes: '512x512', type: 'image/svg+xml' }
+        ]
+      }));
       return;
     }
 
@@ -1362,6 +1380,19 @@ if (url.startsWith('/api/proposal-doc')) {
     proposalText = proposalText.replace(/info@hgi\.com/gi, 'info@hgi-global.com');
     // Geoffrey Brien removal — catch any that slip through
     proposalText = proposalText.replace(/Geoffrey\s+Brien/gi, '[DR Manager — Position Open]');
+    // PBGC removal — HGI has never had a direct federal contract
+    proposalText = proposalText.replace(/PBGC[^.]*?\./gi, '');
+    proposalText = proposalText.replace(/Pension Benefit Guaranty[^.]*?\./gi, '');
+    // Old staff count correction
+    proposalText = proposalText.replace(/67\s+full[- ]time\s+(employees|staff)/gi, 'approximately 50 team members');
+    proposalText = proposalText.replace(/67\s+FT\s*\+?\s*43\s+contract/gi, 'approximately 50 team members');
+    proposalText = proposalText.replace(/110\s+professionals/gi, 'approximately 50 team members');
+    // Founding year catch-all
+    proposalText = proposalText.replace(/founded\s+in\s+1929/gi, 'founded in 1931');
+    proposalText = proposalText.replace(/since\s+1929/gi, 'since 1931');
+    proposalText = proposalText.replace(/\b95[\s-]year/gi, 'ninety-five-year');
+    // Orleans Parish School Board — not confirmed
+    proposalText = proposalText.replace(/Orleans\s+Parish\s+School\s+Board[^.]*?\./gi, '');
 
     if (!proposalText || proposalText.length < 500) {
       res.writeHead(400); res.end(JSON.stringify({
@@ -1909,6 +1940,74 @@ if (url.startsWith('/api/proposal-doc')) {
     } catch(appendixErr) {
       log('PROPOSAL DOC: Appendix generation error — ' + appendixErr.message);
     }
+
+    // --- APPENDIX: SUBMISSION CHECKLIST (auto-extracted from proposal content) ---
+    try {
+      var actionItems = [];
+      var actionRegex = /\[ACTION REQUIRED[^\]]*\][\s:]*([^\]\n]+)/gi;
+      var match;
+      while ((match = actionRegex.exec(proposalText)) !== null) {
+        var item = match[1].trim().replace(/^\s*[:—-]+\s*/, '');
+        if (item.length > 10 && actionItems.indexOf(item) === -1) actionItems.push(item);
+      }
+      // Also catch standalone [ACTION REQUIRED: ...] patterns
+      var actionRegex2 = /\[ACTION REQUIRED:\s*([^\]]+)\]/gi;
+      while ((match = actionRegex2.exec(proposalText)) !== null) {
+        var item2 = match[1].trim();
+        if (item2.length > 5 && actionItems.indexOf(item2) === -1) actionItems.push(item2);
+      }
+
+      if (actionItems.length > 0) {
+        appendixChildren.push(new Paragraph({
+          spacing: { before: 400 }, border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: GOLD, space: 4 } }, children: []
+        }));
+        appendixChildren.push(new Paragraph({
+          heading: HeadingLevel.HEADING_1,
+          spacing: { before: 100, after: 200 },
+          children: [new TextRun({ text: 'SUBMISSION CHECKLIST', bold: true, size: 32, font: 'Calibri', color: NAVY })]
+        }));
+        appendixChildren.push(new Paragraph({
+          spacing: { after: 160 },
+          children: [new TextRun({ text: 'The following items require completion before submission. This checklist is auto-generated from the proposal and should be removed from the final submission package.', size: 20, font: 'Calibri', italics: true, color: GRAY })]
+        }));
+
+        var clBorder = { style: BorderStyle.SINGLE, size: 1, color: 'D1D5DB' };
+        var clBorders = { top: clBorder, bottom: clBorder, left: clBorder, right: clBorder };
+        var clRows = [
+          new TableRow({
+            children: ['#', 'Action Required', 'Owner', 'Status'].map(function(h, ci) {
+              return new TableCell({
+                borders: clBorders,
+                width: { size: [500, 6200, 1500, 1160][ci], type: WidthType.DXA },
+                shading: { fill: TABLE_HEADER, type: ShadingType.CLEAR },
+                margins: { top: 60, bottom: 60, left: 80, right: 80 },
+                children: [new Paragraph({ children: [new TextRun({ text: h, bold: true, size: 20, font: 'Calibri', color: 'FFFFFF' })] })]
+              });
+            })
+          })
+        ];
+        actionItems.forEach(function(item, idx) {
+          clRows.push(new TableRow({
+            children: [
+              String(idx + 1),
+              item,
+              '',
+              ''
+            ].map(function(val, ci) {
+              return new TableCell({
+                borders: clBorders,
+                width: { size: [500, 6200, 1500, 1160][ci], type: WidthType.DXA },
+                shading: idx % 2 === 0 ? { fill: TABLE_ALT, type: ShadingType.CLEAR } : { fill: 'FFFFFF', type: ShadingType.CLEAR },
+                margins: { top: 40, bottom: 40, left: 80, right: 80 },
+                children: [new Paragraph({ children: [new TextRun({ text: val, size: 18, font: 'Calibri' })] })]
+              });
+            })
+          }));
+        });
+        appendixChildren.push(new Table({ width: { size: 9360, type: WidthType.DXA }, rows: clRows }));
+        log('PROPOSAL DOC: Submission checklist — ' + actionItems.length + ' action items extracted');
+      }
+    } catch(clErr) { log('PROPOSAL DOC: Submission checklist error — ' + clErr.message); }
 
     // Format due date for cover page
     var coverDate = 'TBD';
