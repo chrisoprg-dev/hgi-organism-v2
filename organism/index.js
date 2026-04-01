@@ -1142,6 +1142,56 @@ if (url.startsWith('/api/recompetes')) {
   return;
 }
 
+// === EXTRACT PIPELINE ANALYTICS — /api/extract-analytics ===
+if (url.startsWith('/api/extract-analytics')) {
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  try {
+    var anMems = await supabase.from('organism_memory')
+      .select('id,agent,observation,created_at')
+      .in('agent', ['loss_analysis','win_rate_analytics','learning_loop'])
+      .order('created_at', { ascending: false })
+      .limit(15);
+    var anRecords = anMems.data || [];
+    var anTotal = 0;
+    for (var ani = 0; ani < anRecords.length; ani++) {
+      var anm = anRecords[ani];
+      if (!anm.observation || anm.observation.length < 200) continue;
+      try {
+        var anResp = await claudeCall('Extract pipeline analytics insights. Return ONLY JSON array.',
+          'Extract ALL analytical insights, patterns, and recommendations. JSON array with: category (win_pattern/loss_pattern/opi_calibration/competitive_pattern/pricing_insight/market_trend), title (short label), insight (the finding), affected_verticals (comma-separated), affected_agencies, confidence (high/medium/low/speculative), source_data (what evidence), recommendation (what HGI should do).\n\n' + (anm.observation || '').substring(0, 6000),
+          4000, { model: 'claude-haiku-4-5-20251001' });
+        var anMatch = anResp.match(/\[[\s\S]*\]/);
+        if (!anMatch) continue;
+        var insights = JSON.parse(anMatch[0]);
+        for (var ins = 0; ins < insights.length; ins++) {
+          var ig = insights[ins];
+          if (!ig.title || ig.title.length < 3) continue;
+          var anEx = await supabase.from('pipeline_analytics').select('id').eq('title', ig.title).limit(1);
+          var anRec = { title: ig.title, category: ig.category, insight: ig.insight, affected_verticals: ig.affected_verticals, affected_agencies: ig.affected_agencies, confidence: ig.confidence || 'medium', source_data: ig.source_data, recommendation: ig.recommendation, source_agent: 'analytics_extract', updated_at: new Date().toISOString() };
+          if (anEx.data && anEx.data.length > 0) {
+            await supabase.from('pipeline_analytics').update(anRec).eq('id', anEx.data[0].id);
+          } else {
+            anRec.id = 'an-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+            anRec.created_at = new Date().toISOString();
+            await supabase.from('pipeline_analytics').insert(anRec);
+          }
+          anTotal++;
+        }
+      } catch (ane) { log('Analytics extract error: ' + ane.message); }
+    }
+    res.end(JSON.stringify({ extracted: anTotal, from_memories: anRecords.length }));
+  } catch (e) { res.end(JSON.stringify({ error: e.message })); }
+  return;
+}
+if (url.startsWith('/api/analytics')) {
+  res.writeHead(200, corsJ);
+  try {
+    var anlData = await supabase.from('pipeline_analytics').select('*').order('updated_at', { ascending: false }).limit(100);
+    res.end(JSON.stringify(anlData.data || []));
+  } catch(e) { res.end(JSON.stringify({ error: e.message })); }
+  return;
+}
+
 // === PHASE 3 INTELLIGENCE SUMMARY — /api/phase3 ===
 if (url.startsWith('/api/phase3')) {
   res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1188,7 +1238,8 @@ if (url.startsWith('/api/phase3')) {
       var rgcnt = await supabase.from('regulatory_changes').select('id', { count: 'exact', head: true });
       var tcnt = await supabase.from('teaming_partners').select('id', { count: 'exact', head: true });
       var acnt = await supabase.from('agency_profiles').select('id', { count: 'exact', head: true });
-      structuredCounts = { disaster_alerts: dcnt.count || 0, budget_cycles: bcnt.count || 0, recompete_tracker: rcnt.count || 0, regulatory_changes: rgcnt.count || 0, teaming_partners: tcnt.count || 0, agency_profiles: acnt.count || 0 };
+      var pancnt = await supabase.from('pipeline_analytics').select('id', { count: 'exact', head: true });
+      structuredCounts = { disaster_alerts: dcnt.count || 0, budget_cycles: bcnt.count || 0, recompete_tracker: rcnt.count || 0, regulatory_changes: rgcnt.count || 0, teaming_partners: tcnt.count || 0, agency_profiles: acnt.count || 0, pipeline_analytics: pancnt.count || 0 };
     } catch(sc) { structuredCounts = { error: sc.message }; }
     res.end(JSON.stringify({ total: p3mems.length, categories: categories, structured_tables: structuredCounts }));
   } catch(e) { res.end(JSON.stringify({ error: e.message })); }
@@ -3920,6 +3971,34 @@ async function runSession(trigger) {
         log('AGENCY AUTO-EXTRACT: ' + agAutoTotal + ' profiles from ' + recentAg.data.length + ' memories');
       } else { log('AGENCY AUTO-EXTRACT: No new memories in last 24h'); }
     } catch (agAutoErr) { log('AGENCY AUTO-EXTRACT failed: ' + agAutoErr.message); }
+
+    // === ANALYTICS AUTO-EXTRACT ===
+    try {
+      var recentAn = await supabase.from('organism_memory').select('id,observation').in('agent',['loss_analysis','win_rate_analytics','learning_loop']).gte('created_at', new Date(Date.now()-24*60*60*1000).toISOString()).order('created_at',{ascending:false}).limit(5);
+      if (recentAn.data && recentAn.data.length > 0) {
+        var anAutoTotal = 0;
+        for (var nai = 0; nai < recentAn.data.length; nai++) {
+          var nam = recentAn.data[nai];
+          if (!nam.observation || nam.observation.length < 200) continue;
+          try {
+            var naResp = await claudeCall('Extract analytics insights. JSON array only.', 'Extract analytical insights. JSON array: category (win_pattern/loss_pattern/opi_calibration/competitive_pattern/pricing_insight/market_trend), title, insight, affected_verticals, confidence (high/medium/low), recommendation.\n\n' + (nam.observation || '').substring(0, 4000), 3000, { model: 'claude-haiku-4-5-20251001' });
+            var naMatch = naResp.match(/\[[\s\S]*\]/);
+            if (!naMatch) continue;
+            var naIns = JSON.parse(naMatch[0]);
+            for (var nap = 0; nap < naIns.length; nap++) {
+              var na2 = naIns[nap];
+              if (!na2.title) continue;
+              var na2Ex = await supabase.from('pipeline_analytics').select('id').eq('title', na2.title).limit(1);
+              var na2Rec = { title: na2.title, category: na2.category, insight: na2.insight, affected_verticals: na2.affected_verticals, confidence: na2.confidence || 'medium', recommendation: na2.recommendation, source_agent: 'analytics_auto_extract', updated_at: new Date().toISOString() };
+              if (na2Ex.data && na2Ex.data.length > 0) { await supabase.from('pipeline_analytics').update(na2Rec).eq('id', na2Ex.data[0].id); }
+              else { na2Rec.id = 'an-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6); na2Rec.created_at = new Date().toISOString(); await supabase.from('pipeline_analytics').insert(na2Rec); }
+              anAutoTotal++;
+            }
+          } catch (nae) { log('ANALYTICS AUTO-EXTRACT error: ' + nae.message); }
+        }
+        log('ANALYTICS AUTO-EXTRACT: ' + anAutoTotal + ' insights from ' + recentAn.data.length + ' memories');
+      } else { log('ANALYTICS AUTO-EXTRACT: No new memories in last 24h'); }
+    } catch (anAutoErr) { log('ANALYTICS AUTO-EXTRACT failed: ' + anAutoErr.message); }
 
   } catch (e) {
     log('SESSION ERROR: ' + e.message);
