@@ -415,7 +415,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       // 2. Load all memories
       var memR = await supabase.from('organism_memory').select('agent,observation,memory_type,created_at')
         .eq('opportunity_id', ppId).neq('memory_type','decision_point')
-        .order('created_at',{ascending:false}).limit(100);
+        .order('created_at',{ascending:false}).limit(200);
       var mems = memR.data || [];
 
       // 3. Load KB chunks (relevant to vertical)
@@ -442,8 +442,8 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         });
         if (catMems.length > 0) {
           intelSummary += '\n## ' + cat + '\n';
-          catMems.slice(0,3).forEach(function(m) {
-            intelSummary += '[' + m.agent + ']: ' + (m.observation||'').slice(0,1500) + '\n';
+          catMems.slice(0,8).forEach(function(m) {
+            intelSummary += '[' + m.agent + ']: ' + (m.observation||'').slice(0,3000) + '\n';
           });
         }
       });
@@ -459,7 +459,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         '## RFP/SOQ REQUIREMENTS\n' + ((opp.rfp_text && opp.rfp_text.trim().length > 200) ? opp.rfp_text.slice(0, 50000) : (opp.scope_analysis || opp.description || 'No RFP text available')) + '\n\n' +
         '## HGI COMPANY PROFILE\n' + HGI + '\n\n' +
         '## ORGANISM INTELLIGENCE (43 agents analyzed this opportunity)\n' + intelSummary + '\n\n' +
-        '## KNOWLEDGE BASE EXCERPTS\n' + kbChunks.slice(0,4000) + '\n\n' +
+        '## KNOWLEDGE BASE EXCERPTS\n' + kbChunks.slice(0,8000) + '\n\n' +
         '## FINANCIAL ANALYSIS\n' + (opp.financial_analysis || 'Not yet produced') + '\n\n' +
         '## STAFFING PLAN\n' + (opp.staffing_plan || 'Not yet produced') + '\n\n' +
         '## INSTRUCTIONS\n' +
@@ -471,16 +471,19 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         '- Are there specific exhibits or attachments required? List and complete each one.\n' +
         '- What is the submission format (font, spacing, page count)?\n' +
         '- Are there required forms, affidavits, or certifications? Flag what HGI must complete manually.\n\n' +
-        'STEP 2 — PRODUCE THE EXACT DELIVERABLE THE AGENCY WANTS:\n' +
+        'STEP 2 — IDENTIFY WIN THEMES:\n' +
+        'Before writing, identify 2-3 win themes specific to THIS RFP based on the organism intelligence and HGI strengths against the competitive landscape. These are not slogans — they are the strategic reasons HGI should win this contract. Examples: incumbent knowledge of the agency systems, 95-year track record on similar programs, local presence when competitors are out-of-state.\n' +
+        'Place each win theme where it naturally belongs in the proposal — once, in the section where it carries the most weight. Do NOT repeat win themes across multiple sections. Once a theme is stated and supported, it is done. Every other section proves capability through specifics — methodology, past performance, staffing — without restating the theme.\n\n' +
+        'STEP 3 — PRODUCE THE EXACT DELIVERABLE THE AGENCY WANTS:\n' +
         'Do NOT produce a generic proposal. Produce EXACTLY what the submission requirements specify.\n' +
         'If they want a questionnaire filled out, fill out the questionnaire field by field.\n' +
         'If they want a 20-page narrative, write a 20-page narrative with their exact section headings.\n' +
         'If they want Exhibit A and Exhibit B, produce both exhibits with HGI data filled in.\n' +
         'If they want a fee schedule by staff classification, build it from the HGI rate card.\n\n' +
-        'STEP 3 — MAP EVALUATION CRITERIA TO CONTENT:\n' +
-        'Extract the exact evaluation criteria and point values from the RFP.\n' +
-        'Organize your response to maximize points on the highest-weighted criteria.\n' +
-        'Address every criterion explicitly — do not leave points on the table.\n\n' +
+        'STEP 4 — WRITE EVERY SECTION TO ITS BEST POSSIBLE VERSION:\n' +
+        'Every section of this proposal must be written as the best possible version of that section. No section gets less effort or depth than any other. The technical approach must be excellent because it IS the technical approach. The staffing section must be sharp because evaluators are looking at qualifications. Past performance must be specific and compelling because it proves HGI can deliver.\n' +
+        'Do NOT allocate depth based on evaluation scoring weights. A 10-point section written poorly loses those 10 points. Write every section as if the evaluator reads only that section to make their decision.\n' +
+        'Write to the specifics of what THIS RFP asks for in each section. Use confirmed HGI data — real dollar amounts, real project names, real timelines, real outcomes. Never use filler language like "extensive experience" or "proven track record" without immediately following it with the specific evidence. If you cannot back it with data from the context above, cut it.\n\n' +
         'CRITICAL PERSONNEL EXCLUSION:\n' +
         '- Geoffrey Brien is NO LONGER WITH HGI. Do not include him in any staffing, personnel, org charts, or team descriptions. If organism intelligence references Brien, IGNORE those references. Replace his role assignments with [TO BE DETERMINED — DR/PA SME] or redistribute to other confirmed staff.\n' +
         '- Confirmed current HGI staff: President (Christopher Oney), CEO (Lou Resweber), VP (Dillon Truax), CAO (Candy Dottolo), SVP Claims (Vanessa James), 1099 SME (Chris Feduccia). No other named individuals unless confirmed in the organism intelligence as current HGI employees.\n\n' +
@@ -490,16 +493,15 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         '- MINIMIZE [ACTION REQUIRED] flags — use them ONLY for items that genuinely cannot be completed without human action: wet signatures, notarizations, insurance certificates, contact info the system truly does not have. If the data exists anywhere in the context above, USE IT instead of flagging it.\n' +
         '- Use ONLY confirmed HGI past performance. Never fabricate projects, dollar amounts, or references.\n' +
         '- Include specific dollar amounts, dates, and confirmed staff names from HGI data\n' +
-        '- Write to WIN — not to fill space. Every sentence should earn points with evaluators. Cut filler, cut repetition, be direct and specific.\n' +
-        '- Professional, confident tone — this goes directly to evaluators. No hedging, no qualifications, no "we believe" or "we feel" — state capabilities as facts.\n' +
+        '- Professional, confident tone — this goes directly to evaluators. No hedging, no "we believe" or "we feel" — state capabilities as facts.\n' +
         '- No mention of AI, organism, agents, confidence levels, or the capture system\n' +
         '- Document must look like it came from the President with no visible AI involvement\n' +
-        '- HGI was established in 1931 (not 1929). SAM UEI: DL4SJEVKZ6H4 (verify exact characters)\n' +
+        '- HGI was established in 1931 (not 1929). SAM UEI: DL4SJEVKZ6H4\n' +
         '- Do NOT impose section numbering (1.0, 2.0) unless the RFP specifically uses numbered sections. Match the RFP structure exactly.\n' +
-        '- Do NOT include a Table of Contents unless the RFP requires one. If included, build it as real content with section names and approximate page numbers — not a placeholder.\n' +
-        '- Do NOT generate ASCII art org charts or text-based organizational diagrams in the proposal body. Instead write "See Organizational Chart (Appendix A)" — the system generates a professional graphic separately.\n' +
-        '- HGI phone: (504) 681-6135. Email: info@hgi-global.com. Use these when contact info is needed — do NOT use placeholder numbers like 000-0000.\n' +
-        '- HGI has approximately 50 team members across offices in Kenner (HQ), Shreveport, Alexandria, and New Orleans. Do NOT cite "67 full-time employees and 43 contractors" — that is outdated.';
+        '- Do NOT include a Table of Contents unless the RFP requires one.\n' +
+        '- Do NOT generate ASCII art org charts or text-based organizational diagrams. Instead write "See Organizational Chart (Appendix A)" — the system generates a professional graphic separately.\n' +
+        '- HGI phone: (504) 681-6135. Email: info@hgi-global.com. Do NOT use placeholder numbers.\n' +
+        '- HGI has approximately 50 team members across offices in Kenner (HQ), Shreveport, Alexandria, and New Orleans. Do NOT cite "67 full-time employees and 43 contractors."';
 
       log('PROPOSAL ENGINE: Calling Claude Opus 4.6 (128K max) with ' + proposalPrompt.length + ' char prompt');
 
