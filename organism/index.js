@@ -721,6 +721,174 @@ if (url.startsWith('/api/competitors')) {
   return;
 }
 
+// === CRM CONTACT EXTRACTION — /api/extract-contacts ===
+if (url.startsWith('/api/extract-contacts')) {
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  try {
+    log('CRM EXTRACT: Starting contact extraction from organism memories');
+    
+    var crmMems = await supabase.from('organism_memory')
+      .select('id,agent,observation,opportunity_id,created_at')
+      .in('memory_type', ['relationship'])
+      .order('created_at', { ascending: false })
+      .limit(200);
+    
+    var cMems = crmMems.data || [];
+    log('CRM EXTRACT: Found ' + cMems.length + ' relationship memories');
+    
+    var cByOpp = {};
+    cMems.forEach(function(m) { var o = m.opportunity_id || 'global'; if (!cByOpp[o]) cByOpp[o] = []; cByOpp[o].push(m); });
+    
+    var totalContacts = 0;
+    var cOppIds = Object.keys(cByOpp);
+    
+    for (var ci2 = 0; ci2 < cOppIds.length; ci2++) {
+      var cOid = cOppIds[ci2];
+      var cOppMems = cByOpp[cOid];
+      var cCombined = cOppMems.slice(0, 2).map(function(m) { return (m.observation || '').substring(0, 4000); }).join('\n---\n');
+      if (cCombined.length < 200) continue;
+      
+      // Get opportunity title for context
+      var oppTitle = '';
+      if (cOid !== 'global') {
+        var oppLookup = await supabase.from('opportunities').select('title,agency').eq('id', cOid).limit(1);
+        if (oppLookup.data && oppLookup.data[0]) { oppTitle = (oppLookup.data[0].agency || '') + ' - ' + (oppLookup.data[0].title || ''); }
+      }
+      
+      try {
+        var cResp = await claudeCall(
+          'Extract contact information from CRM intelligence briefs. Return ONLY a JSON array.',
+          'Extract ALL named contacts from this CRM brief. Return JSON array. Each object must have:\n' +
+          '- contact_name: string (full name)\n' +
+          '- title: string or null (job title)\n' +
+          '- organization: string (employer/agency)\n' +
+          '- agency: string (government agency they represent)\n' +
+          '- email: string or null\n' +
+          '- phone: string or null\n' +
+          '- role_in_procurement: string (their role in this specific procurement)\n' +
+          '- contact_type: "decision_maker" | "evaluator" | "procurement" | "technical" | "political" | "influencer" | "engineer_of_record" | "other"\n' +
+          '- priority: "critical" | "high" | "medium" | "low"\n' +
+          '- hgi_relationship: "warm" | "cold" | "unknown"\n' +
+          '- notes: string (1-2 sentence strategic note about this contact)\n\n' +
+          'Opportunity context: ' + oppTitle + '\n\nCRM Brief:\n' + cCombined,
+          4000, { model: 'claude-haiku-4-5-20251001' }
+        );
+        
+        var cMatch = cResp.match(/\[[\s\S]*\]/);
+        if (!cMatch) continue;
+        var contacts = JSON.parse(cMatch[0]);
+        
+        for (var cci2 = 0; cci2 < contacts.length; cci2++) {
+          var ct = contacts[cci2];
+          if (!ct.contact_name || ct.contact_name.length < 3) continue;
+          
+          // Check for existing contact by name + opportunity
+          var ctEx = await supabase.from('relationship_graph')
+            .select('id')
+            .eq('contact_name', ct.contact_name)
+            .eq('opportunity_id', cOid === 'global' ? null : cOid)
+            .limit(1);
+          
+          var ctRec = {
+            contact_name: ct.contact_name,
+            title: ct.title || null,
+            organization: ct.organization || null,
+            agency: ct.agency || null,
+            email: ct.email || null,
+            phone: ct.phone || null,
+            role_in_procurement: ct.role_in_procurement || null,
+            contact_type: ct.contact_type || 'other',
+            priority: ct.priority || 'medium',
+            hgi_relationship: ct.hgi_relationship || 'unknown',
+            outreach_status: 'not_contacted',
+            relationship_strength: ct.hgi_relationship || 'unknown',
+            notes: ct.notes || null,
+            opportunity_id: cOid === 'global' ? null : cOid,
+            source_agent: 'crm_extractor',
+            updated_at: new Date().toISOString()
+          };
+          
+          if (ctEx.data && ctEx.data.length > 0) {
+            await supabase.from('relationship_graph').update(ctRec).eq('id', ctEx.data[0].id);
+          } else {
+            ctRec.id = 'ct-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+            ctRec.created_at = new Date().toISOString();
+            await supabase.from('relationship_graph').insert(ctRec);
+          }
+          totalContacts++;
+        }
+      } catch(cParseErr) {
+        log('CRM EXTRACT parse error: ' + cParseErr.message);
+      }
+    }
+    
+    log('CRM EXTRACT: Complete — ' + totalContacts + ' contacts upserted from ' + cOppIds.length + ' opportunities');
+    res.end(JSON.stringify({ success: true, contacts_upserted: totalContacts, opportunities_processed: cOppIds.length }));
+  } catch(e) {
+    log('CRM EXTRACT ERROR: ' + e.message);
+    res.end(JSON.stringify({ error: e.message }));
+  }
+  return;
+}
+
+// === CONTACTS DASHBOARD — /api/contacts ===
+if (url.startsWith('/api/contacts')) {
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  try {
+    var ctData = await supabase.from('relationship_graph')
+      .select('*')
+      .not('contact_name', 'is', null)
+      .order('updated_at', { ascending: false });
+    
+    var ctRecords = ctData.data || [];
+    
+    // Build contact profiles — merge by name across opportunities
+    var ctProfiles = {};
+    ctRecords.forEach(function(r) {
+      var name = r.contact_name;
+      if (!ctProfiles[name]) {
+        ctProfiles[name] = {
+          name: name,
+          title: r.title,
+          organization: r.organization,
+          agency: r.agency,
+          email: r.email,
+          phone: r.phone,
+          contact_type: r.contact_type,
+          priority: r.priority,
+          hgi_relationship: r.hgi_relationship,
+          outreach_status: r.outreach_status || 'not_contacted',
+          notes: r.notes,
+          opportunities: [],
+          total_records: 0
+        };
+      }
+      ctProfiles[name].total_records++;
+      if (r.opportunity_id) ctProfiles[name].opportunities.push(r.opportunity_id);
+      // Use most detailed info available
+      if (!ctProfiles[name].email && r.email) ctProfiles[name].email = r.email;
+      if (!ctProfiles[name].phone && r.phone) ctProfiles[name].phone = r.phone;
+      if (!ctProfiles[name].title && r.title) ctProfiles[name].title = r.title;
+    });
+    
+    var profileList = Object.values(ctProfiles).sort(function(a, b) {
+      var order = { critical: 0, high: 1, medium: 2, low: 3 };
+      return (order[a.priority] || 4) - (order[b.priority] || 4);
+    });
+    
+    res.end(JSON.stringify({
+      total_contacts: profileList.length,
+      total_records: ctRecords.length,
+      by_type: ctRecords.reduce(function(acc, r) { var t = r.contact_type || 'other'; acc[t] = (acc[t] || 0) + 1; return acc; }, {}),
+      by_relationship: ctRecords.reduce(function(acc, r) { var t = r.hgi_relationship || 'unknown'; acc[t] = (acc[t] || 0) + 1; return acc; }, {}),
+      contacts: profileList
+    }));
+  } catch(e) {
+    res.end(JSON.stringify({ error: e.message }));
+  }
+  return;
+}
+
 // === PROPOSAL DOCUMENT GENERATOR — /api/proposal-doc ===
 if (url.startsWith('/api/proposal-doc')) {
   var docId = (req.url.split('?id=')[1]||'').split('&')[0];
