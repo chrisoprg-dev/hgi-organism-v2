@@ -59,7 +59,7 @@ function ago(ts){var m=Math.floor((Date.now()-new Date(ts).getTime())/6e4);retur
 function dtl(ds){if(!ds)return null;var d=new Date(ds);if(isNaN(d)){var m=ds.match(/(\d{1,2})-([A-Za-z]+)-(\d{4})/);if(m){d=new Date(m[2]+' '+m[1]+', '+m[3]);}else return null}return isNaN(d)?null:Math.ceil((d-new Date())/864e5)}
 function fd(ds){if(!ds)return'\u2014';var d=new Date(ds);return isNaN(d)?ds.slice(0,12):d.toLocaleDateString('en-US',{month:'short',day:'numeric'})}
 
-var state={tab:'cop',pipe:[],mems:[],comps:[],cts:[],p3:null,sel:null,selMems:[],selPc:null,loading:true};
+var state={tab:'cop',pipe:[],mems:[],comps:[],cts:[],p3:null,regs:[],teams:[],ags:[],recs:[],anl:[],sel:null,selMems:[],selPc:null,loading:true};
 
 async function loadData(){
   state.loading=true;render();
@@ -79,6 +79,11 @@ async function loadData(){
     }
   }
   try{var p3r=await fetch('/api/phase3');state.p3=await p3r.json();}catch(e){state.p3=null;}
+  try{state.regs=await (await fetch('/api/regulatory')).json();}catch(e){state.regs=[];}
+  try{state.teams=await (await fetch('/api/teaming')).json();}catch(e){state.teams=[];}
+  try{state.ags=await (await fetch('/api/agencies')).json();}catch(e){state.ags=[];}
+  try{state.recs=await (await fetch('/api/recompetes')).json();}catch(e){state.recs=[];}
+  try{state.anl=await (await fetch('/api/analytics')).json();}catch(e){state.anl=[];}
   state.loading=false;render();
 }
 
@@ -165,25 +170,84 @@ function render(){
 
   // STRATEGY (Phase 3)
   else if(state.tab==='p3'){
-    h+='<div class="lbl mono" style="margin-bottom:6px">STRATEGIC INTELLIGENCE \u2014 PHASE 3 AGENTS</div>';
-    if(!state.p3||!state.p3.categories){
-      h+='<div style="font-size:11px;color:#555;padding:12px">Phase 3 data loading from /api/phase3...</div>';
-    }else{
-      var cats=state.p3.categories;
-      var order=['disaster','contracts','regulatory','budget','analytics','teaming','agencies','growth'];
-      var colors={disaster:'#ef4444',contracts:'#f97316',regulatory:'#ec4899',budget:'#84cc16',analytics:'#eab308',teaming:'#a855f7',agencies:'#0891b2',growth:'#22c55e'};
-      h+='<div class="grid2" style="gap:8px">';
-      order.forEach(function(k){
-        var cat=cats[k];if(!cat||cat.count===0)return;
-        var cc=colors[k]||'#64748b';
-        h+='<div class="p3card" style="border-left:3px solid '+cc+'">';
-        h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-size:12px;font-weight:600;color:#ccc">'+cat.label+'</span><span class="mono" style="font-size:8px;padding:1px 4px;border-radius:2px;background:'+cc+'15;color:'+cc+';font-weight:700">'+cat.count+'</span></div>';
-        cat.data.slice(0,2).forEach(function(d){
-          h+='<div style="font-size:10px;color:#777;line-height:1.3;margin-bottom:4px;padding-left:8px;border-left:1px solid rgba(255,255,255,0.06)">'+tr((d.obs||'').replace(/^(Excellent|Good|This is|I\'ll|Now |All |Here is|I now|Let me|I have)[^\\n]*\\n*/,'').replace(/^---\\n*/,'').replace(/^#/,''),200)+'</div>';
-        });
+    var daCnt=(state.p3&&state.p3.structured_tables)?state.p3.structured_tables.disaster_alerts||0:0;
+    var buCnt=(state.p3&&state.p3.structured_tables)?state.p3.structured_tables.budget_cycles||0:0;
+    var totalStructured=(state.regs||[]).length+(state.teams||[]).length+(state.ags||[]).length+(state.recs||[]).length+(state.anl||[]).length+daCnt+buCnt+(state.comps||[]).length+(state.cts||[]).length;
+    h+='<div class="lbl mono" style="margin-bottom:8px">STRATEGIC INTELLIGENCE <span style="color:#d4a843;font-size:9px">'+totalStructured+' STRUCTURED RECORDS</span></div>';
+    // Summary cards
+    var tbs=[
+      {l:'Competitors',c:state.comps.length,clr:'#ef4444'},
+      {l:'Teaming Partners',c:(state.teams||[]).length,clr:'#a855f7'},
+      {l:'Regulatory',c:(state.regs||[]).length,clr:'#ec4899'},
+      {l:'Budget Cycles',c:buCnt,clr:'#84cc16'},
+      {l:'Agencies',c:(state.ags||[]).length,clr:'#0891b2'},
+      {l:'Contacts',c:state.cts.length,clr:'#3b82f6'},
+      {l:'Recompetes',c:(state.recs||[]).length,clr:'#f97316'},
+      {l:'Disasters',c:daCnt,clr:'#dc2626'},
+      {l:'Analytics',c:(state.anl||[]).length,clr:'#eab308'}
+    ];
+    h+='<div class="grid2" style="gap:6px;margin-bottom:12px">';
+    tbs.forEach(function(t){
+      h+='<div style="background:rgba(255,255,255,0.03);border-radius:6px;padding:8px 10px;border-left:3px solid '+t.clr+'"><div style="font-size:9px;color:#888;text-transform:uppercase;letter-spacing:0.5px">'+t.l+'</div><div class="mono" style="font-size:18px;color:'+t.clr+';font-weight:700">'+t.c+'</div></div>';
+    });
+    h+='</div>';
+    // High-impact regulatory
+    var hiRegs=(state.regs||[]).filter(function(r){return r.impact_level==='critical'||r.impact_level==='high'});
+    if(hiRegs.length>0){
+      h+='<div class="lbl mono" style="margin:10px 0 6px;font-size:9px;color:#ec4899">\u26A0 HIGH-IMPACT REGULATORY ('+hiRegs.length+')</div>';
+      hiRegs.slice(0,5).forEach(function(r){
+        var imp=r.impact_level==='critical'?'#ef4444':'#f97316';
+        h+='<div style="background:rgba(255,255,255,0.03);border-radius:4px;padding:8px;margin-bottom:4px;border-left:2px solid '+imp+'">';
+        h+='<div style="display:flex;justify-content:space-between"><span style="font-size:11px;color:#ddd;font-weight:500">'+tr(r.regulation_name,60)+'</span><span class="mono" style="font-size:8px;padding:1px 4px;border-radius:2px;background:'+imp+'20;color:'+imp+'">'+r.impact_level+'</span></div>';
+        if(r.summary)h+='<div style="font-size:10px;color:#888;margin-top:3px;line-height:1.3">'+tr(r.summary,150)+'</div>';
         h+='</div>';
       });
-      h+='</div>';
+    }
+    // Strong-fit teaming partners
+    var strongTeams=(state.teams||[]).filter(function(t){return t.fit_score==='strong'});
+    if(strongTeams.length>0){
+      h+='<div class="lbl mono" style="margin:10px 0 6px;font-size:9px;color:#a855f7">\u2B21 STRONG-FIT TEAMING PARTNERS ('+strongTeams.length+')</div>';
+      strongTeams.slice(0,6).forEach(function(t){
+        h+='<div style="background:rgba(255,255,255,0.03);border-radius:4px;padding:8px;margin-bottom:4px;border-left:2px solid #a855f7">';
+        h+='<div style="font-size:11px;color:#ddd;font-weight:500">'+tr(t.partner_name,50)+'</div>';
+        var meta=[];if(t.capability)meta.push(tr(t.capability,60));if(t.location)meta.push(t.location);if(t.certifications)meta.push(t.certifications);
+        if(meta.length)h+='<div style="font-size:10px;color:#888;margin-top:2px">'+meta.join(' \u00B7 ')+'</div>';
+        h+='</div>';
+      });
+    }
+    // Agency profiles with active/warm relationships
+    var warmAgs=(state.ags||[]).filter(function(a){return a.hgi_relationship==='active'||a.hgi_relationship==='warm'});
+    if(warmAgs.length>0){
+      h+='<div class="lbl mono" style="margin:10px 0 6px;font-size:9px;color:#0891b2">\u25C9 WARM AGENCY RELATIONSHIPS ('+warmAgs.length+')</div>';
+      warmAgs.slice(0,5).forEach(function(a){
+        var rc=a.hgi_relationship==='active'?'#22c55e':'#0891b2';
+        h+='<div style="background:rgba(255,255,255,0.03);border-radius:4px;padding:8px;margin-bottom:4px;border-left:2px solid '+rc+'">';
+        h+='<div style="display:flex;justify-content:space-between"><span style="font-size:11px;color:#ddd;font-weight:500">'+tr(a.agency_name,50)+'</span><span class="mono" style="font-size:8px;padding:1px 4px;border-radius:2px;background:'+rc+'20;color:'+rc+'">'+a.hgi_relationship+'</span></div>';
+        if(a.hgi_history)h+='<div style="font-size:10px;color:#888;margin-top:2px">'+tr(a.hgi_history,120)+'</div>';
+        h+='</div>';
+      });
+    }
+    // Recompete opportunities
+    if((state.recs||[]).length>0){
+      h+='<div class="lbl mono" style="margin:10px 0 6px;font-size:9px;color:#f97316">\u23F0 CONTRACT RECOMPETES ('+state.recs.length+')</div>';
+      (state.recs||[]).slice(0,5).forEach(function(r){
+        h+='<div style="background:rgba(255,255,255,0.03);border-radius:4px;padding:8px;margin-bottom:4px;border-left:2px solid #f97316">';
+        h+='<div style="font-size:11px;color:#ddd;font-weight:500">'+tr(r.contract_name||r.client||'Unknown',50)+'</div>';
+        var meta=[];if(r.client)meta.push(r.client);if(r.contract_end_date)meta.push('Ends: '+r.contract_end_date);if(r.estimated_value_annual)meta.push(r.estimated_value_annual);
+        if(meta.length)h+='<div style="font-size:10px;color:#888;margin-top:2px">'+meta.join(' \u00B7 ')+'</div>';
+        h+='</div>';
+      });
+    }
+    // Analytics insights
+    if((state.anl||[]).length>0){
+      h+='<div class="lbl mono" style="margin:10px 0 6px;font-size:9px;color:#eab308">\u25C7 PIPELINE INSIGHTS ('+state.anl.length+')</div>';
+      (state.anl||[]).slice(0,5).forEach(function(a){
+        h+='<div style="background:rgba(255,255,255,0.03);border-radius:4px;padding:8px;margin-bottom:4px;border-left:2px solid #eab308">';
+        h+='<div style="font-size:11px;color:#ddd;font-weight:500">'+tr(a.title,60)+'</div>';
+        if(a.insight)h+='<div style="font-size:10px;color:#888;margin-top:2px;line-height:1.3">'+tr(a.insight,150)+'</div>';
+        if(a.recommendation)h+='<div style="font-size:10px;color:#d4a843;margin-top:2px">\u2192 '+tr(a.recommendation,120)+'</div>';
+        h+='</div>';
+      });
     }
   }
 
