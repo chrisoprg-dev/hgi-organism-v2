@@ -4017,7 +4017,7 @@ async function autoRetrieveRFPs() {
         if (rfpDocUrl) updateObj.rfp_document_url = rfpDocUrl;
         await supabase.from('opportunities').update(updateObj).eq('id', opp.id);
         log('AUTO-RFP: STORED ' + fullText.length + ' chars for ' + (opp.title||'').slice(0, 40) + ' (retrieved=' + isSubstantial + ', pdfs=' + pdfCount + ')');
-        results.push({ opp: (opp.title||'').slice(0, 40), chars: fullText.length, pdfs: pdfCount, retrieved: isSubstantial });
+        results.push({ id: opp.id, opp: (opp.title||'').slice(0, 40), chars: fullText.length, pdfs: pdfCount, retrieved: isSubstantial });
         await storeMemory('rfp_retrieval_agent', opp.id, 'rfp_retrieval', 'AUTO-RETRIEVED RFP content: ' + fullText.length + ' chars from ' + url.slice(0, 80) + (pdfCount > 0 ? ' + ' + pdfCount + ' PDF(s)' : '') + '. Document marked as ' + (isSubstantial ? 'RETRIEVED' : 'PARTIAL (< 2K chars)') + '.', 'analysis', url, isSubstantial ? 'high' : 'medium');
       } else {
         log('AUTO-RFP: No new content for ' + (opp.title||'').slice(0, 40) + ' (had:' + existingLen + ' got:' + fullText.length + ')');
@@ -4033,8 +4033,9 @@ async function autoRetrieveRFPs() {
 // RUN SESSION — The execution engine
 // ============================================================
 async function runSession(trigger) {
-  var id = 'v3-' + Date.now();
-  log('=== SESSION START: ' + id + ' | trigger: ' + trigger + ' | V3.4 43-agent organism ===');
+  var id = 'v4-' + Date.now();
+  var isSkeleton = trigger.indexOf('skeleton') >= 0;
+  log('=== SESSION START: ' + id + ' | trigger: ' + trigger + ' | mode: ' + (isSkeleton ? 'SKELETON (cost-control)' : 'FULL') + ' ===');
   cycleWrites.clear(); // Reset dedup tracker for new cycle
 
   try {
@@ -4051,12 +4052,51 @@ async function runSession(trigger) {
     var allResults = [];
     var allEvalScores = [];
     var cycleMemoryIds = [];
+    var newOppsFound = 0;
+    var newRFPsRetrieved = 0;
+    var eventTriggeredOpps = []; // opps that need full analysis due to events
 
-    // 1. HUNTING — fires first
-    try { var rH = await agentHunting(state); if (rH) { allResults.push(rH); if (rH.new_opps > 0) { var fresh = await supabase.from('opportunities').select('*').eq('status', 'active').order('opi_score', { ascending: false }).limit(15); if (fresh.data) { state.pipeline = fresh.data; activeOpps = state.pipeline.filter(function(o) { return (o.opi_score || 0) >= 65; }); } } } } catch (e) { log('Hunt error: ' + e.message); }
+    // 1. HUNTING — fires first (always runs, even in skeleton)
+    try { var rH = await agentHunting(state); if (rH) { allResults.push(rH); if (rH.new_opps > 0) { newOppsFound = rH.new_opps; log('EVENT: ' + rH.new_opps + ' new opps discovered — will trigger full analysis'); var fresh = await supabase.from('opportunities').select('*').eq('status', 'active').order('opi_score', { ascending: false }).limit(15); if (fresh.data) { state.pipeline = fresh.data; activeOpps = state.pipeline.filter(function(o) { return (o.opi_score || 0) >= 65; }); } } } } catch (e) { log('Hunt error: ' + e.message); }
 
-    // 1.5. AUTO-RFP RETRIEVAL — fetch actual RFP docs for any opp missing them
-    try { var rfpResults = await autoRetrieveRFPs(); if (rfpResults && rfpResults.length > 0) { var refreshed = await supabase.from('opportunities').select('*').eq('status', 'active').order('opi_score', { ascending: false }).limit(15); if (refreshed.data) { state.pipeline = refreshed.data; activeOpps = state.pipeline.filter(function(o) { return (o.opi_score || 0) >= 65; }); } } } catch (e) { log('Auto-RFP error: ' + e.message); }
+    // 1.5. AUTO-RFP RETRIEVAL — always runs, tracks new retrievals
+    try { var rfpResults = await autoRetrieveRFPs(); if (rfpResults && rfpResults.length > 0) { var successfulRFPs = rfpResults.filter(function(r) { return r && r.retrieved; }); if (successfulRFPs.length > 0) { newRFPsRetrieved = successfulRFPs.length; log('EVENT: ' + successfulRFPs.length + ' new RFPs retrieved — will trigger full analysis for those opps'); successfulRFPs.forEach(function(r) { if (r && r.id) eventTriggeredOpps.push(r.id); }); } var refreshed = await supabase.from('opportunities').select('*').eq('status', 'active').order('opi_score', { ascending: false }).limit(15); if (refreshed.data) { state.pipeline = refreshed.data; activeOpps = state.pipeline.filter(function(o) { return (o.opi_score || 0) >= 65; }); } } } catch (e) { log('Auto-RFP error: ' + e.message); }
+
+    // SKELETON GATE: In skeleton mode, only run essential system agents + event-triggered opps
+    if (isSkeleton) {
+      log('SKELETON MODE: Skipping full agent passes. Running pipeline scanner + amendment tracker + dashboard only.');
+      
+      // Run only 3 essential system-wide agents
+      try { var rPS = await agentPipelineScanner(state); if (rPS) allResults.push(rPS); } catch (e) { log('PS err: ' + e.message); }
+      try { var rAT = await agentAmendmentTracker(state); if (rAT) allResults.push(rAT); } catch (e) { log('AT err: ' + e.message); }
+      try { var rDA = await agentDashboard(state); if (rDA) allResults.push(rDA); } catch (e) { log('Dash err: ' + e.message); }
+      
+      // EVENT-DRIVEN: If new opps or RFPs found, run full analysis ONLY on those opps
+      if (newOppsFound > 0 || eventTriggeredOpps.length > 0) {
+        log('EVENT-DRIVEN: Running full analysis on ' + (newOppsFound > 0 ? 'new opps' : eventTriggeredOpps.length + ' event-triggered opps'));
+        var eventOpps = activeOpps.filter(function(o) {
+          if (newOppsFound > 0) return true; // new opps = analyze everything once
+          return eventTriggeredOpps.indexOf(o.id) >= 0;
+        });
+        for (var ei = 0; ei < eventOpps.length; ei++) {
+          var eOpp = eventOpps[ei];
+          log('--- Event opp ' + (ei+1) + '/' + eventOpps.length + ': ' + (eOpp.title||'?').slice(0,50) + ' ---');
+          var eCB = await buildCycleBrief(eOpp, state);
+          try { var r1 = await agentIntelligence(eOpp, state, eCB); if (r1) allResults.push(r1); } catch(e){}
+          try { var r2 = await agentFinancial(eOpp, state, eCB); if (r2) allResults.push(r2); } catch(e){}
+          try { var r3 = await agentWinnability(eOpp, state, eCB); if (r3) allResults.push(r3); } catch(e){}
+          try { var r4 = await agentCRM(eOpp, state, eCB); if (r4) allResults.push(r4); } catch(e){}
+        }
+      }
+      
+      await storeMemory('v4_engine', null, 'v4,skeleton,session',
+        'V4 SKELETON SESSION - trigger:' + trigger + ' pipeline:' + state.pipeline.length + ' agents:' + allResults.length + ' newOpps:' + newOppsFound + ' newRFPs:' + newRFPsRetrieved,
+        'analysis', null, 'high');
+      log('=== SKELETON SESSION COMPLETE: ' + id + ' | ' + allResults.length + ' agents fired (cost-control mode) ===');
+      return;
+    }
+
+    // === FULL MODE BELOW — only reached via /api/trigger or non-skeleton triggers ===
 
     // 2. PER-OPP FIRST PASS — sequential, each builds on prior
     for (var i = 0; i < activeOpps.length; i++) {
@@ -4444,18 +4484,19 @@ process.on('unhandledRejection', function(reason) {
 });
 
 // STARTUP SESSION DISABLED (Session 68) — deploys no longer trigger agent cycles.
-// Cycles run on scheduled cron only (noon + midnight CST). Use /api/trigger for manual runs.
 // setTimeout(function() { runSession('startup').catch(console.error); }, 3000);
 
-// Cron: noon + midnight CST (UTC-6 = 18:00 and 06:00 UTC)
+// SESSION 80: COST CONTROL — Skeleton crew cron, midnight only.
+// Full suite fires on: manual /api/trigger, new opp discovered, new RFP downloaded, stage change.
+// Skeleton = hunting + auto-RFP + pipeline scanner + amendment tracker + dashboard only.
 setInterval(function() {
   var h = new Date().getUTCHours();
   var m = new Date().getUTCMinutes();
-  if ((h === 18 || h === 6) && m === 0) {
-    log('Scheduled session firing (' + (h === 18 ? 'noon' : 'midnight') + ' CST)');
-    runSession('scheduled_' + (h === 18 ? 'noon' : 'midnight')).catch(console.error);
+  if (h === 6 && m === 0) {
+    log('Skeleton session firing (midnight CST)');
+    runSession('skeleton_midnight').catch(console.error);
   }
 }, 60000);
 
-log('V3.4 ready. Cron-only mode — noon + midnight CST. /api/trigger for manual.');
+log('V4.0-cost-control ready. Midnight skeleton cron only. /api/trigger for full suite.');
 
