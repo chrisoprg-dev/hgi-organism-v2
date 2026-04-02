@@ -182,10 +182,18 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url === '/api/trigger') {
-      log('MANUAL TRIGGER via /api/trigger');
+      log('SMART TRIGGER via /api/trigger — only changed/new opps');
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ triggered: true, time: new Date().toISOString() }));
-      setImmediate(function() { runSession('manual_trigger').catch(function(e) { log('Trigger error: ' + e.message); }); });
+      res.end(JSON.stringify({ triggered: true, mode: 'smart', time: new Date().toISOString() }));
+      setImmediate(function() { runSession('smart_trigger').catch(function(e) { log('Trigger error: ' + e.message); }); });
+      return;
+    }
+
+    if (url === '/api/trigger-full') {
+      log('FULL TRIGGER via /api/trigger-full — all opps, all agents');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ triggered: true, mode: 'full', time: new Date().toISOString() }));
+      setImmediate(function() { runSession('manual_full').catch(function(e) { log('Full trigger error: ' + e.message); }); });
       return;
     }
 
@@ -4096,7 +4104,34 @@ async function runSession(trigger) {
       return;
     }
 
-    // === FULL MODE BELOW — only reached via /api/trigger or non-skeleton triggers ===
+    // === FULL/SMART MODE BELOW ===
+    
+    // SMART TRIGGER: Only run agents on opps where something CHANGED
+    var isSmart = trigger.indexOf('smart') >= 0;
+    if (isSmart) {
+      var beforeCount = activeOpps.length;
+      activeOpps = activeOpps.filter(function(o) {
+        // Never analyzed = always run
+        if (!o.last_analyzed_at) { log('SMART: ' + (o.title||'?').slice(0,40) + ' — NEVER ANALYZED'); return true; }
+        var prev = o.last_analysis_state || {};
+        var curRfpLen = (o.rfp_text || '').length;
+        // RFP text changed (new RFP or addendum)
+        if (curRfpLen !== (prev.rfp_len || 0)) { log('SMART: ' + (o.title||'?').slice(0,40) + ' — RFP CHANGED (' + (prev.rfp_len||0) + ' → ' + curRfpLen + ')'); return true; }
+        // Stage changed
+        if ((o.stage || '') !== (prev.stage || '')) { log('SMART: ' + (o.title||'?').slice(0,40) + ' — STAGE CHANGED (' + (prev.stage||'none') + ' → ' + (o.stage||'none') + ')'); return true; }
+        // Outcome recorded
+        if (o.outcome && !prev.outcome) { log('SMART: ' + (o.title||'?').slice(0,40) + ' — OUTCOME RECORDED'); return true; }
+        // RFP retrieved for first time
+        if (o.rfp_document_retrieved && !prev.rfp_retrieved) { log('SMART: ' + (o.title||'?').slice(0,40) + ' — RFP FIRST RETRIEVED'); return true; }
+        return false;
+      });
+      log('SMART FILTER: ' + activeOpps.length + ' of ' + beforeCount + ' opps need analysis (' + (beforeCount - activeOpps.length) + ' skipped — no changes)');
+      if (activeOpps.length === 0) {
+        log('=== SMART SESSION COMPLETE: Nothing changed. $0 API cost. ===');
+        await storeMemory('v4_engine', null, 'v4,smart,session', 'SMART SESSION — no changes detected across ' + beforeCount + ' opps. Zero API calls. Trigger: ' + trigger, 'analysis', null, 'high');
+        return;
+      }
+    }
 
     // 2. PER-OPP FIRST PASS — sequential, each builds on prior
     for (var i = 0; i < activeOpps.length; i++) {
@@ -4189,8 +4224,25 @@ async function runSession(trigger) {
     // 7. SELF-AWARENESS — runs last
     try { var rSA = await agentSelfAwareness(state, allResults, allEvalScores); if (rSA) allResults.push(rSA); } catch (e) { log('SA err: ' + e.message); }
 
-    await storeMemory('v3_engine', null, 'v3,session',
-      'V3 SESSION - trigger:' + trigger + ' pipeline:' + state.pipeline.length + ' agents:' + allResults.length + ' uptime:' + Math.floor(process.uptime()) + 's',
+    // 8. UPDATE ANALYSIS TRACKING — mark all processed opps as analyzed
+    for (var ti = 0; ti < activeOpps.length; ti++) {
+      try {
+        var tOpp = activeOpps[ti];
+        await supabase.from('opportunities').update({
+          last_analyzed_at: new Date().toISOString(),
+          last_analysis_state: {
+            rfp_len: (tOpp.rfp_text || '').length,
+            stage: tOpp.stage || null,
+            outcome: tOpp.outcome || null,
+            rfp_retrieved: tOpp.rfp_document_retrieved || false
+          }
+        }).eq('id', tOpp.id);
+      } catch (te) {}
+    }
+    log('TRACKING: Updated last_analyzed_at for ' + activeOpps.length + ' opps');
+
+    await storeMemory('v4_engine', null, 'v4,session',
+      'V4 SESSION - trigger:' + trigger + ' pipeline:' + state.pipeline.length + ' agents:' + allResults.length + ' opps_analyzed:' + activeOpps.length + ' uptime:' + Math.floor(process.uptime()) + 's',
       'analysis', null, 'high');
 
     log('=== SESSION COMPLETE: ' + id + ' | ' + allResults.length + ' agent outputs ===');
