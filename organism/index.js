@@ -3,6 +3,7 @@
 // 47 agents total. One shared brain. All into all.
 
 import http from 'http';
+import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import fs from 'fs';
 import path from 'path';
@@ -3851,7 +3852,49 @@ async function agentHunting(state) {
 
 // ============================================================
 // AUTO-RFP RETRIEVAL — Fetches actual RFP documents for new discoveries
+// Handles Central Bidding authentication via MD5 login
 // ============================================================
+
+var cbSessionCookie = null;
+async function cbLogin() {
+  if (cbSessionCookie) return cbSessionCookie;
+  try {
+    var pwd = 'Whatever1340!';
+    var md5hash = crypto.createHash('md5').update(pwd).digest('hex');
+    var loginResp = await fetch('https://www.centralauctionhouse.com/login.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'Mozilla/5.0 (compatible; HGI-Organism/2.0)' },
+      body: 'username=HGIGLOBAL&md5pass=' + md5hash + '&md5pass_utf=' + md5hash + '&login_process=1&redirect=',
+      redirect: 'manual',
+      signal: AbortSignal.timeout(15000)
+    });
+    var cookies = loginResp.headers.getSetCookie ? loginResp.headers.getSetCookie() : [];
+    if (cookies.length === 0) {
+      var raw = loginResp.headers.get('set-cookie') || '';
+      cookies = raw.split(',').filter(function(c) { return c.includes('='); });
+    }
+    var cookieStr = cookies.map(function(c) { return c.split(';')[0].trim(); }).filter(function(c) { return c.length > 2; }).join('; ');
+    if (cookieStr.length > 10) {
+      cbSessionCookie = cookieStr;
+      log('AUTO-RFP: CB login SUCCESS — session established');
+      return cookieStr;
+    }
+    // Fallback: follow redirect and get cookies from response
+    if (loginResp.status >= 300 && loginResp.status < 400) {
+      var loc = loginResp.headers.get('location') || 'https://www.centralauctionhouse.com/main.php';
+      var r2 = await fetch(loc, { headers: { 'User-Agent': 'Mozilla/5.0', 'Cookie': cookieStr }, signal: AbortSignal.timeout(10000) });
+      var body = await r2.text();
+      if (body.includes('HGIGLOBAL') || body.includes('Logout')) {
+        cbSessionCookie = cookieStr;
+        log('AUTO-RFP: CB login SUCCESS via redirect');
+        return cookieStr;
+      }
+    }
+    log('AUTO-RFP: CB login — could not confirm session');
+    return cookieStr || null;
+  } catch(e) { log('AUTO-RFP: CB login error: ' + (e.message||'').slice(0, 80)); return null; }
+}
+
 async function autoRetrieveRFPs() {
   log('AUTO-RFP: Checking for opportunities needing RFP retrieval...');
   var needsRfp = await supabase.from('opportunities')
@@ -3866,13 +3909,24 @@ async function autoRetrieveRFPs() {
   }
   log('AUTO-RFP: ' + needsRfp.data.length + ' opportunities need RFP retrieval');
   var results = [];
+  var cbCookie = null; // Lazy login — only if needed
+
   for (var opp of needsRfp.data) {
     try {
       var url = opp.source_url;
       if (!url || !url.startsWith('http')) continue;
-      log('AUTO-RFP: Fetching ' + url.slice(0, 80));
+      var isCB = url.includes('centralauctionhouse.com') || url.includes('centralbidding.com');
+      log('AUTO-RFP: Fetching ' + url.slice(0, 80) + (isCB ? ' [CB-AUTH]' : ''));
+
+      // For CB URLs, authenticate first
+      var fetchHeaders = { 'User-Agent': 'Mozilla/5.0 (compatible; HGI-Organism/2.0)' };
+      if (isCB) {
+        if (!cbCookie) cbCookie = await cbLogin();
+        if (cbCookie) fetchHeaders['Cookie'] = cbCookie;
+      }
+
       var resp = await fetch(url, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; HGI-Organism/2.0)' },
+        headers: fetchHeaders,
         redirect: 'follow',
         signal: AbortSignal.timeout(20000)
       });
@@ -3880,6 +3934,7 @@ async function autoRetrieveRFPs() {
       var contentType = resp.headers.get('content-type') || '';
       var fullText = '';
       var pdfCount = 0;
+      var rfpDocUrl = null;
 
       // If source URL is directly a PDF
       if (contentType.includes('pdf') || url.endsWith('.pdf')) {
@@ -3888,6 +3943,7 @@ async function autoRetrieveRFPs() {
           var parsed = await pdfParse(buf);
           fullText = parsed.text || '';
           pdfCount = 1;
+          rfpDocUrl = url;
           log('AUTO-RFP: Direct PDF — ' + fullText.length + ' chars');
         }
       } else {
@@ -3901,7 +3957,7 @@ async function autoRetrieveRFPs() {
           .replace(/\s+/g, ' ').trim();
         fullText = text;
 
-        // Find PDF links
+        // Find PDF links — standard .pdf links AND CB Attachment links
         var pdfLinks = [];
         var pdfRx = /href=["']([^"']*\.pdf[^"']*)/gi;
         var m;
@@ -3910,27 +3966,39 @@ async function autoRetrieveRFPs() {
           try { pdfUrl = new URL(pdfUrl, url).href; } catch(e) { continue; }
           if (pdfLinks.indexOf(pdfUrl) < 0) pdfLinks.push(pdfUrl);
         }
+        // CB Attachment pattern: /Attachment/HASH
+        var attRx = /href=["']((?:https?:\/\/[^"']*)?\/Attachment\/[a-f0-9]+)/gi;
+        while ((m = attRx.exec(html)) !== null) {
+          var attUrl = m[1];
+          try { attUrl = new URL(attUrl, url).href; } catch(e) { continue; }
+          if (pdfLinks.indexOf(attUrl) < 0) pdfLinks.push(attUrl);
+        }
 
         if (pdfLinks.length > 0 && pdfParse) {
-          log('AUTO-RFP: Found ' + pdfLinks.length + ' PDF links');
+          log('AUTO-RFP: Found ' + pdfLinks.length + ' document links');
           for (var pi = 0; pi < Math.min(pdfLinks.length, 3); pi++) {
             try {
+              var pHeaders = { 'User-Agent': 'Mozilla/5.0 (compatible; HGI-Organism/2.0)' };
+              if (isCB && cbCookie) pHeaders['Cookie'] = cbCookie;
               var pResp = await fetch(pdfLinks[pi], {
-                headers: { 'User-Agent': 'Mozilla/5.0 (compatible; HGI-Organism/2.0)' },
+                headers: pHeaders,
                 redirect: 'follow',
                 signal: AbortSignal.timeout(30000)
               });
               var pCt = pResp.headers.get('content-type') || '';
-              if (pResp.ok && (pCt.includes('pdf') || pdfLinks[pi].endsWith('.pdf'))) {
+              if (pResp.ok && (pCt.includes('pdf') || pdfLinks[pi].endsWith('.pdf') || pdfLinks[pi].includes('/Attachment/'))) {
                 var pBuf = Buffer.from(await pResp.arrayBuffer());
-                var pParsed = await pdfParse(pBuf);
-                if (pParsed.text && pParsed.text.length > 100) {
-                  fullText += '\n\n=== PDF DOCUMENT: ' + pdfLinks[pi].split('/').pop().slice(0, 60) + ' ===\n' + pParsed.text;
-                  pdfCount++;
-                  log('AUTO-RFP: Extracted ' + pParsed.text.length + ' chars from PDF #' + pdfCount);
+                if (pBuf.length > 1000 && (pBuf[0] === 0x25 || pCt.includes('pdf'))) { // %PDF magic byte or content-type
+                  var pParsed = await pdfParse(pBuf);
+                  if (pParsed.text && pParsed.text.length > 100) {
+                    fullText += '\n\n=== PDF DOCUMENT: ' + pdfLinks[pi].split('/').pop().slice(0, 60) + ' ===\n' + pParsed.text;
+                    pdfCount++;
+                    if (!rfpDocUrl) rfpDocUrl = pdfLinks[pi];
+                    log('AUTO-RFP: Extracted ' + pParsed.text.length + ' chars from PDF #' + pdfCount);
+                  }
                 }
               } else if (!pResp.ok) {
-                log('AUTO-RFP: PDF HTTP ' + pResp.status + ' (auth required?) — ' + pdfLinks[pi].slice(0, 60));
+                log('AUTO-RFP: Document HTTP ' + pResp.status + ' — ' + pdfLinks[pi].slice(0, 60));
               }
             } catch(pe) { log('AUTO-RFP: PDF error: ' + (pe.message||'').slice(0, 60)); }
           }
@@ -3941,11 +4009,13 @@ async function autoRetrieveRFPs() {
       var existingLen = (opp.rfp_text || '').length;
       if (fullText.length > existingLen + 500) {
         var isSubstantial = fullText.length > 2000;
-        await supabase.from('opportunities').update({
+        var updateObj = {
           rfp_text: fullText.slice(0, 200000),
           rfp_document_retrieved: isSubstantial,
           last_updated: new Date().toISOString()
-        }).eq('id', opp.id);
+        };
+        if (rfpDocUrl) updateObj.rfp_document_url = rfpDocUrl;
+        await supabase.from('opportunities').update(updateObj).eq('id', opp.id);
         log('AUTO-RFP: STORED ' + fullText.length + ' chars for ' + (opp.title||'').slice(0, 40) + ' (retrieved=' + isSubstantial + ', pdfs=' + pdfCount + ')');
         results.push({ opp: (opp.title||'').slice(0, 40), chars: fullText.length, pdfs: pdfCount, retrieved: isSubstantial });
         await storeMemory('rfp_retrieval_agent', opp.id, 'rfp_retrieval', 'AUTO-RETRIEVED RFP content: ' + fullText.length + ' chars from ' + url.slice(0, 80) + (pdfCount > 0 ? ' + ' + pdfCount + ' PDF(s)' : '') + '. Document marked as ' + (isSubstantial ? 'RETRIEVED' : 'PARTIAL (< 2K chars)') + '.', 'analysis', url, isSubstantial ? 'high' : 'medium');
