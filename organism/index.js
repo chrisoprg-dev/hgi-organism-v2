@@ -12,6 +12,8 @@ process.on('unhandledRejection', (r) => log('UNHANDLED: ' + (r instanceof Error 
 process.on('uncaughtException', (e) => log('UNCAUGHT: ' + e.message.slice(0,150)));
 
 import Anthropic from '@anthropic-ai/sdk';
+var pdfParse = null;
+try { pdfParse = (await import('pdf-parse')).default; } catch(e) { console.log('pdf-parse not available: ' + e.message); }
 
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_KEY;
@@ -183,6 +185,34 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ triggered: true, time: new Date().toISOString() }));
       setImmediate(function() { runSession('manual_trigger').catch(function(e) { log('Trigger error: ' + e.message); }); });
+      return;
+    }
+
+    // Manual RFP retrieval for a specific opportunity
+    if (url.startsWith('/api/fetch-rfp')) {
+      var frId = new URL(req.url, 'http://x').searchParams.get('id');
+      if (!frId) {
+        // No ID = fetch all missing RFPs
+        res.writeHead(200, cors);
+        res.end(JSON.stringify({ status: 'started', mode: 'all' }));
+        setImmediate(async function() { try { var r = await autoRetrieveRFPs(); log('Manual fetch-rfp all: ' + JSON.stringify(r)); } catch(e) { log('fetch-rfp error: ' + e.message); } });
+        return;
+      }
+      // Specific opp
+      try {
+        var frOpp = await supabase.from('opportunities').select('id,title,source_url,rfp_text').eq('id', decodeURIComponent(frId)).single();
+        if (!frOpp.data) { res.writeHead(404, cors); res.end(JSON.stringify({ error: 'not found' })); return; }
+        res.writeHead(200, cors);
+        res.end(JSON.stringify({ status: 'fetching', opp: frOpp.data.title }));
+        setImmediate(async function() {
+          try {
+            // Temporarily set rfp_document_retrieved=false so autoRetrieveRFPs picks it up
+            await supabase.from('opportunities').update({ rfp_document_retrieved: false }).eq('id', frOpp.data.id);
+            var r = await autoRetrieveRFPs();
+            log('Manual fetch-rfp for ' + frOpp.data.title.slice(0, 40) + ': ' + JSON.stringify(r));
+          } catch(e) { log('fetch-rfp error: ' + e.message); }
+        });
+      } catch(e) { res.writeHead(500, cors); res.end(JSON.stringify({ error: e.message })); }
       return;
     }
 
@@ -3820,6 +3850,116 @@ async function agentHunting(state) {
 
 
 // ============================================================
+// AUTO-RFP RETRIEVAL — Fetches actual RFP documents for new discoveries
+// ============================================================
+async function autoRetrieveRFPs() {
+  log('AUTO-RFP: Checking for opportunities needing RFP retrieval...');
+  var needsRfp = await supabase.from('opportunities')
+    .select('id,title,source_url,rfp_text')
+    .eq('status', 'active')
+    .eq('rfp_document_retrieved', false)
+    .gte('opi_score', 60)
+    .not('source_url', 'is', null);
+  if (!needsRfp.data || needsRfp.data.length === 0) {
+    log('AUTO-RFP: All active opps have RFPs or no source URL');
+    return [];
+  }
+  log('AUTO-RFP: ' + needsRfp.data.length + ' opportunities need RFP retrieval');
+  var results = [];
+  for (var opp of needsRfp.data) {
+    try {
+      var url = opp.source_url;
+      if (!url || !url.startsWith('http')) continue;
+      log('AUTO-RFP: Fetching ' + url.slice(0, 80));
+      var resp = await fetch(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; HGI-Organism/2.0)' },
+        redirect: 'follow',
+        signal: AbortSignal.timeout(20000)
+      });
+      if (!resp.ok) { log('AUTO-RFP: HTTP ' + resp.status + ' for ' + (opp.title||'').slice(0, 40)); continue; }
+      var contentType = resp.headers.get('content-type') || '';
+      var fullText = '';
+      var pdfCount = 0;
+
+      // If source URL is directly a PDF
+      if (contentType.includes('pdf') || url.endsWith('.pdf')) {
+        if (pdfParse) {
+          var buf = Buffer.from(await resp.arrayBuffer());
+          var parsed = await pdfParse(buf);
+          fullText = parsed.text || '';
+          pdfCount = 1;
+          log('AUTO-RFP: Direct PDF — ' + fullText.length + ' chars');
+        }
+      } else {
+        // HTML page — extract text and find PDF links
+        var html = await resp.text();
+        var text = html
+          .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#\d+;/g, '')
+          .replace(/\s+/g, ' ').trim();
+        fullText = text;
+
+        // Find PDF links
+        var pdfLinks = [];
+        var pdfRx = /href=["']([^"']*\.pdf[^"']*)/gi;
+        var m;
+        while ((m = pdfRx.exec(html)) !== null) {
+          var pdfUrl = m[1];
+          try { pdfUrl = new URL(pdfUrl, url).href; } catch(e) { continue; }
+          if (pdfLinks.indexOf(pdfUrl) < 0) pdfLinks.push(pdfUrl);
+        }
+
+        if (pdfLinks.length > 0 && pdfParse) {
+          log('AUTO-RFP: Found ' + pdfLinks.length + ' PDF links');
+          for (var pi = 0; pi < Math.min(pdfLinks.length, 3); pi++) {
+            try {
+              var pResp = await fetch(pdfLinks[pi], {
+                headers: { 'User-Agent': 'Mozilla/5.0 (compatible; HGI-Organism/2.0)' },
+                redirect: 'follow',
+                signal: AbortSignal.timeout(30000)
+              });
+              var pCt = pResp.headers.get('content-type') || '';
+              if (pResp.ok && (pCt.includes('pdf') || pdfLinks[pi].endsWith('.pdf'))) {
+                var pBuf = Buffer.from(await pResp.arrayBuffer());
+                var pParsed = await pdfParse(pBuf);
+                if (pParsed.text && pParsed.text.length > 100) {
+                  fullText += '\n\n=== PDF DOCUMENT: ' + pdfLinks[pi].split('/').pop().slice(0, 60) + ' ===\n' + pParsed.text;
+                  pdfCount++;
+                  log('AUTO-RFP: Extracted ' + pParsed.text.length + ' chars from PDF #' + pdfCount);
+                }
+              } else if (!pResp.ok) {
+                log('AUTO-RFP: PDF HTTP ' + pResp.status + ' (auth required?) — ' + pdfLinks[pi].slice(0, 60));
+              }
+            } catch(pe) { log('AUTO-RFP: PDF error: ' + (pe.message||'').slice(0, 60)); }
+          }
+        }
+      }
+
+      // Update if we got meaningful new content
+      var existingLen = (opp.rfp_text || '').length;
+      if (fullText.length > existingLen + 500) {
+        var isSubstantial = fullText.length > 2000;
+        await supabase.from('opportunities').update({
+          rfp_text: fullText.slice(0, 200000),
+          rfp_document_retrieved: isSubstantial,
+          last_updated: new Date().toISOString()
+        }).eq('id', opp.id);
+        log('AUTO-RFP: STORED ' + fullText.length + ' chars for ' + (opp.title||'').slice(0, 40) + ' (retrieved=' + isSubstantial + ', pdfs=' + pdfCount + ')');
+        results.push({ opp: (opp.title||'').slice(0, 40), chars: fullText.length, pdfs: pdfCount, retrieved: isSubstantial });
+        await storeMemory('rfp_retrieval_agent', opp.id, 'rfp_retrieval', 'AUTO-RETRIEVED RFP content: ' + fullText.length + ' chars from ' + url.slice(0, 80) + (pdfCount > 0 ? ' + ' + pdfCount + ' PDF(s)' : '') + '. Document marked as ' + (isSubstantial ? 'RETRIEVED' : 'PARTIAL (< 2K chars)') + '.', 'analysis', url, isSubstantial ? 'high' : 'medium');
+      } else {
+        log('AUTO-RFP: No new content for ' + (opp.title||'').slice(0, 40) + ' (had:' + existingLen + ' got:' + fullText.length + ')');
+      }
+    } catch(e) { log('AUTO-RFP: Error: ' + (e.message||'').slice(0, 100)); }
+  }
+  if (results.length > 0) log('AUTO-RFP: Retrieved ' + results.length + ' RFPs this cycle');
+  return results;
+}
+
+
+// ============================================================
 // RUN SESSION — The execution engine
 // ============================================================
 async function runSession(trigger) {
@@ -3844,6 +3984,9 @@ async function runSession(trigger) {
 
     // 1. HUNTING — fires first
     try { var rH = await agentHunting(state); if (rH) { allResults.push(rH); if (rH.new_opps > 0) { var fresh = await supabase.from('opportunities').select('*').eq('status', 'active').order('opi_score', { ascending: false }).limit(15); if (fresh.data) { state.pipeline = fresh.data; activeOpps = state.pipeline.filter(function(o) { return (o.opi_score || 0) >= 65; }); } } } } catch (e) { log('Hunt error: ' + e.message); }
+
+    // 1.5. AUTO-RFP RETRIEVAL — fetch actual RFP docs for any opp missing them
+    try { var rfpResults = await autoRetrieveRFPs(); if (rfpResults && rfpResults.length > 0) { var refreshed = await supabase.from('opportunities').select('*').eq('status', 'active').order('opi_score', { ascending: false }).limit(15); if (refreshed.data) { state.pipeline = refreshed.data; activeOpps = state.pipeline.filter(function(o) { return (o.opi_score || 0) >= 65; }); } } } catch (e) { log('Auto-RFP error: ' + e.message); }
 
     // 2. PER-OPP FIRST PASS — sequential, each builds on prior
     for (var i = 0; i < activeOpps.length; i++) {
