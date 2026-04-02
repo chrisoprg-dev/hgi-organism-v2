@@ -44,7 +44,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',-apple-system,
 
 /* TABS */
 .tabs{padding:0 16px;display:flex;gap:0;border-bottom:1px solid var(--border);overflow-x:auto;-webkit-overflow-scrolling:touch}
-.tab{background:transparent;border:none;border-bottom:2px solid transparent;padding:9px 14px;cursor:pointer;color:#444;font-size:8px;font-weight:700;letter-spacing:0.18em;white-space:nowrap;transition:all 0.2s;position:relative}
+.tab{background:transparent;border:none;border-bottom:2px solid transparent;padding:9px 14px;cursor:pointer;color:#444;font-size:8px;font-weight:700;letter-spacing:0.18em;white-space:nowrap;transition:all 0.2s;position:relative;touch-action:manipulation;-webkit-tap-highlight-color:rgba(212,168,67,0.1)}
 .tab.active{color:var(--gold);border-bottom-color:var(--gold)}
 .tab.active::after{content:'';position:absolute;bottom:-1px;left:20%;right:20%;height:4px;background:var(--gold);filter:blur(6px);opacity:0.5}
 .tab:hover{color:#888}
@@ -55,7 +55,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',-apple-system,
 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px}
 
 /* OPPORTUNITY CARDS */
-.opp{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;cursor:pointer;margin-bottom:5px;transition:all 0.2s;position:relative;overflow:hidden}
+.opp{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;cursor:pointer;margin-bottom:5px;transition:all 0.2s;position:relative;overflow:hidden;touch-action:manipulation;-webkit-tap-highlight-color:rgba(212,168,67,0.1)}
 .opp:hover{border-color:var(--border2);background:var(--surface2)}
 .opp:active{transform:scale(0.98)}
 .opp.sel{background:rgba(212,168,67,0.04);border-color:rgba(212,168,67,0.2)}
@@ -84,7 +84,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',-apple-system,
 .p3card:hover{border-color:var(--border2)}
 
 /* BUTTONS */
-.btn{background:rgba(212,168,67,0.08);border:1px solid rgba(212,168,67,0.15);border-radius:6px;padding:3px 10px;color:var(--gold);font-size:9px;cursor:pointer;transition:all 0.2s;font-weight:600}
+.btn{background:rgba(212,168,67,0.08);border:1px solid rgba(212,168,67,0.15);border-radius:6px;padding:3px 10px;color:var(--gold);font-size:9px;cursor:pointer;transition:all 0.2s;font-weight:600;touch-action:manipulation}
 .btn:hover{background:rgba(212,168,67,0.15)}
 .btn:active{transform:scale(0.95)}
 
@@ -122,6 +122,7 @@ var state={tab:'cop',pipe:[],mems:[],comps:[],cts:[],p3:null,regs:[],teams:[],ag
 
 async function loadData(){
   state.loading=true;render();
+  // PHASE 1: Critical data from Supabase (fast, external)
   var p=await sb('/opportunities?status=eq.active&opi_score=gte.60&select=id,title,agency,opi_score,stage,due_date,rfp_document_retrieved&order=opi_score.desc&limit=15');
   var m=await sb('/organism_memory?memory_type=neq.decision_point&memory_type=neq.compliance_matrix_data&memory_type=neq.rate_table_data&memory_type=neq.org_chart_data&select=agent,observation,created_at,memory_type,opportunity_id&order=created_at.desc&limit=50');
   var c=await sb('/competitive_intelligence?select=competitor_name,threat_level,hq_location,strengths&limit=50');
@@ -129,13 +130,26 @@ async function loadData(){
   state.pipe=p||[];state.mems=m||[];state.comps=c||[];state.cts=ct||[];
   var pLens=await sb('/rpc/get_proposal_lengths');
   if(pLens&&pLens.length>0){state.pipe.forEach(function(o){var match=pLens.find(function(q){return q.id===o.id});o.pLen=match?match.proposal_len:0;o.rLen=match?match.review_len:0;})}
-  try{var p3r=await fetch('/api/phase3');state.p3=await p3r.json();}catch(e){state.p3=null;}
-  try{state.regs=await (await fetch('/api/regulatory')).json();}catch(e){state.regs=[];}
-  try{state.teams=await (await fetch('/api/teaming')).json();}catch(e){state.teams=[];}
-  try{state.ags=await (await fetch('/api/agencies')).json();}catch(e){state.ags=[];}
-  try{state.recs=await (await fetch('/api/recompetes')).json();}catch(e){state.recs=[];}
-  try{state.anl=await (await fetch('/api/analytics')).json();}catch(e){state.anl=[];}
+  // RENDER NOW — don't wait for secondary data
   state.loading=false;render();
+  // PHASE 2: Secondary data from Railway API (can be slow, don't block UI)
+  try{
+    var [p3r,regr,teamr,agr,recr,anlr]=await Promise.allSettled([
+      fetch('/api/phase3',{signal:AbortSignal.timeout(8000)}).then(function(r){return r.json()}),
+      fetch('/api/regulatory',{signal:AbortSignal.timeout(8000)}).then(function(r){return r.json()}),
+      fetch('/api/teaming',{signal:AbortSignal.timeout(8000)}).then(function(r){return r.json()}),
+      fetch('/api/agencies',{signal:AbortSignal.timeout(8000)}).then(function(r){return r.json()}),
+      fetch('/api/recompetes',{signal:AbortSignal.timeout(8000)}).then(function(r){return r.json()}),
+      fetch('/api/analytics',{signal:AbortSignal.timeout(8000)}).then(function(r){return r.json()})
+    ]);
+    state.p3=p3r.status==='fulfilled'?p3r.value:null;
+    state.regs=regr.status==='fulfilled'?regr.value:[];
+    state.teams=teamr.status==='fulfilled'?teamr.value:[];
+    state.ags=agr.status==='fulfilled'?agr.value:[];
+    state.recs=recr.status==='fulfilled'?recr.value:[];
+    state.anl=anlr.status==='fulfilled'?anlr.value:[];
+    render();
+  }catch(e){}
 }
 
 async function loadOppDetail(idx){
