@@ -4486,17 +4486,10 @@ process.on('unhandledRejection', function(reason) {
 // STARTUP SESSION DISABLED (Session 68) — deploys no longer trigger agent cycles.
 // setTimeout(function() { runSession('startup').catch(console.error); }, 3000);
 
-// SESSION 80: COST CONTROL — Skeleton crew cron, midnight only.
-// Full suite fires on: manual /api/trigger, new opp discovered, new RFP downloaded, stage change.
-// Skeleton = hunting + auto-RFP + pipeline scanner + amendment tracker + dashboard only.
-setInterval(function() {
-  var h = new Date().getUTCHours();
-  var m = new Date().getUTCMinutes();
-  if (h === 6 && m === 0) {
-    log('Skeleton session firing (midnight CST)');
-    runSession('skeleton_midnight').catch(console.error);
-  }
-}, 60000);
+// SESSION 80: ALL CRONS DISABLED — $0 autonomous API spend.
+// Agents ONLY run when: (1) Christopher hits /api/trigger manually, (2) Claude triggers in-session.
+// No setInterval. No autonomous API calls. Period.
+// The skeleton mode code is preserved in runSession for when Christopher re-enables crons.
 
-log('V4.0-cost-control ready. Midnight skeleton cron only. /api/trigger for full suite.');
+log('V4.1-zero-cost ready. ALL crons disabled. Manual /api/trigger only. $0 autonomous spend.');
 
