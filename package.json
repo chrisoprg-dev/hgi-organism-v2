@@ -1,7 +1,7 @@
 {
   "name": "hgi-organism-v2",
   "version": "2.9.0",
-  "description": "HGI Living Organism V2 — 47 agents, one shared brain, all into all",
+  "description": "HGI Living Organism V2 \u2014 47 agents, one shared brain, all into all",
   "type": "module",
   "main": "organism/index.js",
   "scripts": {
@@ -10,7 +10,8 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@supabase/supabase-js": "^2.39.0",
-    "docx": "^8.5.0"
+    "docx": "^8.5.0",
+    "pdf-parse": "^1.1.1"
   },
   "engines": {
     "node": ">=18.0.0"
