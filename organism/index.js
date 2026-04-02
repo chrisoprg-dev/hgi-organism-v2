@@ -193,7 +193,7 @@ const server = http.createServer(async (req, res) => {
       var frId = new URL(req.url, 'http://x').searchParams.get('id');
       if (!frId) {
         // No ID = fetch all missing RFPs
-        res.writeHead(200, cors);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'started', mode: 'all' }));
         setImmediate(async function() { try { var r = await autoRetrieveRFPs(); log('Manual fetch-rfp all: ' + JSON.stringify(r)); } catch(e) { log('fetch-rfp error: ' + e.message); } });
         return;
@@ -201,8 +201,8 @@ const server = http.createServer(async (req, res) => {
       // Specific opp
       try {
         var frOpp = await supabase.from('opportunities').select('id,title,source_url,rfp_text').eq('id', decodeURIComponent(frId)).single();
-        if (!frOpp.data) { res.writeHead(404, cors); res.end(JSON.stringify({ error: 'not found' })); return; }
-        res.writeHead(200, cors);
+        if (!frOpp.data) { res.writeHead(404, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'not found' })); return; }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'fetching', opp: frOpp.data.title }));
         setImmediate(async function() {
           try {
@@ -212,7 +212,7 @@ const server = http.createServer(async (req, res) => {
             log('Manual fetch-rfp for ' + frOpp.data.title.slice(0, 40) + ': ' + JSON.stringify(r));
           } catch(e) { log('fetch-rfp error: ' + e.message); }
         });
-      } catch(e) { res.writeHead(500, cors); res.end(JSON.stringify({ error: e.message })); }
+      } catch(e) { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
       return;
     }
 
