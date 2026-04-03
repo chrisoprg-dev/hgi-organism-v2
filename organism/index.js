@@ -325,7 +325,17 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (url === '/' || url === '/dashboard' || url === '/interface' || url === '/interface.html') {
+    
+  // Serve brain 3D model
+  if(url==='/brain.glb'){
+    try{
+      const brainPath=require('path').join(__dirname,'brain.glb');
+      const brainData=require('fs').readFileSync(brainPath);
+      res.writeHead(200,{'Content-Type':'model/gltf-binary','Cache-Control':'public,max-age=86400','Access-Control-Allow-Origin':'*'});
+      res.end(brainData);return;
+    }catch(e){res.writeHead(404);res.end('brain.glb not found');return;}
+  }
+if (url === '/' || url === '/dashboard' || url === '/interface' || url === '/interface.html') {
       const html = getInterface();
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache', 'Expires': '0' });
       res.end(html);
