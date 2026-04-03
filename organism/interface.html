@@ -135,16 +135,16 @@ body {
 }
 
 #panel-pipeline {
-  bottom: 120px;
+  bottom: 80px;
   left: 8px;
-  max-height: 280px;
+  max-height: 220px;
   overflow-y: auto;
 }
 
 #panel-agents {
-  bottom: 120px;
+  bottom: 80px;
   right: 8px;
-  max-height: 280px;
+  max-height: 220px;
   overflow-y: auto;
 }
 
@@ -508,9 +508,9 @@ const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x000510, 0.08);
 
 // Camera
-const camera = new THREE.PerspectiveCamera(55, W / H, 0.1, 100);
-camera.position.set(0, 0.8, 4.0);
-camera.lookAt(0, 0.3, 0);
+const camera = new THREE.PerspectiveCamera(60, W / H, 0.1, 100);
+camera.position.set(0, 0.5, 4.5);
+camera.lookAt(0, 0.2, 0);
 
 // Renderer
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -706,21 +706,21 @@ scene.add(particles);
 
 // ═══════ BRAIN REGIONS — specific connection points ═══════
 const BRAIN_REGIONS = {
-  'Intel Engine':  { x: 0.0,  y: 0.85, z: 0.45,  region: 'Prefrontal' },
-  'Financial':     { x:-0.4,  y: 0.55, z: 0.3,   region: 'L-Temporal' },
-  'Winnability':   { x: 0.0,  y: 0.95, z: 0.15,  region: 'Motor Cortex' },
-  'CRM':           { x: 0.4,  y: 0.55, z: 0.3,   region: 'R-Temporal' },
-  'Quality Gate':  { x: 0.0,  y: 0.8,  z:-0.35,  region: 'Parietal' },
-  'Staffing':      { x:-0.35, y: 0.75, z: 0.2,   region: 'L-Frontal' },
-  'Proposal':      { x: 0.35, y: 0.75, z: 0.2,   region: 'R-Frontal' },
-  'Red Team':      { x: 0.0,  y: 0.5,  z:-0.45,  region: 'Occipital' },
-  'Price to Win':  { x:-0.3,  y: 0.7,  z:-0.2,   region: 'L-Parietal' },
-  'Assembly':      { x: 0.3,  y: 0.7,  z:-0.2,   region: 'R-Parietal' },
-  'Scanner':       { x: 0.0,  y: 0.15, z:-0.2,   region: 'Cerebellum' },
-  'Disaster Mon':  { x: 0.0,  y: 0.45, z: 0.0,   region: 'Amygdala' },
-  'Dashboard':     { x: 0.0,  y: 0.65, z: 0.0,   region: 'Corpus Callosum' },
-  'Amendments':    { x: 0.0,  y: 0.05, z:-0.05,  region: 'Brainstem' },
-  'Hunter':        { x: 0.0,  y: 0.7,  z: 0.5,   region: 'Frontal Pole' }
+  'Intel Engine':  { x: 0.0,  y: 0.7,  z: 0.35, region: 'Prefrontal' },
+  'Financial':     { x:-0.3,  y: 0.5,  z: 0.2,  region: 'L-Temporal' },
+  'Winnability':   { x: 0.0,  y: 0.75, z: 0.1,  region: 'Motor Cortex' },
+  'CRM':           { x: 0.3,  y: 0.5,  z: 0.2,  region: 'R-Temporal' },
+  'Quality Gate':  { x: 0.0,  y: 0.65, z:-0.25, region: 'Parietal' },
+  'Staffing':      { x:-0.25, y: 0.6,  z: 0.15, region: 'L-Frontal' },
+  'Proposal':      { x: 0.25, y: 0.6,  z: 0.15, region: 'R-Frontal' },
+  'Red Team':      { x: 0.0,  y: 0.4,  z:-0.35, region: 'Occipital' },
+  'Price to Win':  { x:-0.2,  y: 0.55, z:-0.15, region: 'L-Parietal' },
+  'Assembly':      { x: 0.2,  y: 0.55, z:-0.15, region: 'R-Parietal' },
+  'Scanner':       { x: 0.0,  y: 0.1,  z:-0.15, region: 'Cerebellum' },
+  'Disaster Mon':  { x: 0.0,  y: 0.4,  z: 0.0,  region: 'Amygdala' },
+  'Dashboard':     { x: 0.0,  y: 0.55, z: 0.0,  region: 'Corpus Callosum' },
+  'Amendments':    { x: 0.0,  y: 0.05, z:-0.05, region: 'Brainstem' },
+  'Hunter':        { x: 0.0,  y: 0.55, z: 0.4,  region: 'Frontal Pole' }
 };
 
 // Synapse nodes on the brain surface
@@ -762,10 +762,14 @@ const traceLines = [];
 function createEnergyTraces() {
   AGENTS.forEach((a, i) => {
     const angle = (i / AGENTS.length) * Math.PI * 2;
-    const agentR = 0.95;
-    const agentY = 0.15 + (i % 3) * 0.18;
+    const agentR = 1.4;
+    // Spread vertically in 4 tiers instead of 3
+    const tier = i % 4;
+    const agentY = -0.1 + tier * 0.28;
+    // Elliptical: compress X, keep Z for depth
+    const ellipseX = 0.7; // horizontal squeeze factor
     const agentPos = new THREE.Vector3(
-      agentR * Math.cos(angle), agentY, agentR * Math.sin(angle)
+      agentR * ellipseX * Math.cos(angle), agentY, agentR * Math.sin(angle)
     );
 
     const br = BRAIN_REGIONS[a.name];
@@ -823,8 +827,9 @@ const agentLabels = [];
 function createAgentLabels() {
   AGENTS.forEach((a, i) => {
     const angle = (i / AGENTS.length) * Math.PI * 2;
-    const r = 0.95;
-    const y = 0.15 + (i % 3) * 0.18;
+    const r = 1.4;
+    const tier = i % 4;
+    const y = -0.1 + tier * 0.28;
 
     const div = document.createElement('div');
     div.className = 'agent-label';
@@ -840,7 +845,7 @@ function createAgentLabels() {
 
     const label = new THREE.CSS2DObject(div);
     label.position.set(
-      r * Math.cos(angle),
+      r * 0.7 * Math.cos(angle),
       y,
       r * Math.sin(angle)
     );
@@ -858,7 +863,7 @@ function createBrain() {
 
   // High-poly sphere with noise displacement for sulci/folds
   function makeHemisphere(isLeft) {
-    const geo = new THREE.SphereGeometry(0.6, 48, 32, 
+    const geo = new THREE.SphereGeometry(0.45, 48, 32, 
       isLeft ? 0 : Math.PI, Math.PI, 0, Math.PI);
     const pos = geo.attributes.position;
     
