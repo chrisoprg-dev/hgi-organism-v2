@@ -371,34 +371,175 @@ function updateRightRail(){
 }
 updateRightRail();
 
-// ═══ PATHWAY + OVERLAY SYSTEM ═══
+// ═══ LAYERED LIVE COGNITION SYSTEM ═══
 var cv=document.getElementById('paths'),cx=cv.getContext('2d');
 var tooltip=document.getElementById('tooltip');
 function rs(){cv.width=cv.parentElement.clientWidth;cv.height=cv.parentElement.clientHeight;}
 rs();window.addEventListener('resize',rs);
 
+// ─── BRAIN REGIONS (Layer 1) ───
+// Each region is an elliptical zone mapped to brain anatomy
+var REGIONS=[
+  {id:'planning',    x:0.38, y:0.26, rx:0.08, ry:0.07, c:'0,208,240',   label:'Planning Cortex'},
+  {id:'intelligence',x:0.42, y:0.34, rx:0.06, ry:0.06, c:'0,208,240',   label:'Intelligence Hub'},
+  {id:'memory',      x:0.36, y:0.48, rx:0.07, ry:0.06, c:'130,139,250', label:'Memory Store'},
+  {id:'synthesis',   x:0.52, y:0.38, rx:0.07, ry:0.07, c:'96,165,250',  label:'Synthesis Core'},
+  {id:'gate',        x:0.62, y:0.46, rx:0.06, ry:0.06, c:'212,160,32',  label:'Quality Gate'},
+  {id:'crm',         x:0.34, y:0.54, rx:0.06, ry:0.05, c:'167,139,250', label:'CRM / Relationship'},
+  {id:'winnability', x:0.58, y:0.28, rx:0.06, ry:0.06, c:'212,160,32',  label:'Winnability Engine'}
+];
+
+// Map agents to regions
+var AGENT_REGION={0:'intelligence',1:'planning',2:'winnability',3:'crm',4:'gate',5:'synthesis',6:'gate',7:'memory'};
+// Map modes to regions
+var MODE_REGIONS={
+  planning:['planning','intelligence','winnability'],
+  memory:['memory','crm'],
+  synthesis:['synthesis','planning'],
+  gate:['gate','winnability']
+};
+
+function getRegionActivity(region){
+  // Returns 0.0-1.0 activity level
+  if(selAgent>=0){
+    var agRegion=AGENT_REGION[selAgent];
+    if(region.id===agRegion) return 1.0;
+    return 0.05;
+  }
+  if(selMode){
+    var activeRegions=MODE_REGIONS[selMode]||[];
+    if(activeRegions.indexOf(region.id)>=0) return 0.8;
+    return 0.08;
+  }
+  return 0.2; // ambient
+}
+
+// ─── INTERNAL PARTICLES (Layer 2) ───
+var PARTICLES=[];
+var NEURAL_FLASHES=[];
+var REGION_CONNECTIONS=[
+  ['planning','synthesis'],['planning','intelligence'],['intelligence','memory'],
+  ['synthesis','gate'],['memory','crm'],['winnability','planning'],
+  ['crm','intelligence'],['gate','synthesis'],['memory','synthesis']
+];
+
+function initParticles(){
+  for(var i=0;i<45;i++){
+    PARTICLES.push(createParticle());
+  }
+}
+
+function createParticle(){
+  // Pick a random region to start in
+  var region=REGIONS[Math.floor(Math.random()*REGIONS.length)];
+  var angle=Math.random()*Math.PI*2;
+  var dist=Math.random()*0.8;
+  return {
+    x: region.x + Math.cos(angle)*region.rx*dist,
+    y: region.y + Math.sin(angle)*region.ry*dist,
+    vx: (Math.random()-0.5)*0.0004,
+    vy: (Math.random()-0.5)*0.0004,
+    region: region.id,
+    life: Math.random(),
+    speed: 0.3+Math.random()*0.7,
+    size: 0.8+Math.random()*1.2
+  };
+}
+
+function isInsideBrain(px,py){
+  // Rough elliptical brain boundary
+  var dx=(px-0.49)/0.18, dy=(py-0.40)/0.20;
+  return (dx*dx+dy*dy)<1;
+}
+
+function updateParticles(dt){
+  PARTICLES.forEach(function(p){
+    // Get target region based on state
+    var targetRegion=null;
+    if(selAgent>=0){
+      var agR=AGENT_REGION[selAgent];
+      targetRegion=REGIONS.find(function(r){return r.id===agR;});
+    }else if(selMode){
+      var activeR=MODE_REGIONS[selMode]||[];
+      if(activeR.length>0){
+        var pick=activeR[Math.floor(Math.random()*10)%activeR.length];
+        targetRegion=REGIONS.find(function(r){return r.id===pick;});
+      }
+    }
+
+    // Drift toward target or wander
+    if(targetRegion&&Math.random()<0.02){
+      var dx=targetRegion.x-p.x, dy=targetRegion.y-p.y;
+      var d=Math.sqrt(dx*dx+dy*dy);
+      if(d>0.01){p.vx+=dx/d*0.0002;p.vy+=dy/d*0.0002;}
+    }
+
+    p.x+=p.vx*p.speed;
+    p.y+=p.vy*p.speed;
+    p.life-=0.001;
+
+    // Dampen velocity
+    p.vx*=0.995;p.vy*=0.995;
+
+    // Add slight random drift
+    p.vx+=(Math.random()-0.5)*0.00008;
+    p.vy+=(Math.random()-0.5)*0.00008;
+
+    // Reset if out of bounds or dead
+    if(!isInsideBrain(p.x,p.y)||p.life<=0){
+      var np=createParticle();
+      p.x=np.x;p.y=np.y;p.vx=np.vx;p.vy=np.vy;p.region=np.region;p.life=1;
+    }
+  });
+}
+
+// Neural flashes
+function maybeFireFlash(t){
+  var rate=selAgent>=0||selMode?0.04:0.015; // faster when active
+  if(Math.random()<rate){
+    var conn=REGION_CONNECTIONS[Math.floor(Math.random()*REGION_CONNECTIONS.length)];
+    var r1=REGIONS.find(function(r){return r.id===conn[0];});
+    var r2=REGIONS.find(function(r){return r.id===conn[1];});
+    if(r1&&r2){
+      // Only fire between active regions
+      var a1=getRegionActivity(r1), a2=getRegionActivity(r2);
+      if(a1>0.1&&a2>0.1){
+        NEURAL_FLASHES.push({
+          x1:r1.x,y1:r1.y,x2:r2.x,y2:r2.y,
+          life:1.0,maxLife:1.0,
+          c:a1>0.5?r1.c:r2.c
+        });
+      }
+    }
+  }
+}
+
+function updateFlashes(){
+  for(var i=NEURAL_FLASHES.length-1;i>=0;i--){
+    NEURAL_FLASHES[i].life-=0.04; // ~25 frames = ~400ms
+    if(NEURAL_FLASHES[i].life<=0) NEURAL_FLASHES.splice(i,1);
+  }
+}
+
+// ─── INBOUND/OUTBOUND PATHS (Layer 3) ───
 var INB=[
-  {label:'Intelligence',c:'#00d0f0',fy:0.18,tx:0.34,ty:0.30,sp:0.32,ph:0,agIdx:0,tip:'L-Frontal: Intelligence Engine',detail:'Scanning 3 portals for competitive data'},
-  {label:'Financial',   c:'#3cd9a0',fy:0.30,tx:0.36,ty:0.42,sp:0.28,ph:0.8,agIdx:1,tip:'R-Central: Financial Agent',detail:'Rate benchmarking across 4 verticals'},
-  {label:'Winnability',  c:'#d4a020',fy:0.42,tx:0.40,ty:0.50,sp:0.25,ph:1.6,agIdx:2,tip:'R-Frontal: Winnability Scoring',detail:'PWIN recalculation in progress'},
-  {label:'CRM',          c:'#a78bfa',fy:0.54,tx:0.38,ty:0.36,sp:0.30,ph:2.4,agIdx:3,tip:'L-Temporal: CRM Agent',detail:'Mapping SWBNO decision-makers'},
-  {label:'QualityGate',  c:'#d4a020',fy:0.66,tx:0.42,ty:0.58,sp:0.22,ph:3.2,agIdx:4,tip:'R-Temporal: Quality Gate',detail:'3 compliance items flagged'}
+  {label:'Intelligence',c:'#00d0f0',fy:0.18,tx:0.34,ty:0.30,sp:0.32,ph:0,agIdx:0,region:'intelligence',tip:'L-Frontal: Intelligence Engine',detail:'Scanning 3 portals for competitive data'},
+  {label:'Financial',   c:'#3cd9a0',fy:0.30,tx:0.36,ty:0.42,sp:0.28,ph:0.8,agIdx:1,region:'planning',tip:'R-Central: Financial Agent',detail:'Rate benchmarking across 4 verticals'},
+  {label:'Winnability',  c:'#d4a020',fy:0.42,tx:0.40,ty:0.50,sp:0.25,ph:1.6,agIdx:2,region:'winnability',tip:'R-Frontal: Winnability Scoring',detail:'PWIN recalculation in progress'},
+  {label:'CRM',          c:'#a78bfa',fy:0.54,tx:0.38,ty:0.36,sp:0.30,ph:2.4,agIdx:3,region:'crm',tip:'L-Temporal: CRM Agent',detail:'Mapping SWBNO decision-makers'},
+  {label:'QualityGate',  c:'#d4a020',fy:0.66,tx:0.42,ty:0.58,sp:0.22,ph:3.2,agIdx:4,region:'gate',tip:'R-Temporal: Quality Gate',detail:'3 compliance items flagged'}
 ];
 var OUT=[
   {label:'Priority',  c:'#00d0f0',fx:0.63,fy:0.28,ty:0.16,sp:0.28,ph:0.5,tip:'Priority pursuit output',detail:'Feeding right rail pursuit context'},
   {label:'Bottleneck', c:'#c84848',fx:0.62,fy:0.46,ty:0.56,sp:0.24,ph:1.8,tip:'Bottleneck validation',detail:'Gating compliance issues'},
   {label:'Routing',    c:'#3cd9a0',fx:0.58,fy:0.60,ty:0.88,sp:0.20,ph:3.0,tip:'Routing to timeline',detail:'Dispatching events to timeline'}
 ];
-var HS=[
-  {x:0.40,y:0.28,r:3,s:1.8,p:0,agIdx:0,tip:'L-Frontal',detail:'Intelligence Engine active'},
-  {x:0.60,y:0.28,r:3,s:2.0,p:1,agIdx:2,tip:'R-Frontal',detail:'Winnability scoring'},
-  {x:0.45,y:0.43,r:4,s:1.5,p:2,agIdx:5,tip:'L-Central',detail:'Proposal synthesis running'},
-  {x:0.55,y:0.43,r:4,s:1.6,p:0.5,agIdx:1,tip:'R-Central',detail:'Financial analysis'},
-  {x:0.50,y:0.24,r:2.5,s:2.2,p:3,agIdx:7,tip:'Dorsal',detail:'Dashboard synthesis'},
-  {x:0.35,y:0.50,r:2,s:1.9,p:1.5,agIdx:3,tip:'L-Temporal',detail:'CRM memory retrieval'},
-  {x:0.65,y:0.50,r:2,s:1.7,p:2.5,agIdx:4,tip:'R-Temporal',detail:'Quality Gate validation'},
-  {x:0.50,y:0.56,r:3,s:1.4,p:0.8,agIdx:6,tip:'Ventral',detail:'Red Team standby'}
-];
+
+// Hotspot data for tooltips (mapped to regions)
+var HS=[];
+REGIONS.forEach(function(r,i){
+  HS.push({x:r.x,y:r.y,r:3,tip:r.label,detail:'Region activity: '+r.id,agIdx:i<AG.length?i:0});
+});
 
 function isPathActive(agIdx){
   if(selAgent>=0)return agIdx===selAgent;
@@ -409,6 +550,105 @@ function isPathActive(agIdx){
 var t=0;
 function bezPt(ax,ay,mx,my,bx,by,t){var u=1-t;return{x:u*u*ax+2*u*t*mx+t*t*bx,y:u*u*ay+2*u*t*my+t*t*by};}
 
+// ─── RENDER LAYER 1: Regional Activity ───
+function drawRegions(){
+  var w=cv.width,h=cv.height;
+  REGIONS.forEach(function(region){
+    var activity=getRegionActivity(region);
+    if(activity<0.03)return; // skip invisible regions
+    var x=region.x*w, y=region.y*h;
+    var rx=region.rx*w, ry=region.ry*h;
+
+    // Breathing modulation
+    var breath=0.7+0.3*Math.sin(t*1.2+region.x*10);
+    var alpha=activity*0.28*breath;
+
+    // Pursuit context: warm gold wash
+    var color=region.c;
+    if(selPipe>=0){
+      // Subtle gold tint overlay
+      var goldAlpha=0.03;
+      var gg=cx.createRadialGradient(x,y,0,x,y,Math.max(rx,ry)*1.2);
+      gg.addColorStop(0,'rgba(212,160,32,'+goldAlpha+')');
+      gg.addColorStop(1,'rgba(212,160,32,0)');
+      cx.fillStyle=gg;cx.beginPath();cx.ellipse(x,y,rx*1.2,ry*1.2,0,0,Math.PI*2);cx.fill();
+    }
+
+    // Gated region: override to amber
+    if(selAgent>=0&&AG[selAgent]&&AG[selAgent].gated&&AGENT_REGION[selAgent]===region.id){
+      color='212,160,32';
+    }
+
+    // Main region glow
+    var g=cx.createRadialGradient(x,y,0,x,y,Math.max(rx,ry)*1.5);
+    g.addColorStop(0,'rgba('+color+','+Math.min(alpha,0.32)+')');
+    g.addColorStop(0.5,'rgba('+color+','+Math.min(alpha*0.4,0.12)+')');
+    g.addColorStop(1,'rgba('+color+',0)');
+
+    cx.fillStyle=g;
+    cx.beginPath();cx.ellipse(x,y,rx*1.5,ry*1.5,0,0,Math.PI*2);cx.fill();
+
+    // Active regions get a subtle inner core
+    if(activity>0.5){
+      var shimmer=0.5+0.5*Math.sin(t*3.5+region.y*20);
+      cx.fillStyle='rgba('+color+','+(0.06*shimmer)+')';
+      cx.beginPath();cx.ellipse(x,y,rx*0.5,ry*0.5,0,0,Math.PI*2);cx.fill();
+    }
+  });
+}
+
+// ─── RENDER LAYER 2: Internal Motion ───
+function drawParticles(){
+  var w=cv.width,h=cv.height;
+
+  // Compositing: use 'screen' for internal light feel
+  cx.globalCompositeOperation='screen';
+
+  PARTICLES.forEach(function(p){
+    var px=p.x*w,py=p.y*h;
+    // Find which region this particle is near
+    var nearActive=false;
+    REGIONS.forEach(function(r){
+      var dx=(p.x-r.x)/r.rx, dy=(p.y-r.y)/r.ry;
+      if(dx*dx+dy*dy<1.5){
+        var act=getRegionActivity(r);
+        if(act>0.3) nearActive=true;
+      }
+    });
+
+    var alpha=nearActive?0.25+0.15*p.life:0.06*p.life;
+    var size=p.size*(nearActive?1.4:0.8);
+
+    cx.fillStyle='rgba(140,210,240,'+alpha+')';
+    cx.beginPath();cx.arc(px,py,size,0,Math.PI*2);cx.fill();
+  });
+
+  // Neural flashes
+  NEURAL_FLASHES.forEach(function(f){
+    var x1=f.x1*w,y1=f.y1*h,x2=f.x2*w,y2=f.y2*h;
+    // Progress along the flash
+    var prog=1-f.life;
+    var alpha=f.life*0.35;
+
+    // Draw as a thin traveling line segment
+    var head=prog;
+    var tail=Math.max(0,prog-0.3);
+    var hx=x1+(x2-x1)*head, hy=y1+(y2-y1)*head;
+    var tx=x1+(x2-x1)*tail, ty=y1+(y2-y1)*tail;
+
+    cx.beginPath();cx.moveTo(tx,ty);cx.lineTo(hx,hy);
+    cx.strokeStyle='rgba('+f.c+','+alpha+')';
+    cx.lineWidth=1;cx.stroke();
+
+    // Bright head dot
+    cx.fillStyle='rgba('+f.c+','+(alpha*1.5)+')';
+    cx.beginPath();cx.arc(hx,hy,1.5,0,Math.PI*2);cx.fill();
+  });
+
+  cx.globalCompositeOperation='source-over';
+}
+
+// ─── RENDER LAYER 3: Pathways ───
 function drawInbound(p){
   var w=cv.width,h=cv.height;
   var ax=0,ay=p.fy*h,bx=p.tx*w,by=p.ty*h;
@@ -417,28 +657,41 @@ function drawInbound(p){
   var hasSelection=selAgent>=0||selMode!=='';
   var isGated=AG[p.agIdx]&&AG[p.agIdx].gated;
 
-  // PATH LINE
+  // PATH LINE - 3 distinct states
   var lineAlpha,lineWidth;
-  if(!hasSelection){lineAlpha=0.06;lineWidth=1;}
-  else if(active){lineAlpha=0.35;lineWidth=isGated?1.5:2.5;}
-  else{lineAlpha=0.015;lineWidth=0.5;}
+  if(!hasSelection){
+    // Idle-active: gentle presence
+    lineAlpha=0.06;lineWidth=1;
+  }else if(active){
+    // Active: dominant channel
+    lineAlpha=0.35;lineWidth=isGated?1.5:2.5;
+  }else{
+    // Idle: ghost
+    lineAlpha=0.015;lineWidth=0.5;
+  }
 
   cx.beginPath();cx.moveTo(ax,ay);cx.quadraticCurveTo(mx,my,bx,by);
-  cx.strokeStyle=isGated?'#d4a020':p.c;cx.globalAlpha=lineAlpha;cx.lineWidth=lineWidth;
+  cx.strokeStyle=isGated?'#d4a020':p.c;
+  cx.globalAlpha=lineAlpha;cx.lineWidth=lineWidth;
   if(isGated&&active){cx.setLineDash([6,4]);}
   cx.stroke();cx.setLineDash([]);cx.globalAlpha=1;
 
-  // PULSE PARTICLE — only on active paths
-  if(active){
-    var prog=((t*p.sp+p.ph)%2)/2;
-    if(prog<1){
-      var pt=bezPt(ax,ay,mx,my,bx,by,prog);
-      var sz=hasSelection?9:5;
-      var g=cx.createRadialGradient(pt.x,pt.y,0,pt.x,pt.y,sz);
-      g.addColorStop(0,p.c);g.addColorStop(1,'rgba(0,0,0,0)');
-      cx.fillStyle=g;cx.beginPath();cx.arc(pt.x,pt.y,sz,0,Math.PI*2);cx.fill();
-      cx.fillStyle='#fff';cx.globalAlpha=hasSelection?0.9:0.5;
-      cx.beginPath();cx.arc(pt.x,pt.y,hasSelection?2:1.2,0,Math.PI*2);cx.fill();cx.globalAlpha=1;
+  // PULSE PARTICLES
+  if(active||!hasSelection){
+    var numPulses=active&&hasSelection?2:1;
+    for(var n=0;n<numPulses;n++){
+      var prog=(((t*p.sp+p.ph+n*1.0)%2)/2);
+      if(prog<1){
+        var pt=bezPt(ax,ay,mx,my,bx,by,prog);
+        var sz=hasSelection&&active?8:4;
+        var g=cx.createRadialGradient(pt.x,pt.y,0,pt.x,pt.y,sz);
+        var pc=isGated?'#d4a020':p.c;
+        g.addColorStop(0,pc);g.addColorStop(1,'rgba(0,0,0,0)');
+        cx.fillStyle=g;cx.beginPath();cx.arc(pt.x,pt.y,sz,0,Math.PI*2);cx.fill();
+        // White core
+        cx.fillStyle='#fff';cx.globalAlpha=hasSelection&&active?0.85:0.4;
+        cx.beginPath();cx.arc(pt.x,pt.y,hasSelection&&active?1.8:1,0,Math.PI*2);cx.fill();cx.globalAlpha=1;
+      }
     }
   }
 }
@@ -447,67 +700,65 @@ function drawOutbound(p){
   var w=cv.width,h=cv.height;
   var ax=p.fx*w,ay=p.fy*h,bx=w,by=p.ty*h;
   var mx=0.82*w,my=ay*0.4+by*0.6;
-  var active=!selAgent||(selAgent<0);
-  var lineAlpha=active?0.05:0.015;
+  var show=selAgent<0;
+  var lineAlpha=show?0.05:0.015;
   cx.beginPath();cx.moveTo(ax,ay);cx.quadraticCurveTo(mx,my,bx,by);
   cx.strokeStyle=p.c;cx.globalAlpha=lineAlpha;cx.lineWidth=1;cx.stroke();cx.globalAlpha=1;
-  if(active){
+  if(show){
     var prog=((t*p.sp+p.ph)%2)/2;
     if(prog<1){
       var pt=bezPt(ax,ay,mx,my,bx,by,prog);
       var g=cx.createRadialGradient(pt.x,pt.y,0,pt.x,pt.y,4);
       g.addColorStop(0,p.c);g.addColorStop(1,'rgba(0,0,0,0)');
       cx.fillStyle=g;cx.beginPath();cx.arc(pt.x,pt.y,4,0,Math.PI*2);cx.fill();
-      cx.fillStyle='#fff';cx.globalAlpha=0.5;cx.beginPath();cx.arc(pt.x,pt.y,1,0,Math.PI*2);cx.fill();cx.globalAlpha=1;
     }
   }
 }
 
+// ─── RENDER LAYER 4: UI-State Coupling (hotspot rings) ───
+function drawHotspotRings(){
+  var w=cv.width,h=cv.height;
+  // Draw pulsing rings on active region centers
+  REGIONS.forEach(function(region){
+    var activity=getRegionActivity(region);
+    if(activity<0.4)return;
+    var x=region.x*w,y=region.y*h;
+    var pulse=0.5+0.5*Math.sin(t*2.5+region.x*8);
+    var r=Math.max(region.rx,region.ry)*w*0.6;
+    var isGatedRegion=false;
+    if(selAgent>=0&&AG[selAgent].gated&&AGENT_REGION[selAgent]===region.id) isGatedRegion=true;
+    var col=isGatedRegion?'212,160,32':region.c;
+
+    // Pulsing ring
+    cx.beginPath();cx.arc(x,y,r*(1+0.15*pulse),0,Math.PI*2);
+    cx.strokeStyle='rgba('+col+','+(0.12+0.1*pulse)+')';
+    cx.lineWidth=1;cx.stroke();
+  });
+}
+
+// ─── MAIN ANIMATION LOOP ───
+initParticles();
+
 function anim(){
-  requestAnimationFrame(anim);t+=0.016;
+  requestAnimationFrame(anim);
+  t+=0.016;
   cx.clearRect(0,0,cv.width,cv.height);
+
+  // Layer 1: Regional activity (underneath everything)
+  drawRegions();
+
+  // Layer 2: Internal motion (particles + neural flashes)
+  updateParticles(0.016);
+  maybeFireFlash(t);
+  updateFlashes();
+  drawParticles();
+
+  // Layer 3: Pathways
   INB.forEach(drawInbound);
   OUT.forEach(drawOutbound);
 
-  // HOTSPOTS
-  HS.forEach(function(s){
-    var active=isPathActive(s.agIdx);
-    var hasSelection=selAgent>=0||selMode!=='';
-    var isGated=AG[s.agIdx]&&AG[s.agIdx].gated;
-    var x=s.x*cv.width,y=s.y*cv.height;
-    var sc=cv.width/900;
-
-    if(!hasSelection){
-      // Ambient: subtle breathing glow
-      var p=0.3+0.7*Math.pow((Math.sin(t*s.s+s.p)+1)/2,2);
-      var r=s.r*p*sc;
-      var g=cx.createRadialGradient(x,y,0,x,y,r*3);
-      g.addColorStop(0,'rgba(100,220,255,'+Math.min(0.15,0.06*p)+')');
-      g.addColorStop(1,'rgba(0,180,220,0)');
-      cx.fillStyle=g;cx.beginPath();cx.arc(x,y,r*3,0,Math.PI*2);cx.fill();
-    }else if(active){
-      // SELECTED hotspot: pulsing ring + bright core
-      var pulse=0.5+0.5*Math.sin(t*3+s.p);
-      var r=s.r*1.8*sc;
-      var col=isGated?'212,160,32':'100,220,255';
-
-      // Outer glow
-      var g=cx.createRadialGradient(x,y,0,x,y,r*4);
-      g.addColorStop(0,'rgba('+col+','+0.15*pulse+')');
-      g.addColorStop(1,'rgba('+col+',0)');
-      cx.fillStyle=g;cx.beginPath();cx.arc(x,y,r*4,0,Math.PI*2);cx.fill();
-
-      // Pulsing ring
-      cx.beginPath();cx.arc(x,y,r*2.2,0,Math.PI*2);
-      cx.strokeStyle='rgba('+col+','+(0.2+0.2*pulse)+')';
-      cx.lineWidth=1.5;cx.stroke();
-
-      // Bright core
-      cx.fillStyle='rgba('+col+','+(0.25+0.15*pulse)+')';
-      cx.beginPath();cx.arc(x,y,r*0.9,0,Math.PI*2);cx.fill();
-    }
-    // Non-active when selection exists: invisible (dimmed out)
-  });
+  // Layer 4: UI-state coupling rings
+  drawHotspotRings();
 }
 
 // ═══ TOOLTIP — readable, with label+detail ═══
@@ -527,16 +778,16 @@ function hideTooltip(){tooltip.classList.remove('vis');lastTooltipTarget=null;}
 
 function findTarget(mx,my){
   var found=null;
-  HS.forEach(function(s){
-    var dx=mx-s.x,dy=my-s.y;
-    if(Math.sqrt(dx*dx+dy*dy)<0.045)found=s;
+  // Check regions first (larger targets)
+  REGIONS.forEach(function(r){
+    var dx=(mx-r.x)/r.rx, dy=(my-r.y)/r.ry;
+    if(dx*dx+dy*dy<1.2) found={tip:r.label,detail:'Region: '+r.id+' — Activity: '+(getRegionActivity(r)>0.5?'HIGH':'ambient')};
   });
-  if(!found){
-    INB.forEach(function(p){
-      var dx=mx-p.tx,dy=my-p.ty;
-      if(Math.sqrt(dx*dx+dy*dy)<0.035)found=p;
-    });
-  }
+  // Then check path endpoints (smaller, more specific)
+  INB.forEach(function(p){
+    var dx=mx-p.tx,dy=my-p.ty;
+    if(Math.sqrt(dx*dx+dy*dy)<0.035) found=p;
+  });
   return found;
 }
 
@@ -564,6 +815,7 @@ cv.addEventListener('touchstart',function(e){
     hideTooltip();
   }
 },{passive:false});
+
 
 // ═══ BOOT ═══
 document.getElementById('ld').style.opacity='0';
