@@ -41,7 +41,7 @@ const server = http.createServer(async (req, res) => {
 
     if (url === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'alive', uptime_seconds: Math.floor(process.uptime()), timestamp: new Date().toISOString(), version: 'V3.4-rfp-gate', agents_active: 47 }));
+      res.end(JSON.stringify({ status: 'alive', uptime_seconds: Math.floor(process.uptime()), timestamp: new Date().toISOString(), version: 'V4.2-lean-15', agents_active: 15 }));
       return;
     }
 
@@ -4148,7 +4148,7 @@ async function runSession(trigger) {
       try { var r3 = await agentWinnability(opp, state, cycleBrief); if (r3) allResults.push(r3); } catch (e) { log('Win err: ' + e.message); }
       try { var r4 = await agentCRM(opp, state, cycleBrief); if (r4) allResults.push(r4); } catch (e) { log('CRM err: ' + e.message); }
       try { var r5 = await agentQualityGate(opp, state, cycleBrief); if (r5) allResults.push(r5); } catch (e) { log('QG err: ' + e.message); }
-      try { var r6 = await agentStaffingPlan(opp, state, cycleBrief); if (r6) allResults.push(r6); } catch (e) { log('Staff err: ' + e.message); }
+      // STAFFING moved to gated second pass (Session 81 audit)
     }
 
     // 3. PER-OPP SECOND PASS — GATED behind rfp_document_retrieved
@@ -4163,44 +4163,48 @@ async function runSession(trigger) {
       }
       log('PROPOSAL PASS: ' + (opp2.title || '?').slice(0, 50) + (isUnsolicited ? ' [UNSOLICITED]' : ' [RFP RETRIEVED]'));
       var cb2 = await buildCycleBrief(opp2, state);
+      // SESSION 81 AUDIT: 5 gated proposal agents (staffing moved here from first pass)
+      try { var r6 = await agentStaffingPlan(opp2, state, cb2); if (r6) allResults.push(r6); } catch (e) { log('Staff err: ' + e.message); }
       try { var rPW = await agentProposalWriter(opp2, state, cb2); if (rPW) allResults.push(rPW); } catch (e) { log('PW err: ' + e.message); }
       try { var rRT = await agentRedTeam(opp2, state, cb2); if (rRT) allResults.push(rRT); } catch (e) { log('RT err: ' + e.message); }
-      try { var rBr = await agentBrief(opp2, state, cb2); if (rBr) allResults.push(rBr); } catch (e) { log('Brief err: ' + e.message); }
-      try { var rOB = await agentOppBrief(opp2, state, cb2); if (rOB) allResults.push(rOB); } catch (e) { log('OB err: ' + e.message); }
-      try { var rPA = await agentProposalAssembly(opp2, state, cb2); if (rPA) allResults.push(rPA); } catch (e) { log('PA err: ' + e.message); }
       try { var rPTW = await agentPriceToWin(opp2, state, cb2); if (rPTW) allResults.push(rPTW); } catch (e) { log('PTW err: ' + e.message); }
-      try { var rOP = await agentOralPrep(opp2, state, cb2); if (rOP) allResults.push(rOP); } catch (e) { log('OP err: ' + e.message); }
-      try { var rPO = await agentPostAward(opp2, state); if (rPO) allResults.push(rPO); } catch (e) { log('PO err: ' + e.message); }
+      try { var rPA = await agentProposalAssembly(opp2, state, cb2); if (rPA) allResults.push(rPA); } catch (e) { log('PA err: ' + e.message); }
+      // CUT (Session 81): brief_agent, opp_brief, oral_prep, post_award — re-enable when needed
+      // try { var rBr = await agentBrief(opp2, state, cb2); if (rBr) allResults.push(rBr); } catch (e) { log('Brief err: ' + e.message); }
+      // try { var rOB = await agentOppBrief(opp2, state, cb2); if (rOB) allResults.push(rOB); } catch (e) { log('OB err: ' + e.message); }
+      // try { var rOP = await agentOralPrep(opp2, state, cb2); if (rOP) allResults.push(rOP); } catch (e) { log('OP err: ' + e.message); }
+      // try { var rPO = await agentPostAward(opp2, state); if (rPO) allResults.push(rPO); } catch (e) { log('PO err: ' + e.message); }
     }
 
-    // 4. SYSTEM-WIDE AGENTS
-    log('--- System-wide agents ---');
-    try { var rDis = await agentDiscovery(state); if (rDis) allResults.push(rDis); } catch (e) { log('Disc err: ' + e.message); }
+    // 4. SYSTEM-WIDE AGENTS — SESSION 81 AUDIT: 4 keepers, 21 cut
+    log('--- System-wide agents (4 active) ---');
     try { var rPS = await agentPipelineScanner(state); if (rPS) allResults.push(rPS); } catch (e) { log('PS err: ' + e.message); }
-    try { var rOPI = await agentOPICalibration(state); if (rOPI) allResults.push(rOPI); } catch (e) { log('OPI err: ' + e.message); }
-    try { var rCE = await agentContentEngine(state); if (rCE) allResults.push(rCE); } catch (e) { log('CE err: ' + e.message); }
-    try { var rRec = await agentRecruiting(state); if (rRec) allResults.push(rRec); } catch (e) { log('Rec err: ' + e.message); }
-    try { var rKB = await agentKnowledgeBase(state); if (rKB) allResults.push(rKB); } catch (e) { log('KB err: ' + e.message); }
-    try { var rSI = await agentScraperInsights(state); if (rSI) allResults.push(rSI); } catch (e) { log('SI err: ' + e.message); }
-    try { var rEB = await agentExecutiveBrief(state); if (rEB) allResults.push(rEB); } catch (e) { log('EB err: ' + e.message); }
     try { var rDM = await agentDisasterMonitor(state); if (rDM) allResults.push(rDM); } catch (e) { log('DM err: ' + e.message); }
     try { var rDA = await agentDashboard(state); if (rDA) allResults.push(rDA); } catch (e) { log('Dash err: ' + e.message); }
-    try { var rDV = await agentDesignVisual(state); if (rDV) allResults.push(rDV); } catch (e) { log('DV err: ' + e.message); }
-    try { var rTM = await agentTeaming(state); if (rTM) allResults.push(rTM); } catch (e) { log('Team err: ' + e.message); }
-    try { var rSE = await agentSourceExpansion(state); if (rSE) allResults.push(rSE); } catch (e) { log('SE err: ' + e.message); }
-    try { var rCX = await agentContractExpiration(state); if (rCX) allResults.push(rCX); } catch (e) { log('CX err: ' + e.message); }
-    try { var rBC = await agentBudgetCycle(state); if (rBC) allResults.push(rBC); } catch (e) { log('BC err: ' + e.message); }
-    try { var rLA = await agentLossAnalysis(state); if (rLA) allResults.push(rLA); } catch (e) { log('LA err: ' + e.message); }
-    try { var rWR = await agentWinRateAnalytics(state); if (rWR) allResults.push(rWR); } catch (e) { log('WR err: ' + e.message); }
-    try { var rRM = await agentRegulatoryMonitor(state); if (rRM) allResults.push(rRM); } catch (e) { log('RM err: ' + e.message); }
-    try { var rOA = await agentOutreachAutomation(state); if (rOA) allResults.push(rOA); } catch (e) { log('OA err: ' + e.message); }
-    try { var rLL = await agentLearningLoop(state); if (rLL) allResults.push(rLL); } catch (e) { log('LL err: ' + e.message); }
     try { var rAT = await agentAmendmentTracker(state); if (rAT) allResults.push(rAT); } catch (e) { log('AT err: ' + e.message); }
-    try { var rEN = await agentEntrepreneurial(state); if (rEN) allResults.push(rEN); } catch (e) { log('EN err: ' + e.message); }
-    try { var rRC = await agentRecompete(state); if (rRC) allResults.push(rRC); } catch (e) { log('RC err: ' + e.message); }
-    try { var rCD = await agentCompetitorDeepDive(state); if (rCD) allResults.push(rCD); } catch (e) { log('CD err: ' + e.message); }
-    try { var rAP = await agentAgencyProfile(state); if (rAP) allResults.push(rAP); } catch (e) { log('AP err: ' + e.message); }
-    try { var rSD = await agentSubcontractorDB(state); if (rSD) allResults.push(rSD); } catch (e) { log('SD err: ' + e.message); }
+    // CUT (Session 81) — 21 agents commented out, re-enable as needed:
+    // try { var rDis = await agentDiscovery(state); if (rDis) allResults.push(rDis); } catch (e) { log('Disc err: ' + e.message); }
+    // try { var rOPI = await agentOPICalibration(state); if (rOPI) allResults.push(rOPI); } catch (e) { log('OPI err: ' + e.message); }
+    // try { var rCE = await agentContentEngine(state); if (rCE) allResults.push(rCE); } catch (e) { log('CE err: ' + e.message); }
+    // try { var rRec = await agentRecruiting(state); if (rRec) allResults.push(rRec); } catch (e) { log('Rec err: ' + e.message); }
+    // try { var rKB = await agentKnowledgeBase(state); if (rKB) allResults.push(rKB); } catch (e) { log('KB err: ' + e.message); }
+    // try { var rSI = await agentScraperInsights(state); if (rSI) allResults.push(rSI); } catch (e) { log('SI err: ' + e.message); }
+    // try { var rEB = await agentExecutiveBrief(state); if (rEB) allResults.push(rEB); } catch (e) { log('EB err: ' + e.message); }
+    // try { var rDV = await agentDesignVisual(state); if (rDV) allResults.push(rDV); } catch (e) { log('DV err: ' + e.message); }
+    // try { var rTM = await agentTeaming(state); if (rTM) allResults.push(rTM); } catch (e) { log('Team err: ' + e.message); }
+    // try { var rSE = await agentSourceExpansion(state); if (rSE) allResults.push(rSE); } catch (e) { log('SE err: ' + e.message); }
+    // try { var rCX = await agentContractExpiration(state); if (rCX) allResults.push(rCX); } catch (e) { log('CX err: ' + e.message); }
+    // try { var rBC = await agentBudgetCycle(state); if (rBC) allResults.push(rBC); } catch (e) { log('BC err: ' + e.message); }
+    // try { var rLA = await agentLossAnalysis(state); if (rLA) allResults.push(rLA); } catch (e) { log('LA err: ' + e.message); }
+    // try { var rWR = await agentWinRateAnalytics(state); if (rWR) allResults.push(rWR); } catch (e) { log('WR err: ' + e.message); }
+    // try { var rRM = await agentRegulatoryMonitor(state); if (rRM) allResults.push(rRM); } catch (e) { log('RM err: ' + e.message); }
+    // try { var rOA = await agentOutreachAutomation(state); if (rOA) allResults.push(rOA); } catch (e) { log('OA err: ' + e.message); }
+    // try { var rLL = await agentLearningLoop(state); if (rLL) allResults.push(rLL); } catch (e) { log('LL err: ' + e.message); }
+    // try { var rEN = await agentEntrepreneurial(state); if (rEN) allResults.push(rEN); } catch (e) { log('EN err: ' + e.message); }
+    // try { var rRC = await agentRecompete(state); if (rRC) allResults.push(rRC); } catch (e) { log('RC err: ' + e.message); }
+    // try { var rCD = await agentCompetitorDeepDive(state); if (rCD) allResults.push(rCD); } catch (e) { log('CD err: ' + e.message); }
+    // try { var rAP = await agentAgencyProfile(state); if (rAP) allResults.push(rAP); } catch (e) { log('AP err: ' + e.message); }
+    // try { var rSD = await agentSubcontractorDB(state); if (rSD) allResults.push(rSD); } catch (e) { log('SD err: ' + e.message); }
 
     // 5. EVAL SCORING
     log('--- Eval scoring ---');
