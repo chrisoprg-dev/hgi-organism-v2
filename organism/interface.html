@@ -7,7 +7,7 @@
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Rajdhani:wght@300;400;500;600;700&family=Share+Tech+Mono&display=swap');
 *{margin:0;padding:0;box-sizing:border-box}
-:root{--bg:#040a16;--panel:#0a1122;--border:rgba(0,160,200,0.07);--bb:rgba(0,180,220,0.12);--cy:#00d0f0;--gn:#3cd9a0;--am:#d4a020;--rd:#c84848;--wh:#d0dce8;--tx:rgba(185,205,225,0.85);--dm:rgba(145,170,195,0.32);--mc:rgba(120,145,170,0.2);--mo:'Share Tech Mono',monospace;--ui:'Rajdhani',sans-serif;--br:'Orbitron',sans-serif}
+:root{--bg:#040a16;--panel:#0a1122;--border:rgba(0,160,200,0.07);--bb:rgba(0,180,220,0.12);--cy:#00d0f0;--gn:#3cd9a0;--am:#d4a020;--rd:#c84848;--wh:#d0dce8;--tx:rgba(185,205,225,0.85);--dm:rgba(145,170,195,0.32);--mc:rgba(120,145,170,0.2);--gold:#d4a020;--mo:'Share Tech Mono',monospace;--ui:'Rajdhani',sans-serif;--br:'Orbitron',sans-serif}
 html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-family:var(--ui);font-weight:500}
 #app{display:grid;width:100%;height:100%;grid-template-columns:244px 1fr 274px;grid-template-rows:36px auto 1fr auto 146px;grid-template-areas:"top top top" "ttl ttl ttl" "left center right" "left tiles right" "bot bot bot"}
 
@@ -22,27 +22,48 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(
 #ttl h1{font-size:21px;font-weight:700;color:var(--wh)}
 #ttl p{font-size:10px;color:var(--dm);margin-top:1px}
 
+/* LEFT RAIL */
 #left{grid-area:left;background:var(--panel);border-right:1px solid var(--border);overflow-y:auto;z-index:5}
 #left::-webkit-scrollbar{width:3px}#left::-webkit-scrollbar-thumb{background:rgba(0,160,200,0.1)}
 .lh{padding:8px 14px;font-family:var(--mo);font-size:8px;letter-spacing:2px;color:var(--dm);border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--panel);z-index:2}
-.ag{padding:7px 14px;border-bottom:1px solid rgba(255,255,255,0.015);cursor:pointer;display:flex;align-items:flex-start;gap:8px;transition:background 0.12s}
+.ag{padding:7px 14px;border-bottom:1px solid rgba(255,255,255,0.015);cursor:pointer;display:flex;align-items:flex-start;gap:8px;transition:background 0.15s;border-left:3px solid transparent}
 .ag:hover{background:rgba(0,180,220,0.025)}
 .ag .ab{width:3px;min-height:32px;border-radius:1px;flex-shrink:0;margin-top:1px}
 .ag .ai{flex:1;min-width:0}
-.ag .an{font-size:11px;font-weight:600;color:var(--wh)}
+.ag .an{font-size:11px;font-weight:600;color:var(--dm);transition:color 0.15s}
 .ag .am{font-size:8px;color:var(--dm);margin-top:2px;font-family:var(--mo)}.ag .am b{font-weight:600}
 .ag .at{font-size:8px;color:var(--mc);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ag .av{font-size:8px;font-family:var(--mo);color:var(--cy);flex-shrink:0;margin-top:2px}
 .ag .abg{font-family:var(--br);font-size:18px;font-weight:900;color:var(--cy);flex-shrink:0;margin-top:2px;display:flex;align-items:center;gap:2px}
-.ag.gated .an{color:var(--dm)}.ag.gated .ab{background:var(--am)!important}
 
+/* AGENT SELECTED — unmistakable gold accent */
+.ag.sel{background:rgba(0,200,230,0.08);border-left:3px solid var(--cy)}
+.ag.sel .an{color:#fff}
+.ag.sel .am{color:var(--tx)}
+/* AGENT MODE-HIGHLIGHTED — lighter than selected */
+.ag.mode-active{background:rgba(0,180,220,0.04);border-left:3px solid rgba(0,200,230,0.3)}
+.ag.mode-active .an{color:var(--tx)}
+/* GATED agents — amber accent */
+.ag.gated{border-left:3px solid var(--am)!important}
+.ag.gated .an{color:var(--am)}
+.ag.gated .ab{background:var(--am)!important}
+.ag.gated::after{content:'⚠';position:absolute;right:10px;top:50%;transform:translateY(-50%);color:var(--am);font-size:10px}
+.ag{position:relative}
+
+/* CENTER */
 #center{grid-area:center;position:relative;overflow:hidden;background:#040a16}
 #cv{position:absolute;inset:0}
 
+/* TILES — function mode selection */
 #tiles{grid-area:tiles;display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:2px 10px 6px;z-index:5}
-.tile{background:var(--panel);border:1px solid var(--border);border-radius:3px;padding:6px 8px;display:flex;align-items:center;gap:8px}
+.tile{background:var(--panel);border:1px solid var(--border);border-radius:3px;padding:6px 8px;display:flex;align-items:center;gap:8px;cursor:pointer;transition:border-color 0.2s,background 0.2s}
 .tile .ti2{font-size:16px}.tile .tl{font-family:var(--mo);font-size:8px;letter-spacing:1px;color:var(--dm)}.tile .tv{font-size:9px;color:var(--tx);margin-top:2px}
+/* TILE SELECTED — strong bright border + fill */
+.tile.sel{border-color:rgba(0,208,240,0.5);background:rgba(0,200,230,0.1)}
+.tile.sel .tl{color:var(--cy)}
+.tile.sel .ti2{filter:drop-shadow(0 0 4px rgba(0,200,230,0.4))}
 
+/* RIGHT RAIL */
 #right{grid-area:right;background:var(--panel);border-left:1px solid var(--border);overflow-y:auto;z-index:5;padding:0}
 #right::-webkit-scrollbar{width:3px}#right::-webkit-scrollbar-thumb{background:rgba(0,160,200,0.1)}
 .rb{padding:10px 14px;border-bottom:1px solid var(--border)}
@@ -56,45 +77,63 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(
 .rbar{height:3px;border-radius:1px;background:rgba(0,160,200,0.06);margin-top:3px;overflow:hidden}.rbar .f{height:100%;background:var(--cy);border-radius:1px}
 .rbl{font-size:7px;color:var(--mc);font-family:var(--mo);display:flex;justify-content:space-between;margin-top:1px}
 .ralt{background:rgba(200,72,72,0.04);border:1px solid rgba(200,72,72,0.12);border-radius:3px;padding:7px 10px;margin-top:5px}
-.ralt .rh{font-family:var(--mo);font-size:8px;color:var(--rd);font-weight:600;letter-spacing:0.5px;display:flex;justify-content:space-between;align-items:center}
-.ralt .rx{cursor:pointer;font-size:12px;color:var(--rd);opacity:0.5}
+.ralt .rh{font-family:var(--mo);font-size:8px;color:var(--rd);font-weight:600;letter-spacing:0.5px}
 .ralt .rd{font-size:9px;color:var(--dm);margin-top:3px}
 .mr{display:flex;align-items:center;gap:5px;padding:2px 0;font-size:9px}
 .mr .ma{color:var(--cy);font-size:10px}.mr .mv{font-family:var(--mo);color:var(--cy);font-weight:700;font-size:9px}.mr .ml{color:var(--dm);flex:1}.mr .mc{font-family:var(--br);font-size:10px;font-weight:700}
 .mr .mc.g{color:var(--gn)}.mr .mc.r{color:var(--rd)}
 
+/* BOTTOM */
 #bot{grid-area:bot;background:var(--panel);border-top:1px solid var(--bb);display:grid;grid-template-columns:1.3fr 0.7fr;z-index:5}
 .bz{padding:7px 14px;overflow-y:auto}.bz:first-child{border-right:1px solid var(--border)}
 .bz::-webkit-scrollbar{width:2px}.bz::-webkit-scrollbar-thumb{background:rgba(0,160,200,0.08)}
 .bt{font-family:var(--mo);font-size:7px;letter-spacing:2px;color:var(--mc);margin-bottom:5px;padding-bottom:3px;border-bottom:1px solid var(--border)}
-.pr{display:flex;align-items:center;gap:6px;padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.012);font-size:9px}
+
+/* TIMELINE ROW */
+.pr{display:flex;align-items:center;gap:6px;padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.012);font-size:9px;transition:opacity 0.3s}
 .pr .pk{width:8px;height:8px;border-radius:2px;flex-shrink:0}.pr .pt{font-family:var(--mo);color:var(--dm);min-width:32px;font-size:8px}
 .pr .pn{font-weight:600;color:var(--tx);flex-shrink:0}.pr .ps{font-family:var(--mo);font-size:8px;color:var(--dm);min-width:32px}
 .pr .pw{font-size:8px;font-family:var(--mo);font-weight:600;padding:1px 4px;border-radius:2px}.pr .pw.m{background:rgba(0,208,240,0.08);color:var(--cy)}.pr .pw.w{background:rgba(212,160,32,0.08);color:var(--am)}
 .pr .pd{font-size:8px;color:var(--dm);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pr.faded{opacity:0.15}
+
+/* PIPELINE ROW */
+.pip{cursor:pointer;padding:2px 6px;display:flex;align-items:center;gap:6px;font-size:9px;border-bottom:1px solid rgba(255,255,255,0.02);transition:background 0.12s;border-left:3px solid transparent}
+.pip:hover{background:rgba(0,180,220,0.03)}
+/* PIPELINE SELECTED — gold accent = global context */
+.pip.sel{background:rgba(212,160,32,0.06);border-left:3px solid var(--gold)}
+.pip.sel .pn{color:var(--gold)}
+
 .ne{font-family:var(--br);font-size:26px;font-weight:900;color:var(--wh);margin:4px 0}
 .ns{display:flex;gap:16px;margin-top:6px}
 .ns .ni{}.ns .nv{font-family:var(--br);font-size:14px;font-weight:700;color:var(--cy)}.ns .nl{font-size:8px;color:var(--dm);font-family:var(--mo);margin-top:1px}
 
-@media(max-width:900px){#app{grid-template-columns:1fr;grid-template-rows:36px auto 1fr auto 200px;grid-template-areas:"top" "ttl" "center" "tiles" "bot"}#left,#right{display:none}#tiles{grid-template-columns:repeat(2,1fr);padding:6px 12px 10px}#brain-img{left:50%;transform:translate(-50%,-50%)}#center{min-height:340px}}
+/* TOOLTIP — readable, not tiny */
+#tooltip{position:absolute;z-index:20;pointer-events:none;font-family:var(--mo);font-size:10px;letter-spacing:0.5px;color:var(--cy);background:rgba(4,10,22,0.94);border:1px solid rgba(0,200,230,0.25);padding:6px 12px;border-radius:4px;white-space:nowrap;opacity:0;transition:opacity 0.15s;box-shadow:0 2px 12px rgba(0,0,0,0.5)}
+#tooltip.vis{opacity:1}
+#tooltip .tt-label{font-size:11px;font-weight:600;color:var(--wh);margin-bottom:2px}
+#tooltip .tt-detail{font-size:9px;color:var(--tx)}
+
+/* MOBILE */
+@media(max-width:900px){
+  #app{grid-template-columns:1fr;grid-template-rows:36px auto 1fr auto 200px;grid-template-areas:"top" "ttl" "center" "tiles" "bot"}
+  #left,#right{display:none}
+  #tiles{grid-template-columns:repeat(2,1fr);padding:6px 12px 10px}
+  #brain-img{left:50%;transform:translate(-50%,-50%)}
+  #center{min-height:340px}
+  #tooltip{font-size:12px;padding:8px 14px}
+}
+
+/* LOADER */
 #ld{position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity 0.8s}
 .lr{width:24px;height:24px;border:2px solid rgba(0,200,230,0.08);border-top-color:var(--cy);border-radius:50%;animation:sp .8s linear infinite;margin-bottom:12px}
 @keyframes sp{to{transform:rotate(360deg)}}.lt{font-family:var(--br);font-size:9px;letter-spacing:5px;color:rgba(0,200,230,0.2)}
 
+/* BRAIN IMAGE */
 #brain-img{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:108%;height:auto;max-height:118%;object-fit:contain;pointer-events:none;z-index:1;
   -webkit-mask-image:radial-gradient(ellipse 80% 76% at 50% 46%, rgba(0,0,0,1) 38%, rgba(0,0,0,0.55) 62%, rgba(0,0,0,0) 100%);
   mask-image:radial-gradient(ellipse 80% 76% at 50% 46%, rgba(0,0,0,1) 38%, rgba(0,0,0,0.55) 62%, rgba(0,0,0,0) 100%);}
-#paths{position:absolute;inset:0;z-index:2;pointer-events:none}
-.ag{cursor:pointer}
-.ag.sel{background:rgba(0,200,230,0.06);border-left:2px solid var(--cy)}
-.ag.sel .an{color:var(--cy)}
-.tile{cursor:pointer;transition:border-color 0.2s,background 0.2s}
-.tile.sel{border-color:rgba(0,208,240,0.4);background:rgba(0,200,230,0.06)}
-.pip{cursor:pointer;padding:2px 6px;display:flex;align-items:center;gap:6px;font-size:9px;border-bottom:1px solid rgba(255,255,255,0.02);transition:background 0.12s}
-.pip:hover{background:rgba(0,180,220,0.03)}
-.pip.sel{background:rgba(0,200,230,0.04)}
-#tooltip{position:absolute;z-index:10;pointer-events:none;font-family:var(--mo);font-size:8px;color:var(--cy);background:rgba(4,10,22,0.92);border:1px solid rgba(0,200,230,0.2);padding:3px 8px;border-radius:3px;white-space:nowrap;opacity:0;transition:opacity 0.15s}
-#tooltip.vis{opacity:1}
+#paths{position:absolute;inset:0;z-index:2}
 </style>
 </head>
 <body>
@@ -117,30 +156,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(
   <div class="tile"><div class="ti2">◇</div><div><div class="tl">SYNTHESIS</div><div class="tv" style="color:var(--cy)">Proposal bundle active</div></div></div>
   <div class="tile"><div class="ti2">⬢</div><div><div class="tl">QUALITY GATE</div><div class="tv">1 gate/verify active</div></div></div>
 </div>
-<div id="right">
-  <div class="rb"><div class="rl">PRIORITY PURSUIT</div>
-    <div class="ro">94</div><div class="rn">NOLA Water Infrastructure</div><div class="ra">Sewerage &amp; Water Board of New Orleans</div>
-    <div class="rtags"><span class="rtag">Due Date</span><span class="rtag">Unsolicited ▾</span><span class="rtag hi">Pursuing</span></div>
-  </div>
-  <div class="rb"><div class="rl">STANDARDIZED PARTNERSHIP</div>
-    <div class="rbl"><span>KB MATCH</span><span>95%</span></div><div class="rbar"><div class="f" style="width:95%"></div></div>
-    <div class="rbl"><span>COMPETITIVE</span><span>92%</span></div><div class="rbar"><div class="f" style="width:92%"></div></div>
-    <div class="rbl"><span>RELATIONSHIP</span><span>98%</span></div><div class="rbar"><div class="f" style="width:98%"></div></div>
-  </div>
-  <div class="rb"><div class="rl">PRIORITY PURSUIT</div>
-    <div class="rn">NOLA Water Infrastructure</div>
-    <div class="ra" style="margin-top:4px">Pursuing · INCUMBENT</div>
-    <div style="margin-top:8px"><div class="rl">ACTIVE ANALYSIS</div><div id="analysis" style="font-size:9px;color:var(--tx);line-height:1.4">Deliver compliant draft package and executive review materials.</div></div>
-  </div>
-  <div class="rb"><div class="rl" style="color:var(--rd)">BOTTLENECK ▾</div>
-    <div class="ralt"><div class="rh">1/4 insurance third certifies <span class="rx">✕</span></div></div>
-  </div>
-  <div class="rb"><div class="rl">MEMORY FLOW</div>
-    <div class="mr"><span class="ma">→</span><span class="mv">4</span><span class="ml">intelligence [31.52]</span><span class="mc g">11 engagement</span></div>
-    <div class="mr"><span class="ma">→</span><span class="mv">4</span><span class="ml">monitoring</span><span class="mc">5 pricing benchmarks</span></div>
-    <div class="mr"><span class="ma">→</span><span class="mv">4</span><span class="ml">pattern</span><span class="mc">3 cross-pursuit</span></div>
-  </div>
-</div>
+<div id="right"><div id="rr-content"></div></div>
 <div id="bot">
   <div class="bz"><div class="bt">ROUTING TIMELINE</div><div id="rtl"></div><div class="bt" style="margin-top:6px">PIPELINE</div><div id="pip-list"></div></div>
   <div class="bz"><div class="bt">PHASES / GATING</div>
@@ -156,22 +172,46 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(
 <script>
 // ═══ DATA MODEL ═══
 var AG=[
-  {n:'Intelligence Engine',s:'Scanning',s2:'competitor analysis',v:'18:05',c:'#00d0f0',mode:'planning',task:'OPSB CM — 3 competitors identified (CSRS, Jacobs, Providence)',tip:'Competitive intel active'},
-  {n:'Financial Agent',s:'Bench',s2:'rate benchmarking',v:'18:05',c:'#3cd9a0',mode:'planning',task:'Washington Parish — $95-165/hr comparable range identified',tip:'Rate benchmarking'},
-  {n:'Winnability',s:'Scoring',s2:'alignment eval',v:'14:15',c:'#d4a020',mode:'planning',task:'OPSB CM — PWIN 62%, strong location advantage',tip:'PWIN scoring active'},
-  {n:'CRM Agent',s:'Contact',s2:'relationship mapping',v:'13:05',c:'#a78bfa',mode:'memory',task:'NOLA — 2 existing SWBNO contacts confirmed',tip:'Relationship mapping'},
-  {n:'Quality Gate',s:'Auditing',s2:'compliance check',v:'',c:'#d4a020',badge:'3\u2605',mode:'gate',task:'St. George — missing Exhibit D flagged',tip:'Quality Gate hold'},
-  {n:'Proposal Writer',s:'Drafting',s2:'narrative sections',v:'28:05',c:'#60a5fa',mode:'synthesis',task:'NOLA — executive summary draft in progress',tip:'Proposal synthesis running'},
-  {n:'Red Team',s:'Pending',s2:'evaluator review',v:'',c:'#c84848',badge:'Idle',mode:'gate',task:'Awaiting proposal drafts for adversarial review',tip:'Red team standby'},
-  {n:'Dashboard',s:'Compiling',s2:'briefing synthesis',v:'T36:05',c:'#818cf8',mode:'memory',task:'Overnight synthesis: 8 new memories across 4 opps',tip:'Memory retrieval active'}
+  {n:'Intelligence Engine',s:'Scanning',s2:'competitor analysis',v:'18:05',c:'#00d0f0',mode:'planning',gated:false,
+   task:'OPSB CM — 3 competitors identified (CSRS, Jacobs, Providence)',
+   role:'Competitive Intelligence',status:'Active — scanning 3 portals',
+   tip:'Competitive intel active'},
+  {n:'Financial Agent',s:'Bench',s2:'rate benchmarking',v:'18:05',c:'#3cd9a0',mode:'planning',gated:false,
+   task:'Washington Parish — $95-165/hr comparable range identified',
+   role:'Price-to-Win Analysis',status:'Active — 2 rate comparisons running',
+   tip:'Rate benchmarking'},
+  {n:'Winnability',s:'Scoring',s2:'alignment eval',v:'14:15',c:'#d4a020',mode:'planning',gated:false,
+   task:'OPSB CM — PWIN 62%, strong location advantage',
+   role:'GO/NO-GO Scoring',status:'Active — recalculating 2 opps',
+   tip:'PWIN scoring active'},
+  {n:'CRM Agent',s:'Contact',s2:'relationship mapping',v:'13:05',c:'#a78bfa',mode:'memory',gated:false,
+   task:'NOLA — 2 existing SWBNO contacts confirmed',
+   role:'Relationship Intelligence',status:'Active — mapping decision-makers',
+   tip:'Relationship mapping'},
+  {n:'Quality Gate',s:'Auditing',s2:'compliance check',v:'',c:'#d4a020',badge:'3★',mode:'gate',gated:true,
+   task:'St. George — missing Exhibit D flagged',
+   role:'Compliance Audit',status:'GATED — 3 items require attention',
+   tip:'Quality Gate hold'},
+  {n:'Proposal Writer',s:'Drafting',s2:'narrative sections',v:'28:05',c:'#60a5fa',mode:'synthesis',gated:false,
+   task:'NOLA — executive summary draft in progress',
+   role:'Proposal Production',status:'Active — drafting executive summary',
+   tip:'Proposal synthesis running'},
+  {n:'Red Team',s:'Pending',s2:'evaluator review',v:'',c:'#c84848',badge:'Idle',mode:'gate',gated:true,
+   task:'Awaiting proposal drafts for adversarial review',
+   role:'Adversarial Review',status:'GATED — awaiting proposal drafts',
+   tip:'Red team standby'},
+  {n:'Dashboard',s:'Compiling',s2:'briefing synthesis',v:'T36:05',c:'#818cf8',mode:'memory',gated:false,
+   task:'Overnight synthesis: 8 new memories across 4 opps',
+   role:'Executive Briefing',status:'Active — compiling morning brief',
+   tip:'Memory retrieval active'}
 ];
 
 var PIPE=[
-  {n:'NOLA Water Infrastructure',opi:94,stage:'pursuing',due:'Unsolicited',agency:'SWBNO'},
-  {n:'DR-4900 Louisiana',opi:92,stage:'identified',due:'TBD',agency:'FEMA'},
-  {n:'Washington Parish',opi:88,stage:'pursuing',due:'May 8',agency:'WPSB'},
-  {n:'St. George DR PM',opi:85,stage:'watching',due:'Apr 24',agency:'City of St. George'},
-  {n:'OPSB Construction Mgmt',opi:78,stage:'new',due:'Apr 30',agency:'OPSB'}
+  {n:'NOLA Water Infrastructure',opi:94,stage:'pursuing',due:'Unsolicited',agency:'SWBNO',obj:'Deliver compliant unsolicited proposal'},
+  {n:'DR-4900 Louisiana',opi:92,stage:'identified',due:'TBD',agency:'FEMA',obj:'Monitor for RFP release'},
+  {n:'Washington Parish',opi:88,stage:'pursuing',due:'May 8',agency:'WPSB',obj:'Complete intel package and GO/NO-GO'},
+  {n:'St. George DR PM',opi:85,stage:'watching',due:'Apr 24',agency:'City of St. George',obj:'Proposal generated, reviewing quality'},
+  {n:'OPSB Construction Mgmt',opi:78,stage:'new',due:'Apr 30',agency:'OPSB',obj:'Initial research and competitive scan'}
 ];
 
 var RTD=[
@@ -190,7 +230,7 @@ var agEls=[];
 (function(){
   var el=document.getElementById('agl');
   AG.forEach(function(a,i){
-    var r=document.createElement('div');r.className='ag';r.dataset.idx=i;
+    var r=document.createElement('div');r.className='ag'+(a.gated?' gated':'');r.dataset.idx=i;
     var badge=a.badge?'<div class="abg">'+a.badge+'</div>':(a.v?'<div class="av">'+a.v+'</div>':'');
     r.innerHTML='<div class="ab" style="background:'+a.c+'"></div><div class="ai"><div class="an">'+a.n+'</div><div class="am"><b style="color:'+a.c+'">'+a.s+'</b> \u00b7 '+a.s2+'</div></div>'+badge;
     r.onclick=function(){toggleAgent(i);};
@@ -200,9 +240,17 @@ var agEls=[];
 
 function toggleAgent(i){
   selAgent=selAgent===i?-1:i;selMode='';
-  agEls.forEach(function(e,j){e.classList.toggle('sel',j===selAgent);});
-  document.querySelectorAll('.tile').forEach(function(e){e.classList.remove('sel');});
+  applyAgentStyles();
+  tileEls.forEach(function(e){e.classList.remove('sel');});
   updateRightRail();updateTimeline();
+}
+
+function applyAgentStyles(){
+  agEls.forEach(function(e,j){
+    e.classList.remove('sel','mode-active');
+    if(selAgent>=0&&j===selAgent) e.classList.add('sel');
+    else if(selMode&&AG[j].mode===selMode) e.classList.add('mode-active');
+  });
 }
 
 // ═══ POPULATE TILES ═══
@@ -214,25 +262,25 @@ tileEls.forEach(function(el,i){
 
 function toggleMode(m){
   selMode=selMode===m?'':m;selAgent=-1;
-  agEls.forEach(function(e){e.classList.remove('sel');});
+  applyAgentStyles();
   tileEls.forEach(function(e,i){e.classList.toggle('sel',MODES[i]===selMode);});
   updateRightRail();updateTimeline();
 }
 
-// ═══ POPULATE TIMELINE ═══
+// ═══ TIMELINE — fade non-matching instead of hiding ═══
 var rtlEl=document.getElementById('rtl');
 function updateTimeline(){
   rtlEl.innerHTML='';
   RTD.forEach(function(r){
-    if(selMode&&r.mode!==selMode)return;
     var row=document.createElement('div');row.className='pr';
+    if(selMode&&r.mode!==selMode) row.classList.add('faded');
     row.innerHTML='<div class="pk" style="background:'+r.c+'"></div><span class="pt">'+r.t+'</span><span class="pn">'+r.n+'</span><span class="pw '+(r.w==='Matching'?'m':'w')+'">'+r.w+'</span><span class="pd">'+r.d+'</span>';
     rtlEl.appendChild(row);
   });
 }
 updateTimeline();
 
-// ═══ POPULATE PIPELINE ═══
+// ═══ PIPELINE — gold accent for global context ═══
 (function(){
   var el=document.getElementById('pip-list');if(!el)return;
   PIPE.forEach(function(p,i){
@@ -250,37 +298,78 @@ function togglePipe(i){
   updateRightRail();
 }
 
-// ═══ RIGHT RAIL UPDATES ═══
+// ═══ RIGHT RAIL — context-aware ═══
 function updateRightRail(){
-  var opiEl=document.querySelector('.ro');
-  var nameEl=document.querySelector('.rn');
-  var agencyEl=document.querySelector('.ra');
-  var analysisEl=document.getElementById('analysis');
+  var rr=document.getElementById('rr-content');
+  var html='';
 
-  if(selPipe>=0){
-    var p=PIPE[selPipe];
-    if(opiEl)opiEl.textContent=p.opi;
-    if(nameEl)nameEl.textContent=p.n;
-    if(agencyEl)agencyEl.textContent=p.agency;
-  }else{
-    if(opiEl)opiEl.textContent='94';
-    if(nameEl)nameEl.textContent='NOLA Water Infrastructure';
-    if(agencyEl)agencyEl.textContent='Sewerage & Water Board of New Orleans';
-  }
+  // PURSUIT CONTEXT — always shown at top
+  var p=selPipe>=0?PIPE[selPipe]:PIPE[0];
+  var oc=p.opi>=90?'var(--gn)':p.opi>=80?'var(--cy)':'var(--am)';
+  html+='<div class="rb"><div class="rl">'+(selPipe>=0?'SELECTED PURSUIT':'PRIORITY PURSUIT')+'</div>';
+  html+='<div class="ro" style="color:'+oc+'">'+p.opi+'</div>';
+  html+='<div class="rn">'+p.n+'</div>';
+  html+='<div class="ra">'+p.agency+'</div>';
+  html+='<div class="rtags"><span class="rtag">'+p.due+'</span><span class="rtag hi">'+p.stage+'</span></div>';
+  html+='<div style="margin-top:6px;font-size:9px;color:var(--tx)">'+p.obj+'</div>';
+  html+='</div>';
 
-  if(analysisEl){
-    if(selAgent>=0){
-      var a=AG[selAgent];
-      analysisEl.innerHTML='<div style="color:'+a.c+'">'+a.n+'</div><div style="margin-top:4px">'+a.task+'</div>';
-    }else if(selMode){
-      var html='';
-      AG.forEach(function(a){if(a.mode===selMode)html+='<div style="color:'+a.c+'">'+a.n+'</div><div style="margin-bottom:6px">'+a.task+'</div>';});
-      analysisEl.innerHTML=html;
-    }else{
-      analysisEl.innerHTML='<div style="color:#00d0f0">Intelligence Engine</div><div style="margin-bottom:6px">Mapping incumbent contract history</div><div style="color:#3cd9a0">Financial Agent</div><div>Benchmarking comparable PM rates</div>';
+  // AGENT-SPECIFIC INSPECTION
+  if(selAgent>=0){
+    var a=AG[selAgent];
+    var statusColor=a.gated?'var(--am)':a.c;
+    html+='<div class="rb"><div class="rl">AGENT INSPECTION</div>';
+    html+='<div class="rn" style="color:'+a.c+'">'+a.n+'</div>';
+    html+='<div class="ra" style="margin-top:4px">Role: '+a.role+'</div>';
+    html+='<div style="margin-top:6px"><div class="rl">STATUS</div>';
+    html+='<div style="font-size:9px;color:'+statusColor+';font-weight:600">'+a.status+'</div></div>';
+    html+='<div style="margin-top:6px"><div class="rl">CURRENT TASK</div>';
+    html+='<div style="font-size:9px;color:var(--tx);line-height:1.4">'+a.task+'</div></div>';
+    if(a.gated){
+      html+='<div class="ralt" style="margin-top:8px"><div class="rh">⚠ GATED STATE</div>';
+      html+='<div class="rd">This agent is blocked pending prerequisite completion.</div></div>';
     }
+    html+='</div>';
   }
+  // MODE DIAGNOSTICS
+  else if(selMode){
+    var modeNames={planning:'PLANNING',memory:'MEMORY',synthesis:'SYNTHESIS',gate:'QUALITY GATE'};
+    html+='<div class="rb"><div class="rl">'+modeNames[selMode]+' MODE</div>';
+    var modeAgents=AG.filter(function(a){return a.mode===selMode;});
+    html+='<div style="font-size:9px;color:var(--cy);margin-bottom:6px">'+modeAgents.length+' agents active in this mode</div>';
+    modeAgents.forEach(function(a){
+      var sc=a.gated?'var(--am)':a.c;
+      html+='<div style="margin-bottom:6px">';
+      html+='<div style="font-size:10px;font-weight:600;color:'+sc+'">'+a.n+(a.gated?' ⚠':'')+'</div>';
+      html+='<div style="font-size:9px;color:var(--tx);margin-top:2px">'+a.task+'</div>';
+      html+='</div>';
+    });
+    html+='</div>';
+  }
+  // DEFAULT — OPI bars + memory flow
+  else{
+    html+='<div class="rb"><div class="rl">OPI FACTORS</div>';
+    html+='<div class="rbl"><span>KB MATCH</span><span>95%</span></div><div class="rbar"><div class="f" style="width:95%"></div></div>';
+    html+='<div class="rbl"><span>COMPETITIVE</span><span>92%</span></div><div class="rbar"><div class="f" style="width:92%"></div></div>';
+    html+='<div class="rbl"><span>RELATIONSHIP</span><span>98%</span></div><div class="rbar"><div class="f" style="width:98%"></div></div>';
+    html+='</div>';
+    html+='<div class="rb"><div class="rl">ACTIVE ANALYSIS</div>';
+    html+='<div style="font-size:9px;color:var(--tx);line-height:1.4">';
+    html+='<div style="color:#00d0f0">Intelligence Engine</div><div style="margin-bottom:6px">Mapping incumbent contract history</div>';
+    html+='<div style="color:#3cd9a0">Financial Agent</div><div>Benchmarking comparable PM rates</div>';
+    html+='</div></div>';
+  }
+
+  // MEMORY FLOW — always at bottom
+  html+='<div class="rb"><div class="rl">MEMORY FLOW</div>';
+  html+='<div class="mr"><span class="ma">→</span><span class="mv">4</span><span class="ml">intelligence [31.52]</span><span class="mc g">11 engagement</span></div>';
+  html+='<div class="mr"><span class="ma">→</span><span class="mv">4</span><span class="ml">monitoring</span><span class="mc">5 pricing benchmarks</span></div>';
+  html+='<div class="mr"><span class="ma">→</span><span class="mv">4</span><span class="ml">pattern</span><span class="mc">3 cross-pursuit</span></div>';
+  html+='</div>';
+
+  rr.innerHTML=html;
 }
+updateRightRail();
 
 // ═══ PATHWAY + OVERLAY SYSTEM ═══
 var cv=document.getElementById('paths'),cx=cv.getContext('2d');
@@ -289,26 +378,26 @@ function rs(){cv.width=cv.parentElement.clientWidth;cv.height=cv.parentElement.c
 rs();window.addEventListener('resize',rs);
 
 var INB=[
-  {label:'Intelligence',c:'#00d0f0',fy:0.18,tx:0.34,ty:0.30,sp:0.32,ph:0,agIdx:0,tip:'Competitive intel active'},
-  {label:'Financial',   c:'#3cd9a0',fy:0.30,tx:0.36,ty:0.42,sp:0.28,ph:0.8,agIdx:1,tip:'Rate benchmarking'},
-  {label:'Winnability',  c:'#d4a020',fy:0.42,tx:0.40,ty:0.50,sp:0.25,ph:1.6,agIdx:2,tip:'PWIN scoring'},
-  {label:'CRM',          c:'#a78bfa',fy:0.54,tx:0.38,ty:0.36,sp:0.30,ph:2.4,agIdx:3,tip:'Relationship mapping'},
-  {label:'QualityGate',  c:'#d4a020',fy:0.66,tx:0.42,ty:0.58,sp:0.22,ph:3.2,agIdx:4,tip:'Quality Gate hold'}
+  {label:'Intelligence',c:'#00d0f0',fy:0.18,tx:0.34,ty:0.30,sp:0.32,ph:0,agIdx:0,tip:'L-Frontal: Intelligence Engine',detail:'Scanning 3 portals for competitive data'},
+  {label:'Financial',   c:'#3cd9a0',fy:0.30,tx:0.36,ty:0.42,sp:0.28,ph:0.8,agIdx:1,tip:'R-Central: Financial Agent',detail:'Rate benchmarking across 4 verticals'},
+  {label:'Winnability',  c:'#d4a020',fy:0.42,tx:0.40,ty:0.50,sp:0.25,ph:1.6,agIdx:2,tip:'R-Frontal: Winnability Scoring',detail:'PWIN recalculation in progress'},
+  {label:'CRM',          c:'#a78bfa',fy:0.54,tx:0.38,ty:0.36,sp:0.30,ph:2.4,agIdx:3,tip:'L-Temporal: CRM Agent',detail:'Mapping SWBNO decision-makers'},
+  {label:'QualityGate',  c:'#d4a020',fy:0.66,tx:0.42,ty:0.58,sp:0.22,ph:3.2,agIdx:4,tip:'R-Temporal: Quality Gate',detail:'3 compliance items flagged'}
 ];
 var OUT=[
-  {label:'Priority',  c:'#00d0f0',fx:0.63,fy:0.28,ty:0.16,sp:0.28,ph:0.5,tip:'Priority pursuit output'},
-  {label:'Bottleneck', c:'#c84848',fx:0.62,fy:0.46,ty:0.56,sp:0.24,ph:1.8,tip:'Bottleneck validation'},
-  {label:'Routing',    c:'#3cd9a0',fx:0.58,fy:0.60,ty:0.88,sp:0.20,ph:3.0,tip:'Routing to timeline'}
+  {label:'Priority',  c:'#00d0f0',fx:0.63,fy:0.28,ty:0.16,sp:0.28,ph:0.5,tip:'Priority pursuit output',detail:'Feeding right rail pursuit context'},
+  {label:'Bottleneck', c:'#c84848',fx:0.62,fy:0.46,ty:0.56,sp:0.24,ph:1.8,tip:'Bottleneck validation',detail:'Gating compliance issues'},
+  {label:'Routing',    c:'#3cd9a0',fx:0.58,fy:0.60,ty:0.88,sp:0.20,ph:3.0,tip:'Routing to timeline',detail:'Dispatching events to timeline'}
 ];
 var HS=[
-  {x:0.40,y:0.28,r:3,s:1.8,p:0,agIdx:0,tip:'L-Frontal: Intelligence'},
-  {x:0.60,y:0.28,r:3,s:2.0,p:1,agIdx:2,tip:'R-Frontal: Winnability'},
-  {x:0.45,y:0.43,r:4,s:1.5,p:2,agIdx:5,tip:'L-Central: Proposal synthesis'},
-  {x:0.55,y:0.43,r:4,s:1.6,p:0.5,agIdx:1,tip:'R-Central: Financial analysis'},
-  {x:0.50,y:0.24,r:2.5,s:2.2,p:3,agIdx:7,tip:'Dorsal: Dashboard synthesis'},
-  {x:0.35,y:0.50,r:2,s:1.9,p:1.5,agIdx:3,tip:'L-Temporal: CRM memory'},
-  {x:0.65,y:0.50,r:2,s:1.7,p:2.5,agIdx:4,tip:'R-Temporal: Quality Gate'},
-  {x:0.50,y:0.56,r:3,s:1.4,p:0.8,agIdx:6,tip:'Ventral: Red Team validation'}
+  {x:0.40,y:0.28,r:3,s:1.8,p:0,agIdx:0,tip:'L-Frontal',detail:'Intelligence Engine active'},
+  {x:0.60,y:0.28,r:3,s:2.0,p:1,agIdx:2,tip:'R-Frontal',detail:'Winnability scoring'},
+  {x:0.45,y:0.43,r:4,s:1.5,p:2,agIdx:5,tip:'L-Central',detail:'Proposal synthesis running'},
+  {x:0.55,y:0.43,r:4,s:1.6,p:0.5,agIdx:1,tip:'R-Central',detail:'Financial analysis'},
+  {x:0.50,y:0.24,r:2.5,s:2.2,p:3,agIdx:7,tip:'Dorsal',detail:'Dashboard synthesis'},
+  {x:0.35,y:0.50,r:2,s:1.9,p:1.5,agIdx:3,tip:'L-Temporal',detail:'CRM memory retrieval'},
+  {x:0.65,y:0.50,r:2,s:1.7,p:2.5,agIdx:4,tip:'R-Temporal',detail:'Quality Gate validation'},
+  {x:0.50,y:0.56,r:3,s:1.4,p:0.8,agIdx:6,tip:'Ventral',detail:'Red Team standby'}
 ];
 
 function isPathActive(agIdx){
@@ -325,20 +414,31 @@ function drawInbound(p){
   var ax=0,ay=p.fy*h,bx=p.tx*w,by=p.ty*h;
   var mx=0.14*w,my=ay*0.55+by*0.45;
   var active=isPathActive(p.agIdx);
-  var hasSelection=selAgent>=0||selMode;
-  var lineAlpha=active?(hasSelection?0.25:0.06):0.02;
-  var lineWidth=active?(hasSelection?2:1):0.5;
+  var hasSelection=selAgent>=0||selMode!=='';
+  var isGated=AG[p.agIdx]&&AG[p.agIdx].gated;
+
+  // PATH LINE
+  var lineAlpha,lineWidth;
+  if(!hasSelection){lineAlpha=0.06;lineWidth=1;}
+  else if(active){lineAlpha=0.35;lineWidth=isGated?1.5:2.5;}
+  else{lineAlpha=0.015;lineWidth=0.5;}
+
   cx.beginPath();cx.moveTo(ax,ay);cx.quadraticCurveTo(mx,my,bx,by);
-  cx.strokeStyle=p.c;cx.globalAlpha=lineAlpha;cx.lineWidth=lineWidth;cx.stroke();cx.globalAlpha=1;
+  cx.strokeStyle=isGated?'#d4a020':p.c;cx.globalAlpha=lineAlpha;cx.lineWidth=lineWidth;
+  if(isGated&&active){cx.setLineDash([6,4]);}
+  cx.stroke();cx.setLineDash([]);cx.globalAlpha=1;
+
+  // PULSE PARTICLE — only on active paths
   if(active){
     var prog=((t*p.sp+p.ph)%2)/2;
     if(prog<1){
       var pt=bezPt(ax,ay,mx,my,bx,by,prog);
-      var sz=hasSelection&&isPathActive(p.agIdx)?7:5;
+      var sz=hasSelection?9:5;
       var g=cx.createRadialGradient(pt.x,pt.y,0,pt.x,pt.y,sz);
       g.addColorStop(0,p.c);g.addColorStop(1,'rgba(0,0,0,0)');
       cx.fillStyle=g;cx.beginPath();cx.arc(pt.x,pt.y,sz,0,Math.PI*2);cx.fill();
-      cx.fillStyle='#fff';cx.globalAlpha=0.7;cx.beginPath();cx.arc(pt.x,pt.y,1.5,0,Math.PI*2);cx.fill();cx.globalAlpha=1;
+      cx.fillStyle='#fff';cx.globalAlpha=hasSelection?0.9:0.5;
+      cx.beginPath();cx.arc(pt.x,pt.y,hasSelection?2:1.2,0,Math.PI*2);cx.fill();cx.globalAlpha=1;
     }
   }
 }
@@ -347,18 +447,18 @@ function drawOutbound(p){
   var w=cv.width,h=cv.height;
   var ax=p.fx*w,ay=p.fy*h,bx=w,by=p.ty*h;
   var mx=0.82*w,my=ay*0.4+by*0.6;
-  var active=!selAgent&&!selMode||selMode;
-  var lineAlpha=active?0.06:0.02;
+  var active=!selAgent||(selAgent<0);
+  var lineAlpha=active?0.05:0.015;
   cx.beginPath();cx.moveTo(ax,ay);cx.quadraticCurveTo(mx,my,bx,by);
   cx.strokeStyle=p.c;cx.globalAlpha=lineAlpha;cx.lineWidth=1;cx.stroke();cx.globalAlpha=1;
   if(active){
     var prog=((t*p.sp+p.ph)%2)/2;
     if(prog<1){
       var pt=bezPt(ax,ay,mx,my,bx,by,prog);
-      var g=cx.createRadialGradient(pt.x,pt.y,0,pt.x,pt.y,5);
+      var g=cx.createRadialGradient(pt.x,pt.y,0,pt.x,pt.y,4);
       g.addColorStop(0,p.c);g.addColorStop(1,'rgba(0,0,0,0)');
-      cx.fillStyle=g;cx.beginPath();cx.arc(pt.x,pt.y,5,0,Math.PI*2);cx.fill();
-      cx.fillStyle='#fff';cx.globalAlpha=0.7;cx.beginPath();cx.arc(pt.x,pt.y,1.2,0,Math.PI*2);cx.fill();cx.globalAlpha=1;
+      cx.fillStyle=g;cx.beginPath();cx.arc(pt.x,pt.y,4,0,Math.PI*2);cx.fill();
+      cx.fillStyle='#fff';cx.globalAlpha=0.5;cx.beginPath();cx.arc(pt.x,pt.y,1,0,Math.PI*2);cx.fill();cx.globalAlpha=1;
     }
   }
 }
@@ -368,52 +468,104 @@ function anim(){
   cx.clearRect(0,0,cv.width,cv.height);
   INB.forEach(drawInbound);
   OUT.forEach(drawOutbound);
+
+  // HOTSPOTS
   HS.forEach(function(s){
     var active=isPathActive(s.agIdx);
-    var hasSelection=selAgent>=0||selMode;
-    var intensity=active?(hasSelection?1.5:1.0):0.3;
-    var p=0.3+0.7*Math.pow((Math.sin(t*s.s+s.p)+1)/2,2);
-    p*=intensity;
-    var x=s.x*cv.width,y=s.y*cv.height,r=s.r*p*(cv.width/900);
-    var g=cx.createRadialGradient(x,y,0,x,y,r*3);
-    g.addColorStop(0,'rgba(100,220,255,'+Math.min(0.25,0.08*p)+')');
-    g.addColorStop(1,'rgba(0,180,220,0)');
-    cx.fillStyle=g;cx.beginPath();cx.arc(x,y,r*3,0,Math.PI*2);cx.fill();
-    if(active&&hasSelection){
-      cx.fillStyle='rgba(180,240,255,'+0.3*p+')';
-      cx.beginPath();cx.arc(x,y,r*0.8,0,Math.PI*2);cx.fill();
+    var hasSelection=selAgent>=0||selMode!=='';
+    var isGated=AG[s.agIdx]&&AG[s.agIdx].gated;
+    var x=s.x*cv.width,y=s.y*cv.height;
+    var sc=cv.width/900;
+
+    if(!hasSelection){
+      // Ambient: subtle breathing glow
+      var p=0.3+0.7*Math.pow((Math.sin(t*s.s+s.p)+1)/2,2);
+      var r=s.r*p*sc;
+      var g=cx.createRadialGradient(x,y,0,x,y,r*3);
+      g.addColorStop(0,'rgba(100,220,255,'+Math.min(0.15,0.06*p)+')');
+      g.addColorStop(1,'rgba(0,180,220,0)');
+      cx.fillStyle=g;cx.beginPath();cx.arc(x,y,r*3,0,Math.PI*2);cx.fill();
+    }else if(active){
+      // SELECTED hotspot: pulsing ring + bright core
+      var pulse=0.5+0.5*Math.sin(t*3+s.p);
+      var r=s.r*1.8*sc;
+      var col=isGated?'212,160,32':'100,220,255';
+
+      // Outer glow
+      var g=cx.createRadialGradient(x,y,0,x,y,r*4);
+      g.addColorStop(0,'rgba('+col+','+0.15*pulse+')');
+      g.addColorStop(1,'rgba('+col+',0)');
+      cx.fillStyle=g;cx.beginPath();cx.arc(x,y,r*4,0,Math.PI*2);cx.fill();
+
+      // Pulsing ring
+      cx.beginPath();cx.arc(x,y,r*2.2,0,Math.PI*2);
+      cx.strokeStyle='rgba('+col+','+(0.2+0.2*pulse)+')';
+      cx.lineWidth=1.5;cx.stroke();
+
+      // Bright core
+      cx.fillStyle='rgba('+col+','+(0.25+0.15*pulse)+')';
+      cx.beginPath();cx.arc(x,y,r*0.9,0,Math.PI*2);cx.fill();
     }
+    // Non-active when selection exists: invisible (dimmed out)
   });
 }
 
-// ═══ TOOLTIP ON HOVER ═══
+// ═══ TOOLTIP — readable, with label+detail ═══
 cv.style.pointerEvents='auto';
-cv.addEventListener('mousemove',function(e){
-  var rect=cv.getBoundingClientRect();
-  var mx=(e.clientX-rect.left)/rect.width;
-  var my=(e.clientY-rect.top)/rect.height;
+var lastTooltipTarget=null;
+
+function showTooltip(item,px,py){
+  tooltip.innerHTML='<div class="tt-label">'+item.tip+'</div><div class="tt-detail">'+item.detail+'</div>';
+  var rect=cv.parentElement.getBoundingClientRect();
+  tooltip.style.left=(px-rect.left+14)+'px';
+  tooltip.style.top=(py-rect.top-30)+'px';
+  tooltip.classList.add('vis');
+  lastTooltipTarget=item;
+}
+
+function hideTooltip(){tooltip.classList.remove('vis');lastTooltipTarget=null;}
+
+function findTarget(mx,my){
   var found=null;
   HS.forEach(function(s){
     var dx=mx-s.x,dy=my-s.y;
-    if(Math.sqrt(dx*dx+dy*dy)<0.04)found=s;
+    if(Math.sqrt(dx*dx+dy*dy)<0.045)found=s;
   });
   if(!found){
     INB.forEach(function(p){
       var dx=mx-p.tx,dy=my-p.ty;
-      if(Math.sqrt(dx*dx+dy*dy)<0.03)found=p;
+      if(Math.sqrt(dx*dx+dy*dy)<0.035)found=p;
     });
   }
-  if(found){
-    tooltip.textContent=found.tip;
-    tooltip.style.left=(e.clientX-cv.parentElement.getBoundingClientRect().left+12)+'px';
-    tooltip.style.top=(e.clientY-cv.parentElement.getBoundingClientRect().top-20)+'px';
-    tooltip.className='vis';
-  }else{
-    tooltip.className='';
-  }
-});
-cv.addEventListener('mouseleave',function(){tooltip.className='';});
+  return found;
+}
 
+cv.addEventListener('mousemove',function(e){
+  var rect=cv.getBoundingClientRect();
+  var mx=(e.clientX-rect.left)/rect.width;
+  var my=(e.clientY-rect.top)/rect.height;
+  var found=findTarget(mx,my);
+  if(found){showTooltip(found,e.clientX,e.clientY);}
+  else{hideTooltip();}
+});
+cv.addEventListener('mouseleave',function(){hideTooltip();});
+
+// MOBILE: tap to show, tap elsewhere to dismiss
+cv.addEventListener('touchstart',function(e){
+  var touch=e.touches[0];
+  var rect=cv.getBoundingClientRect();
+  var mx=(touch.clientX-rect.left)/rect.width;
+  var my=(touch.clientY-rect.top)/rect.height;
+  var found=findTarget(mx,my);
+  if(found){
+    e.preventDefault();
+    showTooltip(found,touch.clientX,touch.clientY);
+  }else{
+    hideTooltip();
+  }
+},{passive:false});
+
+// ═══ BOOT ═══
 document.getElementById('ld').style.opacity='0';
 setTimeout(function(){document.getElementById('ld').style.display='none';},600);
 anim();
