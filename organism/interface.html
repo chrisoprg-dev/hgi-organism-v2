@@ -2,293 +2,1165 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="HGI">
-<meta name="theme-color" content="#060810">
-<meta name="mobile-web-app-capable" content="yes">
-<link rel="manifest" href="/manifest.json">
-<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='28' fill='%231B2A4A'/%3E%3Ctext x='90' y='115' text-anchor='middle' font-family='Arial Black' font-size='75' font-weight='900' fill='%23eab308'%3EH%3C/text%3E%3C/svg%3E">
-<title>HGI Organism</title>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;600;700;800&display=swap" rel="stylesheet">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>HGI ORGANISM</title>
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-:root{--bg:#060810;--s1:rgba(255,255,255,0.018);--s2:rgba(255,255,255,0.035);--b1:rgba(255,255,255,0.06);--b2:rgba(255,255,255,0.1);--gold:#d4a843;--navy:#1B2A4A;--t1:#666;--t2:#aaa;--t3:#ddd}
-body{background:var(--bg);color:var(--t1);font-family:'DM Sans',-apple-system,BlinkMacSystemFont,sans-serif;overflow-x:hidden;min-height:100dvh;-webkit-font-smoothing:antialiased}
-::-webkit-scrollbar{width:2px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:rgba(212,168,67,0.2)}
-.m{font-family:'JetBrains Mono',monospace}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
-@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
-@keyframes shimmer{0%{background-position:-200% center}100%{background-position:200% center}}
-@keyframes slideUp{from{opacity:0;transform:translateY(100%)}to{opacity:1;transform:translateY(0)}}
-@keyframes glow{0%,100%{box-shadow:0 0 8px rgba(212,168,67,0.15)}50%{box-shadow:0 0 22px rgba(212,168,67,0.35)}}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;500;600;700&display=swap');
 
-.hdr{padding:16px 18px 12px;background:linear-gradient(180deg,rgba(27,42,74,0.12) 0%,transparent 100%);border-bottom:1px solid rgba(212,168,67,0.06);position:relative}
-.hdr::after{content:'';position:absolute;bottom:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(212,168,67,0.2),transparent)}
-.logo{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--gold),#8b6914);display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:900;color:#000;box-shadow:0 2px 16px rgba(212,168,67,0.3);animation:glow 4s ease-in-out infinite}
-.dot{width:7px;height:7px;border-radius:50%;background:#22c55e;box-shadow:0 0 10px rgba(34,197,94,0.5);animation:pulse 2.5s ease-in-out infinite}
-.metrics{padding:10px 16px;display:grid;grid-template-columns:repeat(4,1fr);gap:7px}
-.mc{background:var(--s1);border:1px solid var(--b1);border-radius:12px;padding:12px 14px;position:relative;overflow:hidden}
-.mc-v{font-size:22px;font-weight:800;color:#fff;line-height:1;margin-top:4px;letter-spacing:-1px}
-.alert{margin:4px 16px 8px;background:rgba(239,68,68,0.025);border:1px solid rgba(239,68,68,0.07);border-radius:10px;padding:12px 14px;border-left:3px solid #ef4444}
-.tabs{padding:0 12px;display:flex;gap:0;border-bottom:1px solid var(--b1);overflow-x:auto;-webkit-overflow-scrolling:touch}
-.tab{background:transparent;border:none;border-bottom:2px solid transparent;padding:11px 16px;cursor:pointer;color:#555;font-size:10px;font-weight:700;letter-spacing:0.12em;white-space:nowrap;transition:all 0.15s;touch-action:manipulation}
-.tab.a{color:var(--gold);border-bottom-color:var(--gold)}
-.cnt{padding:12px 16px;min-height:320px;animation:fadeIn 0.2s ease}
-.opp{background:var(--s1);border:1px solid var(--b1);border-radius:12px;padding:14px 16px;cursor:pointer;margin-bottom:8px;transition:all 0.15s;position:relative;touch-action:manipulation}
-.opp:active{transform:scale(0.98);background:var(--s2)}
-.badge{font-size:9px;padding:3px 8px;border-radius:4px;font-weight:700;text-transform:uppercase;display:inline-block}
-.ov{position:fixed;top:0;left:0;right:0;bottom:0;background:var(--bg);z-index:100;overflow-y:auto;-webkit-overflow-scrolling:touch;animation:slideUp 0.2s ease}
-.ov-h{position:sticky;top:0;background:linear-gradient(180deg,#060810 85%,transparent);padding:14px 16px 12px;border-bottom:1px solid var(--b1);display:flex;align-items:center;gap:12px;z-index:10}
-.ov-b{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:8px;width:38px;height:38px;display:flex;align-items:center;justify-content:center;color:var(--t2);font-size:18px;cursor:pointer;touch-action:manipulation}
-.ov-b:active{background:rgba(255,255,255,0.1)}
-.dg{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}
-.ds{background:var(--s1);border:1px solid var(--b1);border-radius:10px;padding:14px}
-.sh{font-size:10px;font-weight:700;letter-spacing:0.12em;color:#555;text-transform:uppercase;margin:16px 0 10px;padding-bottom:5px;border-bottom:1px solid var(--b1);display:flex;justify-content:space-between;align-items:center}
-.mem{padding:10px 14px;background:rgba(255,255,255,0.01);border-radius:0 8px 8px 0;margin-bottom:5px}
-.thr{padding:14px 16px;background:var(--s1);border:1px solid var(--b1);border-radius:10px;margin-bottom:7px;cursor:pointer;touch-action:manipulation}
-.thr:active{background:var(--s2)}
-.ct{padding:12px 14px;background:var(--s1);border:1px solid var(--b1);border-radius:10px;margin-bottom:6px;cursor:pointer;touch-action:manipulation}
-.st{display:flex;gap:0;border-bottom:1px solid var(--b1);overflow-x:auto;margin-bottom:10px;padding:0 4px;-webkit-overflow-scrolling:touch}
-.stb{background:transparent;border:none;border-bottom:2px solid transparent;padding:9px 11px;cursor:pointer;color:#444;font-size:9px;font-weight:700;letter-spacing:0.08em;white-space:nowrap;transition:all 0.15s;touch-action:manipulation}
-.stb.a{color:var(--gold);border-bottom-color:var(--gold)}
-.pill{padding:5px 11px;border-radius:14px;font-size:9px;font-weight:700;border:1px solid var(--b1);color:#555;cursor:pointer;transition:all 0.15s;touch-action:manipulation}
-.pill.a{background:rgba(212,168,67,0.08);border-color:rgba(212,168,67,0.25);color:var(--gold)}
-.ex{max-height:0;overflow:hidden;transition:max-height 0.3s ease}
-.ex.o{max-height:600px}
-.btn{background:rgba(212,168,67,0.06);border:1px solid rgba(212,168,67,0.12);border-radius:8px;padding:7px 14px;color:var(--gold);font-size:11px;cursor:pointer;font-weight:700;touch-action:manipulation}
-.btn:active{transform:scale(0.95);background:rgba(212,168,67,0.12)}
-@media(max-width:600px){.metrics{grid-template-columns:repeat(2,1fr)}}
+body {
+  background: #000;
+  color: #fff;
+  font-family: 'Rajdhani', sans-serif;
+  overflow: hidden;
+  width: 100vw;
+  height: 100vh;
+}
+
+#canvas-container {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  z-index: 1;
+}
+
+/* Top HUD bar */
+#hud-top {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 10;
+  padding: 8px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: linear-gradient(180deg, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0) 100%);
+}
+
+#hud-top .title {
+  font-family: 'Orbitron', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  color: #00f0ff;
+  text-shadow: 0 0 10px rgba(0,240,255,0.5);
+}
+
+#hud-top .status {
+  font-size: 11px;
+  color: #4ade80;
+  letter-spacing: 1px;
+}
+
+#hud-top .status .dot {
+  display: inline-block;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: #4ade80;
+  box-shadow: 0 0 6px #4ade80;
+  margin-right: 4px;
+  animation: pulse-dot 2s infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* Agent avatars (CSS2D rendered in 3D space) */
+.agent-label {
+  pointer-events: auto;
+  cursor: pointer;
+  text-align: center;
+  width: 80px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.agent-label:active .icon-ring {
+  transform: scale(1.2);
+  box-shadow: 0 0 20px var(--agent-color);
+}
+
+.agent-label .icon-ring {
+  width: 36px; height: 36px;
+  margin: 0 auto 2px;
+  border-radius: 50%;
+  border: 1.5px solid;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  background: rgba(0,0,0,0.6);
+  box-shadow: 0 0 8px var(--agent-color);
+  animation: agent-breathe 3s infinite ease-in-out;
+}
+
+@keyframes agent-breathe {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 8px var(--agent-color); }
+  50% { transform: scale(1.08); box-shadow: 0 0 14px var(--agent-color); }
+}
+
+.agent-label .name {
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--agent-color);
+  text-shadow: 0 0 4px var(--agent-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Data panels */
+.data-panel {
+  position: fixed;
+  z-index: 10;
+  background: rgba(0, 10, 20, 0.85);
+  border: 1px solid rgba(0, 240, 255, 0.15);
+  border-radius: 6px;
+  padding: 8px 10px;
+  backdrop-filter: blur(8px);
+  font-size: 11px;
+  max-width: 180px;
+}
+
+.data-panel .panel-title {
+  font-family: 'Orbitron', monospace;
+  font-size: 8px;
+  letter-spacing: 2px;
+  color: rgba(0, 240, 255, 0.6);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
+
+#panel-pipeline {
+  bottom: 120px;
+  left: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+#panel-agents {
+  bottom: 120px;
+  right: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.opp-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.opp-row:active {
+  background: rgba(0,240,255,0.1);
+}
+
+.opp-opi {
+  font-family: 'Orbitron', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 24px;
+  text-align: right;
+}
+
+.opp-name {
+  font-size: 10px;
+  color: rgba(255,255,255,0.7);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.opp-due {
+  font-size: 9px;
+  color: rgba(255,255,255,0.4);
+  white-space: nowrap;
+}
+
+.agent-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 0;
+}
+
+.agent-dot {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.agent-name-text {
+  font-size: 9px;
+  color: rgba(255,255,255,0.6);
+  white-space: nowrap;
+}
+
+.agent-status-text {
+  font-size: 8px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* Bottom stats bar */
+#hud-bottom {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  z-index: 10;
+  padding: 10px 16px 14px;
+  background: linear-gradient(0deg, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0) 100%);
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+}
+
+.stat-block {
+  text-align: center;
+}
+
+.stat-block .value {
+  font-family: 'Orbitron', monospace;
+  font-size: 18px;
+  font-weight: 700;
+  color: #00f0ff;
+  text-shadow: 0 0 8px rgba(0,240,255,0.4);
+}
+
+.stat-block .label {
+  font-size: 8px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.4);
+  margin-top: 2px;
+}
+
+/* Scan line effect */
+#scanline {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(0,240,255,0.3), transparent);
+  z-index: 20;
+  animation: scan 4s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes scan {
+  0% { top: -2px; }
+  100% { top: 100vh; }
+}
+
+/* Corner decorations */
+.corner {
+  position: fixed;
+  width: 20px; height: 20px;
+  z-index: 10;
+  pointer-events: none;
+}
+.corner.tl { top: 4px; left: 4px; border-top: 1px solid rgba(0,240,255,0.3); border-left: 1px solid rgba(0,240,255,0.3); }
+.corner.tr { top: 4px; right: 4px; border-top: 1px solid rgba(0,240,255,0.3); border-right: 1px solid rgba(0,240,255,0.3); }
+.corner.bl { bottom: 4px; left: 4px; border-bottom: 1px solid rgba(0,240,255,0.3); border-left: 1px solid rgba(0,240,255,0.3); }
+.corner.br { bottom: 4px; right: 4px; border-bottom: 1px solid rgba(0,240,255,0.3); border-right: 1px solid rgba(0,240,255,0.3); }
+
+/* Loading */
+#loading {
+
+/* Detail overlay */
+#detail-overlay {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  z-index: 50;
+  background: rgba(0, 8, 16, 0.95);
+  border-top: 1px solid rgba(0,240,255,0.3);
+  padding: 12px 16px 20px;
+  max-height: 55vh;
+  overflow-y: auto;
+  transform: translateY(100%);
+  transition: transform 0.3s ease;
+  backdrop-filter: blur(12px);
+}
+
+#detail-overlay.open {
+  transform: translateY(0);
+}
+
+#detail-overlay .detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+#detail-overlay .detail-title {
+  font-family: 'Orbitron', monospace;
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: #00f0ff;
+}
+
+#detail-overlay .detail-close {
+  font-size: 18px;
+  color: rgba(255,255,255,0.5);
+  cursor: pointer;
+  padding: 4px 8px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#detail-overlay .detail-body {
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(255,255,255,0.8);
+}
+
+#detail-overlay .detail-body .detail-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-right: 4px;
+  margin-bottom: 4px;
+}
+
+#detail-overlay .detail-loading {
+  text-align: center;
+  padding: 20px;
+  color: rgba(0,240,255,0.5);
+  font-size: 11px;
+  letter-spacing: 2px;
+}
+
+/* Loading */
+#loading {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 100;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Orbitron', monospace;
+  transition: opacity 0.5s;
+}
+
+#loading .spinner {
+  width: 40px; height: 40px;
+  border: 2px solid rgba(0,240,255,0.2);
+  border-top-color: #00f0ff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 16px;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+#loading .text {
+  font-size: 10px;
+  letter-spacing: 4px;
+  color: rgba(0,240,255,0.6);
+}
 </style>
 </head>
 <body>
-<div id="app"></div>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <div class="text">INITIALIZING ORGANISM</div>
+</div>
+
+<div id="scanline"></div>
+<div class="corner tl"></div>
+<div class="corner tr"></div>
+<div class="corner bl"></div>
+<div class="corner br"></div>
+
+<div id="hud-top">
+  <div class="title">HGI ORGANISM</div>
+  <div class="status"><span class="dot"></span>V4.2 LIVE</div>
+</div>
+
+<div id="canvas-container"></div>
+
+<div id="detail-overlay">
+  <div class="detail-header">
+    <div class="detail-title" id="detail-title"></div>
+    <div class="detail-close" id="detail-close">✕</div>
+  </div>
+  <div class="detail-body" id="detail-body"></div>
+</div>
+
+<div id="panel-pipeline" class="data-panel">
+  <div class="panel-title">PIPELINE</div>
+  <div id="pipeline-list"></div>
+</div>
+
+<div id="panel-agents" class="data-panel">
+  <div class="panel-title">AGENT STATUS</div>
+  <div id="agents-list"></div>
+</div>
+
+<div id="hud-bottom">
+  <div class="stat-block">
+    <div class="value">15</div>
+    <div class="label">AGENTS</div>
+  </div>
+  <div class="stat-block">
+    <div class="value">9</div>
+    <div class="label">PIPELINE</div>
+  </div>
+  <div class="stat-block">
+    <div class="value">5.6K</div>
+    <div class="label">MEMORIES</div>
+  </div>
+  <div class="stat-block">
+    <div class="value">47</div>
+    <div class="label">INTEL</div>
+  </div>
+</div>
+
+<!-- Three.js r128 (non-module) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/renderers/CSS2DRenderer.js"></script>
+
 <script>
-var SB='https://mfvfbeyjpwllndeuhldi.supabase.co/rest/v1';
-var AK='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1mdmZiZXlqcHdsbG5kZXVobGRpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI0MDM0NjQsImV4cCI6MjA4Nzk3OTQ2NH0.V-p5WqM8uwJWRcndiQZJcXw7mz9vBcCVsCrfI6Jz0qs';
-var HD={apikey:AK,Authorization:'Bearer '+AK};
-async function sb(p){try{var r=await fetch(SB+p,{headers:HD});return r.ok?await r.json():[];}catch(e){return[];}}
+// ═══════════════════════════════════════════
+// HGI ORGANISM — 3D BRAIN COMMAND CENTER
+// ═══════════════════════════════════════════
 
-function oc(s){return s>=90?'#22c55e':s>=80?'#38bdf8':s>=70?'#eab308':s>=60?'#f97316':'#ef4444'}
-var SC={pursuing:'#38bdf8',submitted:'#22c55e',identified:'#eab308',watching:'#f97316',no_bid:'#555'};
-var TC={primary:'#ef4444',secondary:'#f97316',emerging:'#eab308',watch:'#64748b'};
-function ac(a){var m={'intelligence':'#3b82f6','competitor':'#f97316','financial':'#22c55e','crm':'#a855f7','research':'#0891b2','winnability':'#eab308','staffing':'#ec4899','proposal':'#6366f1','brief':'#14b8a6','quality':'#ef4444','dashboard':'#d4a843','disaster':'#dc2626','amendment':'#0284c7','red_team':'#ef4444','price':'#22c55e'};for(var k in m){if((a||'').indexOf(k)>=0)return m[k];}return '#64748b';}
-function mc(a){var m={'intelligence':'competitive','competitor':'competitive','financial':'financial','price':'financial','crm':'crm','research':'research','winnability':'research','staffing':'staffing','recruiting':'staffing','proposal':'proposal','red_team':'proposal','content':'proposal','brief':'research','quality':'proposal','assembly':'proposal'};for(var k in m){if((a||'').indexOf(k)>=0)return m[k];}return 'other';}
-function tr(s,n){if(!s)return '';s=String(s);return s.length>n?s.slice(0,n)+'\u2026':s}
-function fd(d){if(!d)return '\u2014';try{var dt=new Date(d);if(isNaN(dt))return String(d).slice(0,20);return dt.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});}catch(e){return String(d).slice(0,20)}}
-function dtl(d){if(!d)return null;try{var dt=new Date(d);if(isNaN(dt))return null;return Math.ceil((dt-new Date())/(864e5));}catch(e){return null}}
-function ago(d){if(!d)return '';try{var dt=new Date(d);var mins=Math.floor((Date.now()-dt)/6e4);if(mins<60)return mins+'m';if(mins<1440)return Math.floor(mins/60)+'h';return Math.floor(mins/1440)+'d';}catch(e){return ''}}
+// Pipeline data
+const PIPELINE = [
+  { name: 'NOLA Water', opi: 94, stage: 'pursuing', due: 'Unsolicited', color: '#4ade80' },
+  { name: 'DR-4900 LA', opi: 92, stage: 'identified', due: 'TBD', color: '#facc15' },
+  { name: 'Washington Parish', opi: 88, stage: 'pursuing', due: 'May 8', color: '#00f0ff' },
+  { name: 'St. George', opi: 85, stage: 'watching', due: 'Apr 24', color: '#a78bfa' },
+  { name: 'BRIC Resilient', opi: 82, stage: 'identified', due: 'Jul 23', color: '#facc15' },
+  { name: 'DR-4899 MS', opi: 82, stage: 'identified', due: 'TBD', color: '#facc15' },
+  { name: 'OPSB CM', opi: 78, stage: 'new', due: 'Apr 30', color: '#f97316' },
+  { name: 'HTHA', opi: 78, stage: 'submitted', due: '—', color: '#4ade80' },
+  { name: 'JP SOQ', opi: 72, stage: 'pursuing', due: 'Apr 9', color: '#ef4444' }
+];
 
-var S={pipe:[],mems:[],comps:[],cts:[],loading:true,tab:'cop',sel:null,selMems:[],selPc:0,selReview:null,subTab:'overview',feedFilter:'all',expanded:{}};
+// Agent data
+const AGENTS = [
+  { name: 'Intel Engine', icon: '🔍', color: '#00f0ff', status: 'scanning', type: 'per-opp' },
+  { name: 'Financial', icon: '💰', color: '#4ade80', status: 'analyzing', type: 'per-opp' },
+  { name: 'Winnability', icon: '🎯', color: '#f97316', status: 'scoring', type: 'per-opp' },
+  { name: 'CRM', icon: '🤝', color: '#a78bfa', status: 'tracking', type: 'per-opp' },
+  { name: 'Quality Gate', icon: '✓', color: '#facc15', status: 'auditing', type: 'per-opp' },
+  { name: 'Staffing', icon: '👥', color: '#34d399', status: 'gated', type: 'gated' },
+  { name: 'Proposal', icon: '📝', color: '#60a5fa', status: 'gated', type: 'gated' },
+  { name: 'Red Team', icon: '🛡️', color: '#ef4444', status: 'gated', type: 'gated' },
+  { name: 'Price to Win', icon: '📊', color: '#c084fc', status: 'gated', type: 'gated' },
+  { name: 'Assembly', icon: '📦', color: '#fb923c', status: 'gated', type: 'gated' },
+  { name: 'Scanner', icon: '📡', color: '#22d3ee', status: 'monitoring', type: 'system' },
+  { name: 'Disaster Mon', icon: '⚡', color: '#f43f5e', status: 'watching', type: 'system' },
+  { name: 'Dashboard', icon: '📋', color: '#818cf8', status: 'compiling', type: 'system' },
+  { name: 'Amendments', icon: '📌', color: '#fbbf24', status: 'tracking', type: 'system' },
+  { name: 'Hunter', icon: '🎯', color: '#10b981', status: 'hunting', type: 'always' }
+];
 
-async function loadData(){
-  S.loading=true;render();
-  try{
-    var [pRaw,mems,comps,cts]=await Promise.all([
-      sb('/opportunities?status=neq.filtered&opi_score=gte.40&order=opi_score.desc&select=id,title,agency,opi_score,stage,due_date,status,rfp_document_retrieved,source_url'),
-      sb('/organism_memory?memory_type=neq.decision_point&memory_type=neq.compliance_matrix_data&memory_type=neq.rate_table_data&memory_type=neq.org_chart_data&order=created_at.desc&limit=50&select=agent,observation,created_at,memory_type,opportunity_id'),
-      sb('/competitive_intelligence?order=created_at.desc&limit=60&select=competitor_name,threat_level,strengths,weaknesses,opportunity_id,strategic_notes'),
-      sb('/relationship_graph?order=created_at.desc&limit=80&select=contact_name,title,organization,priority,contact_type,opportunity_id,email,phone,hgi_relationship,notes')
-    ]);
-    var pLens=await sb('/opportunities?status=neq.filtered&opi_score=gte.40&select=id,proposal_content,proposal_review');
-    var lenMap={};(pLens||[]).forEach(function(p){lenMap[p.id]={pLen:(p.proposal_content||'').length,rLen:(p.proposal_review||'').length}});
-    S.pipe=(pRaw||[]).map(function(o){var l=lenMap[o.id]||{};o.pLen=l.pLen||0;o.rLen=l.rLen||0;return o}).filter(function(o){return o.status!=='no_bid'&&o.status!=='filtered'});
-    S.mems=mems||[];S.comps=comps||[];S.cts=cts||[];S.loading=false;
-  }catch(e){S.loading=false;}
-  render();
+// Populate data panels
+const pipelineHTML = PIPELINE.map(p => {
+  const opiColor = p.opi >= 90 ? '#4ade80' : p.opi >= 80 ? '#00f0ff' : p.opi >= 70 ? '#facc15' : '#ef4444';
+  const urgent = p.due === 'Apr 9' ? ' style="color:#ef4444;font-weight:700"' : '';
+  return `<div class="opp-row">
+    <span class="opp-opi" style="color:${opiColor}">${p.opi}</span>
+    <span class="opp-name">${p.name}</span>
+    <span class="opp-due"${urgent}>${p.due}</span>
+  </div>`;
+}).join('');
+document.getElementById('pipeline-list').innerHTML = pipelineHTML;
+
+const agentsHTML = AGENTS.map(a => {
+  const statusColor = a.status === 'gated' ? 'rgba(255,255,255,0.25)' : a.color;
+  return `<div class="agent-row">
+    <span class="agent-dot" style="background:${a.color};box-shadow:0 0 4px ${a.color}"></span>
+    <span class="agent-name-text">${a.icon} ${a.name}</span>
+    <span class="agent-status-text" style="color:${statusColor}">${a.status}</span>
+  </div>`;
+}).join('');
+document.getElementById('agents-list').innerHTML = agentsHTML;
+
+// ═══════ THREE.JS SCENE ═══════
+const container = document.getElementById('canvas-container');
+const W = window.innerWidth;
+const H = window.innerHeight;
+
+// Scene
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x000510, 0.08);
+
+// Camera
+const camera = new THREE.PerspectiveCamera(55, W / H, 0.1, 100);
+camera.position.set(0, 0.8, 4.0);
+camera.lookAt(0, 0.3, 0);
+
+// Renderer
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setSize(W, H);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ReinhardToneMapping;
+renderer.toneMappingExposure = 1.2;
+container.appendChild(renderer.domElement);
+
+// CSS2D Renderer for agent labels
+const labelRenderer = new THREE.CSS2DRenderer();
+labelRenderer.setSize(W, H);
+labelRenderer.domElement.style.position = 'absolute';
+labelRenderer.domElement.style.top = '0';
+labelRenderer.domElement.style.pointerEvents = 'none';
+container.appendChild(labelRenderer.domElement);
+
+// Bloom post-processing
+const composer = new THREE.EffectComposer(renderer);
+const renderPass = new THREE.RenderPass(scene, camera);
+composer.addPass(renderPass);
+
+const bloomPass = new THREE.UnrealBloomPass(
+  new THREE.Vector2(W, H), 1.2, 0.5, 0.2
+);
+composer.addPass(bloomPass);
+
+// Controls
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.05;
+controls.enablePan = false;
+controls.minDistance = 2;
+controls.maxDistance = 6;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 0.3;
+controls.maxPolarAngle = Math.PI * 0.7;
+controls.minPolarAngle = Math.PI * 0.2;
+
+// ═══════ PLATFORM (glowing pedestal) ═══════
+function createPlatform() {
+  const group = new THREE.Group();
+  const platY = -0.8;
+
+  // Main disc with glow
+  const discGeo = new THREE.CylinderGeometry(2.0, 2.0, 0.03, 64);
+  const discMat = new THREE.MeshBasicMaterial({
+    color: 0x001a2a,
+    transparent: true,
+    opacity: 0.7
+  });
+  group.add(new THREE.Mesh(discGeo, discMat));
+  group.children[0].position.y = platY;
+
+  // Concentric glowing rings
+  for (let i = 0; i < 5; i++) {
+    const r = 0.4 + i * 0.38;
+    const ringGeo = new THREE.TorusGeometry(r, 0.008, 8, 64);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0x00f0ff,
+      transparent: true,
+      opacity: 0.15 + i * 0.05,
+      blending: THREE.AdditiveBlending
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = platY + 0.02;
+    group.add(ring);
+  }
+
+  // Outer bright edge ring
+  const outerGeo = new THREE.TorusGeometry(2.0, 0.015, 8, 64);
+  const outerMat = new THREE.MeshBasicMaterial({
+    color: 0x00f0ff,
+    transparent: true,
+    opacity: 0.4
+  });
+  const outer = new THREE.Mesh(outerGeo, outerMat);
+  outer.rotation.x = Math.PI / 2;
+  outer.position.y = platY + 0.02;
+  group.add(outer);
+
+  // Radial grid lines
+  for (let i = 0; i < 16; i++) {
+    const angle = (i / 16) * Math.PI * 2;
+    const points = [
+      new THREE.Vector3(Math.cos(angle) * 0.2, platY + 0.02, Math.sin(angle) * 0.2),
+      new THREE.Vector3(Math.cos(angle) * 1.95, platY + 0.02, Math.sin(angle) * 1.95)
+    ];
+    const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
+    const lineMat = new THREE.LineBasicMaterial({ color: 0x00f0ff, transparent: true, opacity: 0.08 });
+    group.add(new THREE.Line(lineGeo, lineMat));
+  }
+
+  return group;
 }
+scene.add(createPlatform());
 
-async function loadOppDetail(idx){
-  var opp=S.pipe[idx];S.sel=opp;S.selMems=[];S.selPc=opp.pLen||0;S.selReview=null;S.subTab='overview';render();
-  var [mems,det]=await Promise.all([
-    sb('/organism_memory?opportunity_id=eq.'+opp.id+'&memory_type=neq.decision_point&memory_type=neq.compliance_matrix_data&memory_type=neq.rate_table_data&memory_type=neq.org_chart_data&select=agent,observation,created_at,memory_type&order=created_at.desc&limit=60'),
-    sb('/opportunities?id=eq.'+opp.id+'&select=proposal_review&limit=1')
-  ]);
-  S.selMems=mems||[];
-  S.selReview=det&&det[0]&&det[0].proposal_review?det[0].proposal_review:null;
-  render();
+// ═══════ GLASS DOME (visible containment field) ═══════
+function createDome() {
+  const group = new THREE.Group();
+
+  // Dome shell — visible glass
+  const domeGeo = new THREE.SphereGeometry(1.8, 64, 32, 0, Math.PI * 2, 0, Math.PI * 0.55);
+  const domeMat = new THREE.MeshBasicMaterial({
+    color: 0x00f0ff,
+    transparent: true,
+    opacity: 0.04,
+    side: THREE.DoubleSide
+  });
+  const dome = new THREE.Mesh(domeGeo, domeMat);
+  dome.position.y = -0.2;
+  group.add(dome);
+
+  // Dome wireframe for glass panel look
+  const domeWireGeo = new THREE.SphereGeometry(1.81, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.55);
+  const domeWireMat = new THREE.MeshBasicMaterial({
+    color: 0x00f0ff,
+    wireframe: true,
+    transparent: true,
+    opacity: 0.06
+  });
+  const domeWire = new THREE.Mesh(domeWireGeo, domeWireMat);
+  domeWire.position.y = -0.2;
+  group.add(domeWire);
+
+  // Bottom edge ring — bright
+  const edgeGeo = new THREE.TorusGeometry(1.8, 0.02, 12, 64);
+  const edgeMat = new THREE.MeshBasicMaterial({
+    color: 0x00f0ff,
+    transparent: true,
+    opacity: 0.5
+  });
+  const edge = new THREE.Mesh(edgeGeo, edgeMat);
+  edge.rotation.x = Math.PI / 2;
+  edge.position.y = -0.2;
+  group.add(edge);
+
+  // Edge glow ring
+  const edgeGlowGeo = new THREE.TorusGeometry(1.8, 0.08, 12, 64);
+  const edgeGlowMat = new THREE.MeshBasicMaterial({
+    color: 0x00f0ff,
+    transparent: true,
+    opacity: 0.08,
+    blending: THREE.AdditiveBlending
+  });
+  const edgeGlow = new THREE.Mesh(edgeGlowGeo, edgeGlowMat);
+  edgeGlow.rotation.x = Math.PI / 2;
+  edgeGlow.position.y = -0.2;
+  group.add(edgeGlow);
+
+  return group;
 }
-function closeSel(){S.sel=null;render()}
-function setTab(t){S.tab=t;S.sel=null;render();window.scrollTo(0,0)}
-function setSubTab(t){S.subTab=t;render()}
-function setFeedFilter(f){S.feedFilter=f;render()}
-function toggleExpand(id){S.expanded[id]=!S.expanded[id];render()}
+scene.add(createDome());
 
-function bdg(text,color,mono){return '<span class="badge'+(mono?' m':'')+'" style="background:'+color+'15;color:'+color+'">'+text+'</span>'}
+// ═══════ AMBIENT PARTICLES ═══════
+function createParticles() {
+  const count = 600;
+  const positions = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
 
-function render(){
-  var a=document.getElementById('app');
-  var p=S.pipe;
-  var urgs=p.filter(function(o){var d=dtl(o.due_date);return d!==null&&d>=0&&d<=14&&o.stage!=='submitted'});
-  var propCount=p.filter(function(o){return o.pLen>100}).length;
-  // Consolidated competitors
-  var compMap={};S.comps.forEach(function(c){var n=c.competitor_name;if(!compMap[n]){compMap[n]={competitor_name:n,threat_level:c.threat_level,strengths:c.strengths||'',weaknesses:c.weaknesses||'',strategic_notes:c.strategic_notes||'',opps:1};}else{compMap[n].opps++;if((c.strengths||'').length>(compMap[n].strengths||'').length)compMap[n].strengths=c.strengths;if((c.weaknesses||'').length>(compMap[n].weaknesses||'').length)compMap[n].weaknesses=c.weaknesses;if((c.strategic_notes||'').length>(compMap[n].strategic_notes||'').length)compMap[n].strategic_notes=c.strategic_notes;}});
-  var tOrd={primary:0,secondary:1,emerging:2,watch:3};
-  var merged=Object.values(compMap).sort(function(a,b){return(tOrd[a.threat_level]||4)-(tOrd[b.threat_level]||4)});
-  var h='';
+  for (let i = 0; i < count; i++) {
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.random() * Math.PI * 0.5;
+    const r = 0.5 + Math.random() * 1.5;
+    positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+    positions[i * 3 + 1] = -0.5 + r * Math.cos(phi);
+    positions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
 
-  // HEADER
-  h+='<div class="hdr"><div style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:center;gap:14px"><div class="logo">H</div><div><div style="font-size:15px;font-weight:700;color:var(--t3);letter-spacing:0.12em">HGI ORGANISM</div><div class="m" style="font-size:9px;color:rgba(212,168,67,0.4);letter-spacing:0.15em;font-weight:600;margin-top:2px">'+(S.loading?'SYNCING\u2026':'V4.2 \u00B7 '+p.length+' OPS \u00B7 15 AGENTS')+'</div></div></div><div style="display:flex;align-items:center;gap:10px">'+(S.loading?'':'<div class="dot"></div><span class="m" style="font-size:9px;color:#22c55e;font-weight:600">LIVE</span>')+'<button class="btn m" onclick="loadData()">\u21BB</button></div></div></div>';
-
-  // METRICS
-  var mcs=[{l:'PIPELINE',v:p.length,s:propCount+' proposals',c:'#38bdf8'},{l:'INTEL',v:S.mems.length,s:'findings',c:'#d4a843'},{l:'THREATS',v:merged.length,s:'tracked',c:'#f97316'},{l:'CONTACTS',v:S.cts.length,s:'mapped',c:'#22c55e'}];
-  h+='<div class="metrics">';
-  mcs.forEach(function(m){h+='<div class="mc"><div style="position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,'+m.c+',transparent);border-radius:12px 12px 0 0"></div><div class="m" style="font-size:9px;color:#555;letter-spacing:0.1em;font-weight:600">'+m.l+'</div><div class="m mc-v">'+m.v+'</div><div class="m" style="font-size:9px;color:#444;margin-top:3px">'+m.s+'</div></div>'});
-  h+='</div>';
-
-  // ALERTS
-  if(urgs.length>0){
-    h+='<div class="alert"><div class="m" style="color:#ef4444;margin-bottom:6px;font-size:9px;font-weight:700;letter-spacing:0.1em">\u26A0 UPCOMING DEADLINES</div>';
-    urgs.forEach(function(o){var dl=dtl(o.due_date);
-      h+='<div style="font-size:12px;color:var(--t2);padding:4px 0;display:flex;gap:8px;align-items:baseline"><span class="m" style="color:#ef4444;font-weight:800;font-size:14px;min-width:28px">'+dl+'d</span><span>'+tr(o.title,38)+'</span></div>';
-    });
-    h+='</div>';
+    const c = new THREE.Color().setHSL(0.52 + Math.random() * 0.08, 1, 0.5 + Math.random() * 0.3);
+    colors[i * 3] = c.r;
+    colors[i * 3 + 1] = c.g;
+    colors[i * 3 + 2] = c.b;
   }
 
-  // TABS
-  var tabs=[{id:'cop',l:'PIPELINE'},{id:'feed',l:'FEED'},{id:'rivals',l:'RIVALS'},{id:'crm',l:'CRM'}];
-  h+='<div class="tabs">';tabs.forEach(function(t){h+='<button class="tab m'+(S.tab===t.id?' a':'')+'" onclick="setTab(\''+t.id+'\')">'+t.l+'</button>'});h+='</div>';
-  h+='<div class="cnt">';
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
-  if(S.loading){h+='<div style="text-align:center;padding:60px;color:#333"><div class="m" style="font-size:12px;letter-spacing:0.15em">SYNCHRONIZING</div><div style="margin-top:12px;width:80px;height:2px;background:linear-gradient(90deg,transparent,var(--gold),transparent);margin:12px auto;animation:shimmer 1.5s ease infinite;background-size:200% auto"></div></div>';}
+  const mat = new THREE.PointsMaterial({
+    size: 0.015,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.6,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false
+  });
 
-  // ═══ PIPELINE ═══
-  else if(S.tab==='cop'){
-    h+='<div class="m sh"><span>ACTIVE ('+p.length+')</span><span style="color:#333">BY OPI \u2193</span></div>';
-    p.forEach(function(o,i){
-      var sc=SC[o.stage]||'#555';var dl=dtl(o.due_date);var urg=dl!==null&&dl>=0&&dl<=10&&o.stage!=='submitted';
-      h+='<div class="opp" style="border-left:3px solid '+oc(o.opi_score)+'" onclick="loadOppDetail('+i+')">';
-      h+='<div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:8px"><div style="font-size:13px;font-weight:600;color:var(--t3);line-height:1.35;flex:1">'+tr(o.title,52)+'</div><div class="m" style="font-size:28px;font-weight:800;color:'+oc(o.opi_score)+';line-height:1;letter-spacing:-1.5px;flex-shrink:0">'+o.opi_score+'</div></div>';
-      h+='<div style="display:flex;flex-wrap:wrap;gap:4px">'+bdg(o.stage||'new',sc);
-      if(!o.rfp_document_retrieved)h+=bdg('NO RFP','#f87171');
-      if(o.pLen>100)h+=bdg('\u2713 '+Math.round(o.pLen/1000)+'K','#22c55e',1);
-      if(o.rLen>100)h+=bdg('REVIEWED','#a855f7');
-      if(urg)h+=bdg('\u26A0 '+dl+'d','#ef4444',1);
-      else if(dl!==null&&dl>10)h+=bdg(dl+'d','#555',1);
-      h+='</div>';
-      if(o.agency)h+='<div class="m" style="font-size:10px;color:#444;margin-top:6px">'+tr(o.agency,48)+'</div>';
-      h+='</div>';
+  return new THREE.Points(geo, mat);
+}
+const particles = createParticles();
+scene.add(particles);
+
+// ═══════ BRAIN REGIONS — specific connection points ═══════
+const BRAIN_REGIONS = {
+  'Intel Engine':  { x: 0.0,  y: 0.85, z: 0.45,  region: 'Prefrontal' },
+  'Financial':     { x:-0.4,  y: 0.55, z: 0.3,   region: 'L-Temporal' },
+  'Winnability':   { x: 0.0,  y: 0.95, z: 0.15,  region: 'Motor Cortex' },
+  'CRM':           { x: 0.4,  y: 0.55, z: 0.3,   region: 'R-Temporal' },
+  'Quality Gate':  { x: 0.0,  y: 0.8,  z:-0.35,  region: 'Parietal' },
+  'Staffing':      { x:-0.35, y: 0.75, z: 0.2,   region: 'L-Frontal' },
+  'Proposal':      { x: 0.35, y: 0.75, z: 0.2,   region: 'R-Frontal' },
+  'Red Team':      { x: 0.0,  y: 0.5,  z:-0.45,  region: 'Occipital' },
+  'Price to Win':  { x:-0.3,  y: 0.7,  z:-0.2,   region: 'L-Parietal' },
+  'Assembly':      { x: 0.3,  y: 0.7,  z:-0.2,   region: 'R-Parietal' },
+  'Scanner':       { x: 0.0,  y: 0.15, z:-0.2,   region: 'Cerebellum' },
+  'Disaster Mon':  { x: 0.0,  y: 0.45, z: 0.0,   region: 'Amygdala' },
+  'Dashboard':     { x: 0.0,  y: 0.65, z: 0.0,   region: 'Corpus Callosum' },
+  'Amendments':    { x: 0.0,  y: 0.05, z:-0.05,  region: 'Brainstem' },
+  'Hunter':        { x: 0.0,  y: 0.7,  z: 0.5,   region: 'Frontal Pole' }
+};
+
+// Synapse nodes on the brain surface
+function createSynapseNodes() {
+  AGENTS.forEach(a => {
+    const br = BRAIN_REGIONS[a.name];
+    if (!br) return;
+    // Outer glow sphere
+    const glowGeo = new THREE.SphereGeometry(0.06, 12, 12);
+    const glowMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(a.color),
+      transparent: true,
+      opacity: 0.8,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      depthTest: false
     });
-  }
-
-  // ═══ FEED ═══
-  else if(S.tab==='feed'){
-    var cats=['all','competitive','financial','research','proposal','staffing','crm'];
-    h+='<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px">';
-    cats.forEach(function(c){h+='<div class="pill m'+(S.feedFilter===c?' a':'')+'" onclick="setFeedFilter(\''+c+'\')">'+c.toUpperCase()+'</div>'});
-    h+='</div>';
-    var filtered=S.mems.filter(function(m){return S.feedFilter==='all'||mc(m.agent)===S.feedFilter});
-    h+='<div class="m" style="font-size:9px;color:#444;margin-bottom:8px">'+filtered.length+' of '+S.mems.length+' findings</div>';
-    filtered.forEach(function(m){var c=ac(m.agent);
-      h+='<div class="mem" style="border-left:2px solid '+c+'"><div style="display:flex;justify-content:space-between;margin-bottom:3px"><span class="m" style="font-size:9px;font-weight:700;color:'+c+';text-transform:uppercase;letter-spacing:0.1em">'+(m.agent||'?').replace(/_/g,' ')+'</span><span class="m" style="font-size:9px;color:#333">'+ago(m.created_at)+'</span></div><div style="font-size:12px;color:#777;line-height:1.45">'+tr(m.observation,200)+'</div></div>';
+    const glow = new THREE.Mesh(glowGeo, glowMat);
+    glow.position.set(br.x, br.y, br.z);
+    scene.add(glow);
+    // Inner bright core
+    const coreGeo = new THREE.SphereGeometry(0.025, 8, 8);
+    const coreMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 1.0,
+      depthWrite: false,
+      depthTest: false
     });
-    if(filtered.length===0)h+='<div style="text-align:center;padding:30px;color:#444;font-size:11px">No findings in this category</div>';
-  }
+    const core = new THREE.Mesh(coreGeo, coreMat);
+    core.position.set(br.x, br.y, br.z);
+    scene.add(core);
+  });
+}
+createSynapseNodes();
 
-  // ═══ RIVALS ═══
-  else if(S.tab==='rivals'){
-    h+='<div class="m sh">COMPETITIVE LANDSCAPE ('+merged.length+')</div>';
-    merged.forEach(function(c,ci){
-      var tc=TC[c.threat_level]||'#64748b';var eid='c-'+ci;var isO=S.expanded[eid];
-      h+='<div class="thr" style="border-left:3px solid '+tc+'" onclick="toggleExpand(\''+eid+'\')">';
-      h+='<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:13px;font-weight:600;color:var(--t3)">'+c.competitor_name+'</span><div style="display:flex;gap:5px;align-items:center">';
-      if(c.opps>1)h+=bdg(c.opps+' OPPS','#666',1);
-      if(c.threat_level)h+=bdg(c.threat_level,tc);
-      h+='<span style="font-size:14px;color:#444;transform:rotate('+(isO?'90':'0')+'deg);display:inline-block;transition:transform 0.2s">\u25B8</span></div></div>';
-      if(!isO&&c.strengths)h+='<div style="font-size:11px;color:#555;margin-top:5px;line-height:1.35">'+tr(c.strengths,85)+'</div>';
-      h+='<div class="ex'+(isO?' o':'')+'" style="margin-top:'+(isO?'10':'0')+'px">';
-      if(c.strengths)h+='<div style="margin-bottom:8px"><div class="m" style="font-size:8px;color:#22c55e;font-weight:700;margin-bottom:3px">STRENGTHS</div><div style="font-size:11px;color:#777;line-height:1.45">'+c.strengths+'</div></div>';
-      if(c.weaknesses)h+='<div style="margin-bottom:8px"><div class="m" style="font-size:8px;color:#ef4444;font-weight:700;margin-bottom:3px">WEAKNESSES</div><div style="font-size:11px;color:#777;line-height:1.45">'+c.weaknesses+'</div></div>';
-      if(c.strategic_notes)h+='<div><div class="m" style="font-size:8px;color:var(--gold);font-weight:700;margin-bottom:3px">STRATEGY</div><div style="font-size:11px;color:#777;line-height:1.45">'+tr(c.strategic_notes,350)+'</div></div>';
-      h+='</div></div>';
+// ═══════ ENERGY TRACES (agent → specific brain region) ═══════
+const traceLines = [];
+function createEnergyTraces() {
+  AGENTS.forEach((a, i) => {
+    const angle = (i / AGENTS.length) * Math.PI * 2;
+    const agentR = 0.95;
+    const agentY = 0.15 + (i % 3) * 0.18;
+    const agentPos = new THREE.Vector3(
+      agentR * Math.cos(angle), agentY, agentR * Math.sin(angle)
+    );
+
+    const br = BRAIN_REGIONS[a.name];
+    if (!br) return;
+    const brainPos = new THREE.Vector3(br.x, br.y, br.z);
+
+    // Build curved path from agent → brain region
+    const mid = new THREE.Vector3().lerpVectors(agentPos, brainPos, 0.5);
+    mid.y += 0.15; // slight arc upward
+    const curve = new THREE.CatmullRomCurve3([agentPos, mid, brainPos]);
+
+    const color = new THREE.Color(a.color);
+
+    // Main trace line (renders on top of brain)
+    const geo = new THREE.TubeGeometry(curve, 24, 0.012, 6, false);
+    const mat = new THREE.MeshBasicMaterial({
+      color: color,
+      transparent: true,
+      opacity: 0.7,
+      depthWrite: false,
+      depthTest: false
     });
-    if(merged.length===0)h+='<div style="text-align:center;padding:30px;color:#444;font-size:11px">No competitor data</div>';
-  }
+    const mesh = new THREE.Mesh(geo, mat);
+    scene.add(mesh);
 
-  // ═══ CRM ═══
-  else if(S.tab==='crm'){
-    var ctT={};S.cts.forEach(function(c){var t=c.contact_type||'other';ctT[t]=(ctT[t]||0)+1});
-    var tClr={decision_maker:'#ef4444',evaluator:'#f97316',procurement:'#eab308',technical:'#38bdf8',political:'#a855f7',influencer:'#ec4899',other:'#64748b'};
-    h+='<div class="m sh">RELATIONSHIP MAP ('+S.cts.length+')</div>';
-    h+='<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px">';
-    Object.keys(ctT).forEach(function(t){var c=tClr[t]||'#64748b';h+=bdg(t.replace(/_/g,' ')+' ('+ctT[t]+')',c)});
-    h+='</div>';
-    S.cts.forEach(function(c,ci){
-      var pc={critical:'#ef4444',high:'#f97316',medium:'#eab308',low:'#64748b'}[c.priority]||'#64748b';
-      var tc2=tClr[c.contact_type]||'#64748b';var eid='ct-'+ci;var isO=S.expanded[eid];
-      h+='<div class="ct" style="border-top:2px solid '+pc+'" onclick="toggleExpand(\''+eid+'\')">';
-      h+='<div style="display:flex;justify-content:space-between;align-items:center"><div><div style="font-size:12px;font-weight:600;color:var(--t3)">'+tr(c.contact_name,28)+'</div>';
-      if(c.title)h+='<div style="font-size:10px;color:#666;margin-top:2px">'+tr(c.title,38)+'</div>';
-      h+='</div><div style="display:flex;gap:5px;align-items:center">';
-      if(c.contact_type)h+=bdg(c.contact_type.replace(/_/g,' '),tc2);
-      h+='<span style="font-size:14px;color:#444;transform:rotate('+(isO?'90':'0')+'deg);display:inline-block;transition:transform 0.2s">\u25B8</span></div></div>';
-      h+='<div class="ex'+(isO?' o':'')+'" style="margin-top:'+(isO?'8':'0')+'px">';
-      if(c.organization)h+='<div style="font-size:10px;color:#666;margin-top:2px">\u{1F3E2} '+c.organization+'</div>';
-      if(c.email)h+='<div style="font-size:10px;color:#4a9eff;margin-top:3px">\u2709 '+c.email+'</div>';
-      if(c.phone)h+='<div style="font-size:10px;color:#888;margin-top:3px">\u260E '+c.phone+'</div>';
-      if(c.hgi_relationship)h+='<div style="font-size:10px;margin-top:5px"><span class="m" style="font-size:8px;color:#555">RELATIONSHIP:</span> <span style="color:'+(c.hgi_relationship==='warm'?'#22c55e':c.hgi_relationship==='cold'?'#ef4444':'#eab308')+'">'+c.hgi_relationship+'</span></div>';
-      if(c.notes)h+='<div style="font-size:10px;color:#666;margin-top:5px;line-height:1.35">'+tr(c.notes,200)+'</div>';
-      h+='</div></div>';
+    // Glow around trace
+    const glowGeo = new THREE.TubeGeometry(curve, 24, 0.04, 6, false);
+    const glowMat = new THREE.MeshBasicMaterial({
+      color: color,
+      transparent: true,
+      opacity: 0.15,
+      blending: THREE.AdditiveBlending
     });
-    if(S.cts.length===0)h+='<div style="text-align:center;padding:30px;color:#444;font-size:11px">No contacts mapped</div>';
-  }
+    const glowMesh = new THREE.Mesh(glowGeo, glowMat);
+    scene.add(glowMesh);
 
-  h+='</div>'; // end content
+    // Traveling pulse
+    const pulseGeo = new THREE.SphereGeometry(0.025, 8, 8);
+    const pulseMat = new THREE.MeshBasicMaterial({
+      color: color,
+      transparent: true,
+      opacity: 0.9,
+      blending: THREE.AdditiveBlending
+    });
+    const pulse = new THREE.Mesh(pulseGeo, pulseMat);
+    scene.add(pulse);
 
-  // ═══ DETAIL OVERLAY ═══
-  if(S.sel){
-    var s=S.sel;var dl=dtl(s.due_date);
-    h+='<div class="ov">';
-    h+='<div class="ov-h"><div class="ov-b" onclick="closeSel()">\u2190</div><div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:700;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+tr(s.title,38)+'</div><div class="m" style="font-size:9px;color:#555;margin-top:2px">OPI '+s.opi_score+' \u00B7 '+(s.stage||'new')+' \u00B7 '+fd(s.due_date)+(dl!==null&&dl>=0?' \u00B7 '+dl+'d':'')+'</div></div></div>';
-    var stabs=[{id:'overview',l:'OVERVIEW'},{id:'competitive',l:'INTEL'},{id:'financial',l:'FINANCIAL'},{id:'research',l:'RESEARCH'},{id:'proposal',l:'PROPOSAL'},{id:'staffing',l:'STAFFING'},{id:'crm',l:'CRM'}];
-    h+='<div class="st">';stabs.forEach(function(st){var cnt=st.id==='overview'?'':S.selMems.filter(function(m){return mc(m.agent)===st.id}).length;h+='<button class="stb m'+(S.subTab===st.id?' a':'')+'" onclick="setSubTab(\''+st.id+'\')">'+st.l+(cnt?' ('+cnt+')':'')+'</button>'});h+='</div>';
-    h+='<div style="padding:16px">';
+    traceLines.push({ mesh, glowMesh, pulse, curve, agent: a, phase: i * 0.3, agentAngle: angle, agentR, agentY });
+  });
+}
+createEnergyTraces();
 
-    if(S.subTab==='overview'){
-      h+='<div class="dg">';
-      h+='<div class="ds"><div class="m" style="font-size:9px;color:#555;letter-spacing:0.1em;font-weight:600">OPI SCORE</div><div class="m" style="font-size:24px;font-weight:800;color:'+oc(s.opi_score)+';margin-top:4px">'+s.opi_score+'</div></div>';
-      h+='<div class="ds"><div class="m" style="font-size:9px;color:#555;letter-spacing:0.1em;font-weight:600">DEADLINE</div><div class="m" style="font-size:16px;color:'+(dl!==null&&dl<=14?'#ef4444':'#999')+';margin-top:6px;font-weight:700">'+(dl!==null?dl+' days':'TBD')+'</div></div>';
-      h+='<div class="ds"><div class="m" style="font-size:9px;color:#555;letter-spacing:0.1em;font-weight:600">PROPOSAL</div><div class="m" style="font-size:16px;color:'+(S.selPc>100?'#22c55e':'#ef4444')+';margin-top:6px;font-weight:700">'+(S.selPc>100?Math.round(S.selPc/1000)+'K chars':'NONE')+'</div></div>';
-      h+='<div class="ds"><div class="m" style="font-size:9px;color:#555;letter-spacing:0.1em;font-weight:600">INTEL</div><div class="m" style="font-size:16px;color:var(--gold);margin-top:6px;font-weight:700">'+S.selMems.length+' findings</div></div>';
-      h+='</div>';
-      if(s.agency)h+='<div style="font-size:11px;color:#666;margin-bottom:14px"><span style="font-weight:600;color:#555">Agency:</span> '+s.agency+'</div>';
+// ═══════ AGENT CSS2D LABELS ═══════
+const agentLabels = [];
+function createAgentLabels() {
+  AGENTS.forEach((a, i) => {
+    const angle = (i / AGENTS.length) * Math.PI * 2;
+    const r = 0.95;
+    const y = 0.15 + (i % 3) * 0.18;
 
-      // Red team
-      if(S.selReview){var rv=S.selReview;var fl=rv.split('\n')[0]||'';var cm=fl.match(/(\d+)\s*critical/i);var mm=fl.match(/(\d+)\s*major/i);var rc=cm?parseInt(cm[1]):0;var rm=mm?parseInt(mm[1]):0;var rvC=rc>0?'#ef4444':rm>3?'#f97316':'#22c55e';
-        h+='<div style="background:var(--s1);border-radius:10px;padding:14px;margin-bottom:14px;border:1px solid var(--b1);border-left:3px solid '+rvC+'">';
-        h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span class="m" style="font-size:10px;color:'+rvC+';font-weight:700">\u26A0 RED TEAM</span><div style="display:flex;gap:4px">';
-        if(rc>0)h+=bdg(rc+' CRIT','#ef4444',1);if(rm>0)h+=bdg(rm+' MAJOR','#f97316',1);
-        h+='</div></div><div style="font-size:11px;color:#777;max-height:180px;overflow-y:auto;line-height:1.45;white-space:pre-wrap">'+tr(rv,1500)+'</div></div>';
-      }
+    const div = document.createElement('div');
+    div.className = 'agent-label';
+    div.style.setProperty('--agent-color', a.color);
+    div.innerHTML = `
+      <div class="icon-ring" style="border-color:${a.color};color:${a.color}">${a.icon}</div>
+      <div class="name">${a.name}</div>
+    `;
+    div.addEventListener('click', (e) => {
+      e.stopPropagation();
+      onAgentClick(a);
+    });
 
-      // Agent coverage
-      var cats2={};S.selMems.forEach(function(m){var c=mc(m.agent);cats2[c]=(cats2[c]||0)+1});
-      h+='<div class="m sh">AGENT COVERAGE</div>';
-      h+='<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:14px">';
-      Object.keys(cats2).forEach(function(k){h+='<div class="pill a m" onclick="setSubTab(\''+k+'\')">'+k.toUpperCase()+' ('+cats2[k]+')</div>'});
-      h+='</div>';
-      h+='<div class="m sh">LATEST INTEL</div>';
-      S.selMems.slice(0,6).forEach(function(m){var c=ac(m.agent);h+='<div class="mem" style="border-left:2px solid '+c+'"><div style="display:flex;justify-content:space-between;margin-bottom:3px"><span class="m" style="font-size:9px;font-weight:700;color:'+c+';text-transform:uppercase;letter-spacing:0.1em">'+(m.agent||'?').replace(/_/g,' ')+'</span><span class="m" style="font-size:9px;color:#333">'+ago(m.created_at)+'</span></div><div style="font-size:12px;color:#777;line-height:1.45">'+tr(m.observation,160)+'</div></div>'});
+    const label = new THREE.CSS2DObject(div);
+    label.position.set(
+      r * Math.cos(angle),
+      y,
+      r * Math.sin(angle)
+    );
+    scene.add(label);
+    agentLabels.push({ label, baseAngle: angle, radius: r, baseY: y, idx: i });
+  });
+}
+createAgentLabels();
 
-    } else {
-      var catMems=S.selMems.filter(function(m){return mc(m.agent)===S.subTab});
-      h+='<div class="m" style="font-size:9px;color:#555;margin-bottom:10px">'+catMems.length+' findings in '+S.subTab.toUpperCase()+'</div>';
-      if(catMems.length===0)h+='<div style="text-align:center;padding:30px;color:#444;font-size:11px">No '+S.subTab+' intel for this opportunity</div>';
-      catMems.forEach(function(m){var c=ac(m.agent);h+='<div class="mem" style="border-left:2px solid '+c+'"><div style="display:flex;justify-content:space-between;margin-bottom:3px"><span class="m" style="font-size:9px;font-weight:700;color:'+c+';text-transform:uppercase;letter-spacing:0.1em">'+(m.agent||'?').replace(/_/g,' ')+'</span><span class="m" style="font-size:9px;color:#333">'+ago(m.created_at)+'</span></div><div style="font-size:12px;color:#777;line-height:1.45">'+tr(m.observation,350)+'</div></div>'});
+// ═══════ PROCEDURAL BRAIN (renders everywhere) ═══════
+let brainMesh = null;
+
+function createBrain() {
+  const group = new THREE.Group();
+
+  // High-poly sphere with noise displacement for sulci/folds
+  function makeHemisphere(isLeft) {
+    const geo = new THREE.SphereGeometry(0.6, 48, 32, 
+      isLeft ? 0 : Math.PI, Math.PI, 0, Math.PI);
+    const pos = geo.attributes.position;
+    
+    // Multi-frequency noise for brain folds
+    for (let i = 0; i < pos.count; i++) {
+      let x = pos.getX(i);
+      let y = pos.getY(i);
+      let z = pos.getZ(i);
+      
+      // Primary sulci (deep folds)
+      const n1 = Math.sin(x * 12 + y * 8) * Math.cos(z * 10) * 0.04;
+      // Secondary gyri (ridges)  
+      const n2 = Math.sin(x * 20 + z * 15) * Math.cos(y * 18) * 0.025;
+      // Tertiary detail
+      const n3 = Math.sin(x * 35 + y * 30 + z * 25) * 0.01;
+      // Overall brain shape: wider at top, narrower at bottom
+      const shapeY = 1 + y * 0.15;
+      // Frontal lobe bulge
+      const frontal = z > 0 ? 1.05 : 1.0;
+      
+      const displacement = n1 + n2 + n3;
+      const r = Math.sqrt(x*x + y*y + z*z);
+      const nx = x/r, ny = y/r, nz = z/r;
+      
+      pos.setXYZ(i, 
+        (x + nx * displacement) * frontal,
+        (y + ny * displacement) * shapeY,
+        z + nz * displacement
+      );
     }
-    h+='</div></div>'; // close overlay
+    geo.computeVertexNormals();
+    return geo;
   }
-
-  // FOOTER
-  h+='<div style="padding:12px 18px;border-top:1px solid rgba(255,255,255,0.04);display:flex;justify-content:space-between;align-items:center"><span class="m" style="font-size:9px;color:#333">HGI GLOBAL \u00B7 EST 1931</span><span class="m" style="font-size:9px;color:#222">'+new Date().toLocaleTimeString()+'</span></div>';
-
-  a.innerHTML=h;
-  if(!S.sel)window.scrollTo(0,0);
+  
+  // Left hemisphere
+  const leftGeo = makeHemisphere(true);
+  const brainMat = new THREE.MeshBasicMaterial({
+    color: 0x00ccee,
+    transparent: true,
+    opacity: 0.12
+  });
+  const left = new THREE.Mesh(leftGeo, brainMat);
+  left.position.x = -0.03;
+  group.add(left);
+  
+  // Right hemisphere
+  const rightGeo = makeHemisphere(false);
+  const right = new THREE.Mesh(rightGeo, brainMat.clone());
+  right.position.x = 0.03;
+  group.add(right);
+  
+  // Wireframe overlay for holographic look
+  [left, right].forEach(hemi => {
+    const wire = new THREE.Mesh(hemi.geometry.clone(), new THREE.MeshBasicMaterial({
+      color: 0x00f0ff,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.1
+    }));
+    wire.position.copy(hemi.position);
+    group.add(wire);
+  });
+  
+  // Inner glow core
+  const coreGeo = new THREE.SphereGeometry(0.3, 16, 16);
+  const coreMat = new THREE.MeshBasicMaterial({
+    color: 0x00f0ff,
+    transparent: true,
+    opacity: 0.06,
+    blending: THREE.AdditiveBlending
+  });
+  group.add(new THREE.Mesh(coreGeo, coreMat));
+  
+  // Brainstem
+  const stemGeo = new THREE.CylinderGeometry(0.12, 0.08, 0.35, 12);
+  const stemMat = new THREE.MeshBasicMaterial({
+    color: 0x00aacc,
+    transparent: true,
+    opacity: 0.5
+  });
+  const stem = new THREE.Mesh(stemGeo, stemMat);
+  stem.position.y = -0.55;
+  stem.position.z = -0.1;
+  group.add(stem);
+  
+  // Cerebellum (back bump)
+  const cerebGeo = new THREE.SphereGeometry(0.28, 24, 16);
+  const cerebPos = cerebGeo.attributes.position;
+  for (let i = 0; i < cerebPos.count; i++) {
+    const x = cerebPos.getX(i), y = cerebPos.getY(i), z = cerebPos.getZ(i);
+    const ripple = Math.sin(x * 30) * Math.cos(y * 25) * 0.02;
+    cerebPos.setXYZ(i, x + ripple, y * 0.7 + ripple, z + ripple);
+  }
+  cerebGeo.computeVertexNormals();
+  const cerebellum = new THREE.Mesh(cerebGeo, brainMat.clone());
+  cerebellum.position.set(0, -0.35, -0.25);
+  group.add(cerebellum);
+  
+  group.position.y = 0.35;
+  group.userData.baseScale = 1;
+  scene.add(group);
+  brainMesh = group;
+  
+  // Point light inside brain for glow
+  const innerLight = new THREE.PointLight(0x00f0ff, 0.8, 3);
+  innerLight.position.set(0, 0.35, 0);
+  scene.add(innerLight);
+  
+  // Remove loading screen
+  const loadEl = document.getElementById('loading');
+  loadEl.style.opacity = '0';
+  setTimeout(() => loadEl.style.display = 'none', 500);
 }
 
-loadData();
-setInterval(loadData,300000);
+createBrain();
+
+// Ambient light
+scene.add(new THREE.AmbientLight(0x112233, 0.5));
+
+// ═══════ ANIMATION LOOP ═══════
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+
+  // Rotate brain slowly
+  if (brainMesh) {
+    brainMesh.rotation.y = t * 0.1;
+    // Gentle breathing
+    const breathe = 1 + Math.sin(t * 0.8) * 0.02;
+    const bs = brainMesh.userData.baseScale || 1;
+    brainMesh.scale.set(breathe * bs, breathe * bs, breathe * bs);
+  }
+
+  // Animate particles
+  const pPos = particles.geometry.attributes.position;
+  for (let i = 0; i < pPos.count; i++) {
+    let y = pPos.getY(i);
+    y += 0.001;
+    if (y > 1.5) y = -0.5;
+    pPos.setY(i, y);
+  }
+  pPos.needsUpdate = true;
+  particles.rotation.y = t * 0.02;
+
+  // Pulse energy traces + traveling particles
+  traceLines.forEach((tl, i) => {
+    const pulse = 0.3 + Math.sin(t * 2 + i * 0.5) * 0.15;
+    tl.mesh.material.opacity = pulse;
+    tl.glowMesh.material.opacity = pulse * 0.2;
+    
+    // Traveling pulse along curve (agent → brain region)
+    const progress = ((t * 0.4 + tl.phase) % 1);
+    const pt = tl.curve.getPoint(progress);
+    tl.pulse.position.copy(pt);
+    tl.pulse.material.opacity = 0.7 + Math.sin(t * 8) * 0.3;
+    const pScale = 0.8 + Math.sin(t * 6 + i) * 0.4;
+    tl.pulse.scale.setScalar(pScale);
+  });
+
+  // Gentle bob on agent labels (no orbit — keeps traces connected)
+  agentLabels.forEach((al) => {
+    al.label.position.y = al.baseY + Math.sin(t * 0.5 + al.idx) * 0.03;
+  });
+
+  controls.update();
+  composer.render();
+  labelRenderer.render(scene, camera);
+}
+
+animate();
+
+// Resize
+window.addEventListener('resize', () => {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+  labelRenderer.setSize(w, h);
+  composer.setSize(w, h);
+});
+
+// ═══════ INTERACTION — tap to see detail ═══════
+const API_BASE = window.location.origin;
+const overlay = document.getElementById('detail-overlay');
+const detailTitle = document.getElementById('detail-title');
+const detailBody = document.getElementById('detail-body');
+
+document.getElementById('detail-close').addEventListener('click', () => {
+  overlay.classList.remove('open');
+});
+
+// Close on tap outside
+overlay.addEventListener('click', (e) => {
+  if (e.target === overlay) overlay.classList.remove('open');
+});
+
+function showDetail(title, html) {
+  detailTitle.textContent = title;
+  detailBody.innerHTML = html;
+  overlay.classList.add('open');
+}
+
+function showLoading(title) {
+  detailTitle.textContent = title;
+  detailBody.innerHTML = '<div class="detail-loading">QUERYING ORGANISM...</div>';
+  overlay.classList.add('open');
+}
+
+// Agent click handler
+function onAgentClick(agent) {
+  showLoading(agent.name.toUpperCase());
+  
+  fetch(API_BASE + '/api/memories?limit=50')
+    .then(r => r.json())
+    .then(memories => {
+      // Filter to this agent type
+      const agentKey = agent.name.toLowerCase().replace(/\s+/g, '_');
+      const relevant = (memories || []).filter(m => {
+        const a = (m.agent || '').toLowerCase();
+        return a.includes(agentKey) || a.includes(agent.name.toLowerCase().split(' ')[0]);
+      }).slice(0, 5);
+      
+      if (relevant.length === 0) {
+        showDetail(agent.name.toUpperCase(), `
+          <div style="color:${agent.color}">
+            <span class="detail-tag" style="background:${agent.color}22;border:1px solid ${agent.color}">${agent.type}</span>
+            <span class="detail-tag" style="background:${agent.status === 'gated' ? '#ffffff11' : agent.color + '22'};border:1px solid ${agent.status === 'gated' ? '#ffffff33' : agent.color}">${agent.status}</span>
+          </div>
+          <p style="margin-top:10px;color:rgba(255,255,255,0.5)">No recent memories from this agent. ${agent.status === 'gated' ? 'Agent is gated — requires RFP document to activate.' : 'Run /api/trigger to generate fresh analysis.'}</p>
+        `);
+      } else {
+        const memHTML = relevant.map(m => `
+          <div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05)">
+            <div style="font-size:9px;color:rgba(255,255,255,0.35);margin-bottom:3px">${new Date(m.created_at).toLocaleDateString()} — ${m.opportunity_id ? m.opportunity_id.split('-').slice(0,3).join('-') : 'system'}</div>
+            <div style="font-size:11px;color:rgba(255,255,255,0.75)">${(m.observation || '').substring(0, 300)}${(m.observation || '').length > 300 ? '...' : ''}</div>
+          </div>
+        `).join('');
+        
+        showDetail(agent.name.toUpperCase(), `
+          <div style="margin-bottom:8px">
+            <span class="detail-tag" style="background:${agent.color}22;border:1px solid ${agent.color}">${agent.type}</span>
+            <span class="detail-tag" style="background:${agent.color}22;border:1px solid ${agent.color}">${agent.status}</span>
+            <span class="detail-tag" style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15)">${relevant.length} recent</span>
+          </div>
+          ${memHTML}
+        `);
+      }
+    })
+    .catch(() => {
+      showDetail(agent.name.toUpperCase(), `
+        <div style="color:${agent.color}">
+          <span class="detail-tag" style="background:${agent.color}22;border:1px solid ${agent.color}">${agent.type}</span>
+          <span class="detail-tag" style="background:${agent.color}22;border:1px solid ${agent.color}">${agent.status}</span>
+        </div>
+        <p style="margin-top:10px;color:rgba(255,255,255,0.4)">Brain region: ${BRAIN_REGIONS[agent.name]?.region || 'Unknown'}</p>
+        <p style="color:rgba(255,255,255,0.3);font-size:10px">Could not reach organism API.</p>
+      `);
+    });
+}
+
+// Pipeline click handler
+function onPipelineClick(opp) {
+  showLoading(opp.name);
+  
+  fetch(API_BASE + '/api/pipeline')
+    .then(r => r.json())
+    .then(opps => {
+      const match = (opps || []).find(o => 
+        o.title && o.title.toLowerCase().includes(opp.name.toLowerCase().split(' ')[0])
+      );
+      
+      if (match) {
+        const hasRFP = match.rfp_document_retrieved ? '✓ RFP Retrieved' : '✗ No RFP';
+        const hasProposal = match.proposal_content ? '✓ Proposal (' + Math.round((match.proposal_content||'').length/1000) + 'K)' : '✗ No Proposal';
+        
+        showDetail(opp.name.toUpperCase(), `
+          <div style="margin-bottom:8px">
+            <span class="detail-tag" style="background:${opp.color}22;border:1px solid ${opp.color}">OPI ${match.opi_score}</span>
+            <span class="detail-tag" style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15)">${match.stage}</span>
+            ${match.due_date ? '<span class="detail-tag" style="background:#ef444422;border:1px solid #ef4444">Due ' + new Date(match.due_date).toLocaleDateString() + '</span>' : ''}
+          </div>
+          <p style="font-size:10px;color:rgba(255,255,255,0.5);margin-bottom:6px">${match.agency || ''} — ${match.vertical || ''}</p>
+          <p style="font-size:10px;margin-bottom:4px;color:${match.rfp_document_retrieved ? '#4ade80' : '#ef4444'}">${hasRFP}</p>
+          <p style="font-size:10px;margin-bottom:8px;color:${match.proposal_content ? '#4ade80' : '#ef4444'}">${hasProposal}</p>
+          ${match.scope_analysis ? '<div style="padding:8px 0;border-top:1px solid rgba(255,255,255,0.05)"><div style="font-size:9px;color:rgba(0,240,255,0.5);margin-bottom:3px">SCOPE</div><div style="font-size:11px;color:rgba(255,255,255,0.7)">' + (match.scope_analysis||'').substring(0,400) + '...</div></div>' : ''}
+        `);
+      } else {
+        showDetail(opp.name.toUpperCase(), '<p style="color:rgba(255,255,255,0.4)">Opportunity not found in pipeline.</p>');
+      }
+    })
+    .catch(() => {
+      showDetail(opp.name.toUpperCase(), '<p style="color:rgba(255,255,255,0.4)">Could not reach organism API.</p>');
+    });
+}
+
+// Wire up pipeline row clicks
+document.querySelectorAll('.opp-row').forEach((row, i) => {
+  row.addEventListener('click', () => onPipelineClick(PIPELINE[i]));
+});
 </script>
 </body>
 </html>
