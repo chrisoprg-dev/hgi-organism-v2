@@ -2,433 +2,142 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
 <title>HGI ORGANISM</title>
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Rajdhani:wght@300;400;500;600;700&family=Share+Tech+Mono&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#040a16;--panel:#0a1122;--border:rgba(0,160,200,0.07);--bb:rgba(0,180,220,0.12);--cy:#00d0f0;--gn:#3cd9a0;--am:#d4a020;--rd:#c84848;--wh:#d0dce8;--tx:rgba(185,205,225,0.85);--dm:rgba(145,170,195,0.32);--mc:rgba(120,145,170,0.2);--mo:'Share Tech Mono',monospace;--ui:'Rajdhani',sans-serif;--br:'Orbitron',sans-serif}
+html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-family:var(--ui);font-weight:500}
+#app{display:grid;width:100%;height:100%;grid-template-columns:244px 1fr 274px;grid-template-rows:36px auto 1fr auto 146px;grid-template-areas:"top top top" "ttl ttl ttl" "left center right" "left tiles right" "bot bot bot"}
 
-body {
-  background: #000;
-  color: #fff;
-  font-family: 'Rajdhani', sans-serif;
-  overflow: hidden;
-  width: 100vw;
-  height: 100vh;
-}
+#top{grid-area:top;background:var(--panel);border-bottom:1px solid var(--bb);display:flex;align-items:center;padding:0 20px;gap:16px;z-index:10}
+.tb{font-family:var(--br);font-size:11px;font-weight:700;color:var(--cy);letter-spacing:3px}
+.ts{font-size:9px;font-family:var(--mo);color:var(--dm);display:flex;align-items:center;gap:4px}.ts .v{color:var(--cy);font-size:10px;font-weight:700;font-family:var(--br)}
+.tsp{width:1px;height:14px;background:var(--bb)}.tr{margin-left:auto;display:flex;align-items:center;gap:10px}
+.th{width:6px;height:6px;border-radius:50%;background:var(--gn);box-shadow:0 0 6px var(--gn)}
+.ti{display:flex;gap:6px;align-items:center}.ti span{font-size:14px;cursor:pointer;color:var(--dm)}
 
-#canvas-container {
-  position: fixed;
-  top: 0; left: 0;
-  width: 100%; height: 100%;
-  z-index: 1;
-}
+#ttl{grid-area:ttl;padding:8px 20px 4px}
+#ttl h1{font-size:21px;font-weight:700;color:var(--wh)}
+#ttl p{font-size:10px;color:var(--dm);margin-top:1px}
 
-/* Top HUD bar */
-#hud-top {
-  position: fixed;
-  top: 0; left: 0; right: 0;
-  z-index: 10;
-  padding: 8px 16px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: linear-gradient(180deg, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0) 100%);
-}
+#left{grid-area:left;background:var(--panel);border-right:1px solid var(--border);overflow-y:auto;z-index:5}
+#left::-webkit-scrollbar{width:3px}#left::-webkit-scrollbar-thumb{background:rgba(0,160,200,0.1)}
+.lh{padding:8px 14px;font-family:var(--mo);font-size:8px;letter-spacing:2px;color:var(--dm);border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--panel);z-index:2}
+.ag{padding:7px 14px;border-bottom:1px solid rgba(255,255,255,0.015);cursor:pointer;display:flex;align-items:flex-start;gap:8px;transition:background 0.12s}
+.ag:hover{background:rgba(0,180,220,0.025)}
+.ag .ab{width:3px;min-height:32px;border-radius:1px;flex-shrink:0;margin-top:1px}
+.ag .ai{flex:1;min-width:0}
+.ag .an{font-size:11px;font-weight:600;color:var(--wh)}
+.ag .am{font-size:8px;color:var(--dm);margin-top:2px;font-family:var(--mo)}.ag .am b{font-weight:600}
+.ag .at{font-size:8px;color:var(--mc);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ag .av{font-size:8px;font-family:var(--mo);color:var(--cy);flex-shrink:0;margin-top:2px}
+.ag .abg{font-family:var(--br);font-size:18px;font-weight:900;color:var(--cy);flex-shrink:0;margin-top:2px;display:flex;align-items:center;gap:2px}
+.ag.gated .an{color:var(--dm)}.ag.gated .ab{background:var(--am)!important}
 
-#hud-top .title {
-  font-family: 'Orbitron', monospace;
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 4px;
-  color: #00f0ff;
-  text-shadow: 0 0 10px rgba(0,240,255,0.5);
-}
+#center{grid-area:center;position:relative;overflow:hidden}
+#cv{position:absolute;inset:0}
 
-#hud-top .status {
-  font-size: 11px;
-  color: #4ade80;
-  letter-spacing: 1px;
-}
+#tiles{grid-area:tiles;display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:2px 10px 6px;z-index:5}
+.tile{background:var(--panel);border:1px solid var(--border);border-radius:3px;padding:6px 8px;display:flex;align-items:center;gap:8px}
+.tile .ti2{font-size:16px}.tile .tl{font-family:var(--mo);font-size:8px;letter-spacing:1px;color:var(--dm)}.tile .tv{font-size:9px;color:var(--tx);margin-top:2px}
 
-#hud-top .status .dot {
-  display: inline-block;
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: #4ade80;
-  box-shadow: 0 0 6px #4ade80;
-  margin-right: 4px;
-  animation: pulse-dot 2s infinite;
-}
+#right{grid-area:right;background:var(--panel);border-left:1px solid var(--border);overflow-y:auto;z-index:5;padding:0}
+#right::-webkit-scrollbar{width:3px}#right::-webkit-scrollbar-thumb{background:rgba(0,160,200,0.1)}
+.rb{padding:10px 14px;border-bottom:1px solid var(--border)}
+.rl{font-family:var(--mo);font-size:7px;letter-spacing:2px;color:var(--mc);text-transform:uppercase;margin-bottom:6px}
+.ro{font-family:var(--br);font-size:34px;font-weight:900;color:var(--cy);line-height:1}
+.rn{font-size:13px;font-weight:700;color:var(--wh);margin-top:4px}
+.ra{font-size:9px;color:var(--dm);margin-top:2px}
+.rtags{display:flex;gap:4px;margin-top:6px;flex-wrap:wrap}
+.rtag{font-size:8px;padding:2px 6px;border-radius:2px;font-family:var(--mo);border:1px solid var(--border);color:var(--dm)}
+.rtag.ok{border-color:rgba(60,217,160,0.2);color:var(--gn)}.rtag.hi{border-color:rgba(0,208,240,0.2);color:var(--cy)}
+.rbar{height:3px;border-radius:1px;background:rgba(0,160,200,0.06);margin-top:3px;overflow:hidden}.rbar .f{height:100%;background:var(--cy);border-radius:1px}
+.rbl{font-size:7px;color:var(--mc);font-family:var(--mo);display:flex;justify-content:space-between;margin-top:1px}
+.ralt{background:rgba(200,72,72,0.04);border:1px solid rgba(200,72,72,0.12);border-radius:3px;padding:7px 10px;margin-top:5px}
+.ralt .rh{font-family:var(--mo);font-size:8px;color:var(--rd);font-weight:600;letter-spacing:0.5px;display:flex;justify-content:space-between;align-items:center}
+.ralt .rx{cursor:pointer;font-size:12px;color:var(--rd);opacity:0.5}
+.ralt .rd{font-size:9px;color:var(--dm);margin-top:3px}
+.mr{display:flex;align-items:center;gap:5px;padding:2px 0;font-size:9px}
+.mr .ma{color:var(--cy);font-size:10px}.mr .mv{font-family:var(--mo);color:var(--cy);font-weight:700;font-size:9px}.mr .ml{color:var(--dm);flex:1}.mr .mc{font-family:var(--br);font-size:10px;font-weight:700}
+.mr .mc.g{color:var(--gn)}.mr .mc.r{color:var(--rd)}
 
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
-}
+#bot{grid-area:bot;background:var(--panel);border-top:1px solid var(--bb);display:grid;grid-template-columns:1.3fr 0.7fr;z-index:5}
+.bz{padding:7px 14px;overflow-y:auto}.bz:first-child{border-right:1px solid var(--border)}
+.bz::-webkit-scrollbar{width:2px}.bz::-webkit-scrollbar-thumb{background:rgba(0,160,200,0.08)}
+.bt{font-family:var(--mo);font-size:7px;letter-spacing:2px;color:var(--mc);margin-bottom:5px;padding-bottom:3px;border-bottom:1px solid var(--border)}
+.pr{display:flex;align-items:center;gap:6px;padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.012);font-size:9px}
+.pr .pk{width:8px;height:8px;border-radius:2px;flex-shrink:0}.pr .pt{font-family:var(--mo);color:var(--dm);min-width:32px;font-size:8px}
+.pr .pn{font-weight:600;color:var(--tx);flex-shrink:0}.pr .ps{font-family:var(--mo);font-size:8px;color:var(--dm);min-width:32px}
+.pr .pw{font-size:8px;font-family:var(--mo);font-weight:600;padding:1px 4px;border-radius:2px}.pr .pw.m{background:rgba(0,208,240,0.08);color:var(--cy)}.pr .pw.w{background:rgba(212,160,32,0.08);color:var(--am)}
+.pr .pd{font-size:8px;color:var(--dm);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ne{font-family:var(--br);font-size:26px;font-weight:900;color:var(--wh);margin:4px 0}
+.ns{display:flex;gap:16px;margin-top:6px}
+.ns .ni{}.ns .nv{font-family:var(--br);font-size:14px;font-weight:700;color:var(--cy)}.ns .nl{font-size:8px;color:var(--dm);font-family:var(--mo);margin-top:1px}
 
-/* Agent avatars (CSS2D rendered in 3D space) */
-.agent-label {
-  pointer-events: auto;
-  cursor: pointer;
-  text-align: center;
-  width: 80px;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.agent-label:active .icon-ring {
-  transform: scale(1.2);
-  box-shadow: 0 0 20px var(--agent-color);
-}
-
-.agent-label .icon-ring {
-  width: 36px; height: 36px;
-  margin: 0 auto 2px;
-  border-radius: 50%;
-  border: 1.5px solid;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  background: rgba(0,0,0,0.6);
-  box-shadow: 0 0 8px var(--agent-color);
-  animation: agent-breathe 3s infinite ease-in-out;
-}
-
-@keyframes agent-breathe {
-  0%, 100% { transform: scale(1); box-shadow: 0 0 8px var(--agent-color); }
-  50% { transform: scale(1.08); box-shadow: 0 0 14px var(--agent-color); }
-}
-
-.agent-label .name {
-  font-family: 'Rajdhani', sans-serif;
-  font-size: 8px;
-  font-weight: 600;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  color: var(--agent-color);
-  text-shadow: 0 0 4px var(--agent-color);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Data panels */
-.data-panel {
-  position: fixed;
-  z-index: 10;
-  background: rgba(0, 10, 20, 0.85);
-  border: 1px solid rgba(0, 240, 255, 0.15);
-  border-radius: 6px;
-  padding: 8px 10px;
-  backdrop-filter: blur(8px);
-  font-size: 11px;
-  max-width: 180px;
-}
-
-.data-panel .panel-title {
-  font-family: 'Orbitron', monospace;
-  font-size: 8px;
-  letter-spacing: 2px;
-  color: rgba(0, 240, 255, 0.6);
-  margin-bottom: 6px;
-  text-transform: uppercase;
-}
-
-#panel-pipeline {
-  bottom: 80px;
-  left: 8px;
-  max-height: 220px;
-  overflow-y: auto;
-}
-
-#panel-agents {
-  bottom: 80px;
-  right: 8px;
-  max-height: 220px;
-  overflow-y: auto;
-}
-
-.opp-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 0;
-  border-bottom: 1px solid rgba(255,255,255,0.04);
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.opp-row:active {
-  background: rgba(0,240,255,0.1);
-}
-
-.opp-opi {
-  font-family: 'Orbitron', monospace;
-  font-size: 11px;
-  font-weight: 700;
-  min-width: 24px;
-  text-align: right;
-}
-
-.opp-name {
-  font-size: 10px;
-  color: rgba(255,255,255,0.7);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex: 1;
-}
-
-.opp-due {
-  font-size: 9px;
-  color: rgba(255,255,255,0.4);
-  white-space: nowrap;
-}
-
-.agent-row {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 0;
-}
-
-.agent-dot {
-  width: 5px; height: 5px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.agent-name-text {
-  font-size: 9px;
-  color: rgba(255,255,255,0.6);
-  white-space: nowrap;
-}
-
-.agent-status-text {
-  font-size: 8px;
-  margin-left: auto;
-  white-space: nowrap;
-}
-
-/* Bottom stats bar */
-#hud-bottom {
-  position: fixed;
-  bottom: 0; left: 0; right: 0;
-  z-index: 10;
-  padding: 10px 16px 14px;
-  background: linear-gradient(0deg, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0) 100%);
-  display: flex;
-  justify-content: space-around;
-  align-items: center;
-}
-
-.stat-block {
-  text-align: center;
-}
-
-.stat-block .value {
-  font-family: 'Orbitron', monospace;
-  font-size: 18px;
-  font-weight: 700;
-  color: #00f0ff;
-  text-shadow: 0 0 8px rgba(0,240,255,0.4);
-}
-
-.stat-block .label {
-  font-size: 8px;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  color: rgba(255,255,255,0.4);
-  margin-top: 2px;
-}
-
-/* Scan line effect */
-#scanline {
-  position: fixed;
-  top: 0; left: 0; right: 0;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, rgba(0,240,255,0.3), transparent);
-  z-index: 20;
-  animation: scan 4s linear infinite;
-  pointer-events: none;
-}
-
-@keyframes scan {
-  0% { top: -2px; }
-  100% { top: 100vh; }
-}
-
-/* Corner decorations */
-.corner {
-  position: fixed;
-  width: 20px; height: 20px;
-  z-index: 10;
-  pointer-events: none;
-}
-.corner.tl { top: 4px; left: 4px; border-top: 1px solid rgba(0,240,255,0.3); border-left: 1px solid rgba(0,240,255,0.3); }
-.corner.tr { top: 4px; right: 4px; border-top: 1px solid rgba(0,240,255,0.3); border-right: 1px solid rgba(0,240,255,0.3); }
-.corner.bl { bottom: 4px; left: 4px; border-bottom: 1px solid rgba(0,240,255,0.3); border-left: 1px solid rgba(0,240,255,0.3); }
-.corner.br { bottom: 4px; right: 4px; border-bottom: 1px solid rgba(0,240,255,0.3); border-right: 1px solid rgba(0,240,255,0.3); }
-
-/* Loading */
-#loading {
-
-/* Detail overlay */
-#detail-overlay {
-  position: fixed;
-  bottom: 0; left: 0; right: 0;
-  z-index: 50;
-  background: rgba(0, 8, 16, 0.95);
-  border-top: 1px solid rgba(0,240,255,0.3);
-  padding: 12px 16px 20px;
-  max-height: 55vh;
-  overflow-y: auto;
-  transform: translateY(100%);
-  transition: transform 0.3s ease;
-  backdrop-filter: blur(12px);
-}
-
-#detail-overlay.open {
-  transform: translateY(0);
-}
-
-#detail-overlay .detail-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-}
-
-#detail-overlay .detail-title {
-  font-family: 'Orbitron', monospace;
-  font-size: 12px;
-  letter-spacing: 2px;
-  color: #00f0ff;
-}
-
-#detail-overlay .detail-close {
-  font-size: 18px;
-  color: rgba(255,255,255,0.5);
-  cursor: pointer;
-  padding: 4px 8px;
-  -webkit-tap-highlight-color: transparent;
-}
-
-#detail-overlay .detail-body {
-  font-size: 12px;
-  line-height: 1.5;
-  color: rgba(255,255,255,0.8);
-}
-
-#detail-overlay .detail-body .detail-tag {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 3px;
-  font-size: 9px;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  margin-right: 4px;
-  margin-bottom: 4px;
-}
-
-#detail-overlay .detail-loading {
-  text-align: center;
-  padding: 20px;
-  color: rgba(0,240,255,0.5);
-  font-size: 11px;
-  letter-spacing: 2px;
-}
-
-/* Loading */
-#loading {
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  z-index: 100;
-  background: #000;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  font-family: 'Orbitron', monospace;
-  transition: opacity 0.5s;
-}
-
-#loading .spinner {
-  width: 40px; height: 40px;
-  border: 2px solid rgba(0,240,255,0.2);
-  border-top-color: #00f0ff;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-  margin-bottom: 16px;
-}
-
-@keyframes spin { to { transform: rotate(360deg); } }
-
-#loading .text {
-  font-size: 10px;
-  letter-spacing: 4px;
-  color: rgba(0,240,255,0.6);
-}
+@media(max-width:900px){#app{grid-template-columns:1fr;grid-template-rows:36px auto 1fr auto 200px;grid-template-areas:"top" "ttl" "center" "tiles" "bot"}#left,#right{display:none}#tiles{grid-template-columns:repeat(2,1fr)}}
+#ld{position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity 0.8s}
+.lr{width:24px;height:24px;border:2px solid rgba(0,200,230,0.08);border-top-color:var(--cy);border-radius:50%;animation:sp .8s linear infinite;margin-bottom:12px}
+@keyframes sp{to{transform:rotate(360deg)}}.lt{font-family:var(--br);font-size:9px;letter-spacing:5px;color:rgba(0,200,230,0.2)}
 </style>
 </head>
 <body>
-
-<div id="loading">
-  <div class="spinner"></div>
-  <div class="text">INITIALIZING ORGANISM</div>
+<div id="ld"><div class="lr"></div><div class="lt">HGI ORGANISM</div></div>
+<div id="app">
+<div id="top">
+  <span class="tb">HGI ORGANISM</span>
+  <span class="ts">Active Accounts/Agents: <span class="v">1</span></span><span class="tsp"></span>
+  <span class="ts">Workflows: <span class="v">IE</span></span><span class="tsp"></span>
+  <span class="ts">Runtime: <span class="v">622</span></span><span class="tsp"></span>
+  <span class="ts">Agents: <span class="v">15.0x</span></span>
+  <span class="tr"><span class="th"></span><span class="ti"><span>◉</span><span>⌕</span><span>☰</span></span></span>
 </div>
-
-<div id="scanline"></div>
-<div class="corner tl"></div>
-<div class="corner tr"></div>
-<div class="corner bl"></div>
-<div class="corner br"></div>
-
-<div id="hud-top">
-  <div class="title">HGI ORGANISM</div>
-  <div class="status"><span class="dot"></span>V4.2 LIVE</div>
+<div id="ttl"><h1>Integrated Cognition Command Center</h1><p>Live multi-agent capture intelligence and proposal orchestration.</p></div>
+<div id="left"><div class="lh">AGENT ROSTER</div><div id="agl"></div></div>
+<div id="center"><div id="cv"></div></div>
+<div id="tiles">
+  <div class="tile"><div class="ti2">◆</div><div><div class="tl">PLANNING</div><div class="tv" style="color:var(--cy)">Strong activation</div></div></div>
+  <div class="tile"><div class="ti2">⬡</div><div><div class="tl">MEMORY</div><div class="tv">5,612 records indexed</div></div></div>
+  <div class="tile"><div class="ti2">◇</div><div><div class="tl">SYNTHESIS</div><div class="tv" style="color:var(--cy)">Proposal bundle active</div></div></div>
+  <div class="tile"><div class="ti2">⬢</div><div><div class="tl">QUALITY GATE</div><div class="tv">1 gate/verify active</div></div></div>
 </div>
-
-<div id="canvas-container"></div>
-
-<div id="detail-overlay">
-  <div class="detail-header">
-    <div class="detail-title" id="detail-title"></div>
-    <div class="detail-close" id="detail-close">✕</div>
+<div id="right">
+  <div class="rb"><div class="rl">PRIORITY PURSUIT</div>
+    <div class="ro">94</div><div class="rn">NOLA Water Infrastructure</div><div class="ra">Sewerage &amp; Water Board of New Orleans</div>
+    <div class="rtags"><span class="rtag">Due Date</span><span class="rtag">Unsolicited ▾</span><span class="rtag hi">Pursuing</span></div>
   </div>
-  <div class="detail-body" id="detail-body"></div>
-</div>
-
-<div id="panel-pipeline" class="data-panel">
-  <div class="panel-title">PIPELINE</div>
-  <div id="pipeline-list"></div>
-</div>
-
-<div id="panel-agents" class="data-panel">
-  <div class="panel-title">AGENT STATUS</div>
-  <div id="agents-list"></div>
-</div>
-
-<div id="hud-bottom">
-  <div class="stat-block">
-    <div class="value">15</div>
-    <div class="label">AGENTS</div>
+  <div class="rb"><div class="rl">STANDARDIZED PARTNERSHIP</div>
+    <div class="rbl"><span>KB MATCH</span><span>95%</span></div><div class="rbar"><div class="f" style="width:95%"></div></div>
+    <div class="rbl"><span>COMPETITIVE</span><span>92%</span></div><div class="rbar"><div class="f" style="width:92%"></div></div>
+    <div class="rbl"><span>RELATIONSHIP</span><span>98%</span></div><div class="rbar"><div class="f" style="width:98%"></div></div>
   </div>
-  <div class="stat-block">
-    <div class="value">9</div>
-    <div class="label">PIPELINE</div>
+  <div class="rb"><div class="rl">PRIORITY PURSUIT</div>
+    <div class="rn">NOLA Water Infrastructure</div>
+    <div class="ra" style="margin-top:4px">Pursuing · INCUMBENT</div>
+    <div style="margin-top:8px"><div class="rl">ACTIVE OBJECTIVE</div><div style="font-size:9px;color:var(--tx);line-height:1.4">Deliver compliant draft package and executive review materials.</div></div>
   </div>
-  <div class="stat-block">
-    <div class="value">5.6K</div>
-    <div class="label">MEMORIES</div>
+  <div class="rb"><div class="rl" style="color:var(--rd)">BOTTLENECK ▾</div>
+    <div class="ralt"><div class="rh">1/4 insurance third certifies <span class="rx">✕</span></div></div>
   </div>
-  <div class="stat-block">
-    <div class="value">47</div>
-    <div class="label">INTEL</div>
+  <div class="rb"><div class="rl">MEMORY FLOW</div>
+    <div class="mr"><span class="ma">→</span><span class="mv">4</span><span class="ml">intelligence [31.52]</span><span class="mc g">11 engagement</span></div>
+    <div class="mr"><span class="ma">→</span><span class="mv">4</span><span class="ml">monitoring</span><span class="mc">5 pricing benchmarks</span></div>
+    <div class="mr"><span class="ma">→</span><span class="mv">4</span><span class="ml">pattern</span><span class="mc">3 cross-pursuit</span></div>
   </div>
 </div>
-
-<!-- Three.js r128 (non-module) -->
+<div id="bot">
+  <div class="bz"><div class="bt">ROUTING TIMELINE</div><div id="rtl"></div></div>
+  <div class="bz"><div class="bt">PHASES / GATING</div>
+    <div class="ne">6 new events</div>
+    <div class="ns">
+      <div class="ni"><div class="nl">Memory</div><div style="font-size:9px;color:var(--dm)">1 gates bundle active</div></div>
+      <div class="ni"><div class="nv">4</div><div class="nl">3 gated requirement</div></div>
+      <div class="ni"><div class="nv">7</div><div class="nl">3 gated requirement</div></div>
+    </div>
+  </div>
+</div>
+</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
@@ -437,735 +146,306 @@ body {
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/renderers/CSS2DRenderer.js"></script>
-
 <script>
-// ═══════════════════════════════════════════
-// HGI ORGANISM — 3D BRAIN COMMAND CENTER
-// ═══════════════════════════════════════════
-
-// Pipeline data
-const PIPELINE = [
-  { name: 'NOLA Water', opi: 94, stage: 'pursuing', due: 'Unsolicited', color: '#4ade80' },
-  { name: 'DR-4900 LA', opi: 92, stage: 'identified', due: 'TBD', color: '#facc15' },
-  { name: 'Washington Parish', opi: 88, stage: 'pursuing', due: 'May 8', color: '#00f0ff' },
-  { name: 'St. George', opi: 85, stage: 'watching', due: 'Apr 24', color: '#a78bfa' },
-  { name: 'BRIC Resilient', opi: 82, stage: 'identified', due: 'Jul 23', color: '#facc15' },
-  { name: 'DR-4899 MS', opi: 82, stage: 'identified', due: 'TBD', color: '#facc15' },
-  { name: 'OPSB CM', opi: 78, stage: 'new', due: 'Apr 30', color: '#f97316' },
-  { name: 'HTHA', opi: 78, stage: 'submitted', due: '—', color: '#4ade80' },
-  { name: 'JP SOQ', opi: 72, stage: 'pursuing', due: 'Apr 9', color: '#ef4444' }
+const AG=[
+  {n:'Intelligence Engine',s:'Corpusnet',s2:'/investigationStrategicrow.',v:'18:0585',badge:'',c:'#00d0f0'},
+  {n:'Financial Agent',s:'Corpusnet',s2:'/benchmarkingStrategicrow.',v:'18:0585',badge:'',c:'#3cd9a0'},
+  {n:'Winnability',s:'Equipner',s2:'/reconScoringStrategicrow.',v:'14:1585',badge:'',c:'#d4a020'},
+  {n:'CRM Agent',s:'Corpusnet',s2:'/investigationBlAttrategicrow.',v:'13:0585',badge:'',c:'#a78bfa'},
+  {n:'Quality Gate',s:'Corpusnet',s2:'/readinessGateModuleTesting.',v:'',badge:'3★',c:'#d4a020'},
+  {n:'Proposal Writer',s:'Factorinamento',s2:'/designStartegy.flows.',v:'28:0585',badge:'',c:'#60a5fa'},
+  {n:'Red Team',s:'Forensic',s2:'/adversarialStressTesting./review.',v:'',badge:'',c:'#c84848'},
+  {n:'Dashboard',s:'Corpusnet',s2:'/Priority',v:'T36:0508',badge:'',c:'#818cf8'}
 ];
-
-// Agent data
-const AGENTS = [
-  { name: 'Intel Engine', icon: '🔍', color: '#00f0ff', status: 'scanning', type: 'per-opp' },
-  { name: 'Financial', icon: '💰', color: '#4ade80', status: 'analyzing', type: 'per-opp' },
-  { name: 'Winnability', icon: '🎯', color: '#f97316', status: 'scoring', type: 'per-opp' },
-  { name: 'CRM', icon: '🤝', color: '#a78bfa', status: 'tracking', type: 'per-opp' },
-  { name: 'Quality Gate', icon: '✓', color: '#facc15', status: 'auditing', type: 'per-opp' },
-  { name: 'Staffing', icon: '👥', color: '#34d399', status: 'gated', type: 'gated' },
-  { name: 'Proposal', icon: '📝', color: '#60a5fa', status: 'gated', type: 'gated' },
-  { name: 'Red Team', icon: '🛡️', color: '#ef4444', status: 'gated', type: 'gated' },
-  { name: 'Price to Win', icon: '📊', color: '#c084fc', status: 'gated', type: 'gated' },
-  { name: 'Assembly', icon: '📦', color: '#fb923c', status: 'gated', type: 'gated' },
-  { name: 'Scanner', icon: '📡', color: '#22d3ee', status: 'monitoring', type: 'system' },
-  { name: 'Disaster Mon', icon: '⚡', color: '#f43f5e', status: 'watching', type: 'system' },
-  { name: 'Dashboard', icon: '📋', color: '#818cf8', status: 'compiling', type: 'system' },
-  { name: 'Amendments', icon: '📌', color: '#fbbf24', status: 'tracking', type: 'system' },
-  { name: 'Hunter', icon: '🎯', color: '#10b981', status: 'hunting', type: 'always' }
+(function(){
+  const el=document.getElementById('agl');
+  AG.forEach(a=>{
+    const r=document.createElement('div');r.className='ag';
+    const badge=a.badge?`<div class="abg">${a.badge}</div>`:(a.v?`<div class="av">${a.v}</div>`:'');
+    r.innerHTML=`<div class="ab" style="background:${a.c}"></div><div class="ai"><div class="an">${a.n}</div><div class="am"><b style="color:${a.c}">${a.s}</b> ${a.s2}</div></div>${badge}`;
+    el.appendChild(r);
+  });
+})();
+const RT=[
+  {t:'14:52',n:'Hunting Agent',ts2:'14:53',w:'Matching',wd:'Detected addendum on JP SIQ0 26-005',c:'#00d0f0'},
+  {t:'14:54',n:'Quality Gate',ts2:'14:54',w:'Warning',wd:'Flagged missing insurance certificate requirement',c:'#d4a020'},
+  {t:'14:88',n:'Washington Paris School Board',ts2:'14:56',w:'Matching',wd:'Winnability: 14-data aggregation/proportioner across 3 bids',c:'#00d0f0'},
+  {t:'27.28',n:'Booster Bolt',ts2:'14:55',w:'Warning',wd:'Found misaligned the executive summary draft',c:'#d4a020'},
+  {t:'21.23',n:'BRIC Resilient Infrastructure',ts2:'',w:'Matching',wd:'BRIC Protected commitment insurance ...',c:'#00d0f0'}
 ];
-
-// Populate data panels
-const pipelineHTML = PIPELINE.map(p => {
-  const opiColor = p.opi >= 90 ? '#4ade80' : p.opi >= 80 ? '#00f0ff' : p.opi >= 70 ? '#facc15' : '#ef4444';
-  const urgent = p.due === 'Apr 9' ? ' style="color:#ef4444;font-weight:700"' : '';
-  return `<div class="opp-row">
-    <span class="opp-opi" style="color:${opiColor}">${p.opi}</span>
-    <span class="opp-name">${p.name}</span>
-    <span class="opp-due"${urgent}>${p.due}</span>
-  </div>`;
-}).join('');
-document.getElementById('pipeline-list').innerHTML = pipelineHTML;
-
-const agentsHTML = AGENTS.map(a => {
-  const statusColor = a.status === 'gated' ? 'rgba(255,255,255,0.25)' : a.color;
-  return `<div class="agent-row">
-    <span class="agent-dot" style="background:${a.color};box-shadow:0 0 4px ${a.color}"></span>
-    <span class="agent-name-text">${a.icon} ${a.name}</span>
-    <span class="agent-status-text" style="color:${statusColor}">${a.status}</span>
-  </div>`;
-}).join('');
-document.getElementById('agents-list').innerHTML = agentsHTML;
-
-// ═══════ THREE.JS SCENE ═══════
-const container = document.getElementById('canvas-container');
-const W = window.innerWidth;
-const H = window.innerHeight;
-
-// Scene
-const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x000510, 0.08);
-
-// Camera
-const camera = new THREE.PerspectiveCamera(60, W / H, 0.1, 100);
-camera.position.set(0, 0.5, 4.5);
-camera.lookAt(0, 0.2, 0);
-
-// Renderer
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-renderer.setSize(W, H);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.toneMapping = THREE.ReinhardToneMapping;
-renderer.toneMappingExposure = 1.2;
-container.appendChild(renderer.domElement);
-
-// CSS2D Renderer for agent labels
-const labelRenderer = new THREE.CSS2DRenderer();
-labelRenderer.setSize(W, H);
-labelRenderer.domElement.style.position = 'absolute';
-labelRenderer.domElement.style.top = '0';
-labelRenderer.domElement.style.pointerEvents = 'none';
-container.appendChild(labelRenderer.domElement);
-
-// Bloom post-processing
-const composer = new THREE.EffectComposer(renderer);
-const renderPass = new THREE.RenderPass(scene, camera);
-composer.addPass(renderPass);
-
-const bloomPass = new THREE.UnrealBloomPass(
-  new THREE.Vector2(W, H), 1.2, 0.5, 0.2
-);
-composer.addPass(bloomPass);
-
-// Controls
-const controls = new THREE.OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-controls.dampingFactor = 0.05;
-controls.enablePan = false;
-controls.minDistance = 2;
-controls.maxDistance = 6;
-controls.autoRotate = true;
-controls.autoRotateSpeed = 0.3;
-controls.maxPolarAngle = Math.PI * 0.7;
-controls.minPolarAngle = Math.PI * 0.2;
-
-// ═══════ PLATFORM (glowing pedestal) ═══════
-function createPlatform() {
-  const group = new THREE.Group();
-  const platY = -0.8;
-
-  // Main disc with glow
-  const discGeo = new THREE.CylinderGeometry(2.0, 2.0, 0.03, 64);
-  const discMat = new THREE.MeshBasicMaterial({
-    color: 0x001a2a,
-    transparent: true,
-    opacity: 0.7
+(function(){
+  const el=document.getElementById('rtl');
+  RT.forEach(r=>{
+    const row=document.createElement('div');row.className='pr';
+    const wc=r.w==='Matching'?'m':'w';
+    row.innerHTML=`<div class="pk" style="background:${r.c}"></div><span class="pt">${r.t}</span><span class="pn">${r.n}</span><span class="ps">${r.ts2}</span><span class="pw ${wc}">${r.w}</span><span class="pd">${r.wd}</span>`;
+    el.appendChild(row);
   });
-  group.add(new THREE.Mesh(discGeo, discMat));
-  group.children[0].position.y = platY;
+})();
 
-  // Concentric glowing rings
-  for (let i = 0; i < 5; i++) {
-    const r = 0.4 + i * 0.38;
-    const ringGeo = new THREE.TorusGeometry(r, 0.008, 8, 64);
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: 0x00f0ff,
-      transparent: true,
-      opacity: 0.15 + i * 0.05,
-      blending: THREE.AdditiveBlending
-    });
-    const ring = new THREE.Mesh(ringGeo, ringMat);
-    ring.rotation.x = Math.PI / 2;
-    ring.position.y = platY + 0.02;
-    group.add(ring);
-  }
+// ═══ THREE.JS — DARK BRAIN + CONSTELLATION NEURAL NETWORK ═══
+const ctr=document.getElementById('cv');
+const W=ctr.clientWidth||600,H=ctr.clientHeight||400;
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(36,W/H,0.1,100);
+camera.position.set(0,0.2,3.0);camera.lookAt(0,0.0,0);
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
+renderer.setSize(W,H);renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+renderer.toneMapping=THREE.ReinhardToneMapping;renderer.toneMappingExposure=1.2;
+ctr.appendChild(renderer.domElement);
+const controls=new THREE.OrbitControls(camera,renderer.domElement);
+controls.enableDamping=true;controls.dampingFactor=0.04;controls.enablePan=false;
+controls.autoRotate=true;controls.autoRotateSpeed=0.08;
+controls.minDistance=2;controls.maxDistance=4.5;
+controls.maxPolarAngle=Math.PI*0.58;controls.minPolarAngle=Math.PI*0.32;
 
-  // Outer bright edge ring
-  const outerGeo = new THREE.TorusGeometry(2.0, 0.015, 8, 64);
-  const outerMat = new THREE.MeshBasicMaterial({
-    color: 0x00f0ff,
-    transparent: true,
-    opacity: 0.4
-  });
-  const outer = new THREE.Mesh(outerGeo, outerMat);
-  outer.rotation.x = Math.PI / 2;
-  outer.position.y = platY + 0.02;
-  group.add(outer);
+const composer=new THREE.EffectComposer(renderer);
+composer.addPass(new THREE.RenderPass(scene,camera));
+// Minimal bloom
+composer.addPass(new THREE.UnrealBloomPass(new THREE.Vector2(W,H),0.15,0.9,0.8));
 
-  // Radial grid lines
-  for (let i = 0; i < 16; i++) {
-    const angle = (i / 16) * Math.PI * 2;
-    const points = [
-      new THREE.Vector3(Math.cos(angle) * 0.2, platY + 0.02, Math.sin(angle) * 0.2),
-      new THREE.Vector3(Math.cos(angle) * 1.95, platY + 0.02, Math.sin(angle) * 1.95)
-    ];
-    const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
-    const lineMat = new THREE.LineBasicMaterial({ color: 0x00f0ff, transparent: true, opacity: 0.08 });
-    group.add(new THREE.Line(lineGeo, lineMat));
-  }
+// ════════════════════════════════════════════
+// BRAIN — Explicit silhouette, NOT a sphere
+// ════════════════════════════════════════════
 
-  return group;
+// Brain radius function: returns radius at spherical coords
+// This produces a BRAIN shape, not a sphere
+function brainR(theta,phi){
+  // theta=azimuthal(0-2PI), phi=polar from top(0-PI)
+  const st=Math.sin(theta),ct=Math.cos(theta);
+  const sp=Math.sin(phi),cp=Math.cos(phi);
+  // Base ellipsoid: wider than tall, deeper front-back
+  let r=0.82*Math.sqrt(1/(
+    (ct*sp/1.0)**2+(cp/0.78)**2+(st*sp/0.85)**2
+  ));
+  // Interhemispheric fissure: deep cut at midline
+  const midline=Math.abs(ct*sp);
+  if(midline<0.12)r*=0.45+midline*4.5;
+  // Temporal lobe bulge (sides, lower half)
+  if(cp<0.1&&Math.abs(ct*sp)>0.3)r*=1.08;
+  // Frontal lobe projection
+  if(st*sp>0.3)r*=1.06;
+  // Flatten bottom
+  if(cp<-0.5)r*=0.75-cp*0.2;
+  // Sulci (surface folds)
+  const sx=r*sp*ct,sy=r*cp,sz=r*sp*st;
+  r+=Math.sin(sx*12+sy*8)*Math.cos(sz*10)*0.03;
+  r+=Math.sin(sx*22+sz*18)*0.015;
+  return Math.max(r,0.1);
 }
-scene.add(createPlatform());
 
-// ═══════ GLASS DOME (visible containment field) ═══════
-function createDome() {
-  const group = new THREE.Group();
-
-  // Dome shell — visible glass
-  const domeGeo = new THREE.SphereGeometry(1.8, 64, 32, 0, Math.PI * 2, 0, Math.PI * 0.55);
-  const domeMat = new THREE.MeshBasicMaterial({
-    color: 0x00f0ff,
-    transparent: true,
-    opacity: 0.04,
-    side: THREE.DoubleSide
-  });
-  const dome = new THREE.Mesh(domeGeo, domeMat);
-  dome.position.y = -0.2;
-  group.add(dome);
-
-  // Dome wireframe for glass panel look
-  const domeWireGeo = new THREE.SphereGeometry(1.81, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.55);
-  const domeWireMat = new THREE.MeshBasicMaterial({
-    color: 0x00f0ff,
-    wireframe: true,
-    transparent: true,
-    opacity: 0.06
-  });
-  const domeWire = new THREE.Mesh(domeWireGeo, domeWireMat);
-  domeWire.position.y = -0.2;
-  group.add(domeWire);
-
-  // Bottom edge ring — bright
-  const edgeGeo = new THREE.TorusGeometry(1.8, 0.02, 12, 64);
-  const edgeMat = new THREE.MeshBasicMaterial({
-    color: 0x00f0ff,
-    transparent: true,
-    opacity: 0.5
-  });
-  const edge = new THREE.Mesh(edgeGeo, edgeMat);
-  edge.rotation.x = Math.PI / 2;
-  edge.position.y = -0.2;
-  group.add(edge);
-
-  // Edge glow ring
-  const edgeGlowGeo = new THREE.TorusGeometry(1.8, 0.08, 12, 64);
-  const edgeGlowMat = new THREE.MeshBasicMaterial({
-    color: 0x00f0ff,
-    transparent: true,
-    opacity: 0.08,
-    blending: THREE.AdditiveBlending
-  });
-  const edgeGlow = new THREE.Mesh(edgeGlowGeo, edgeGlowMat);
-  edgeGlow.rotation.x = Math.PI / 2;
-  edgeGlow.position.y = -0.2;
-  group.add(edgeGlow);
-
-  return group;
-}
-scene.add(createDome());
-
-// ═══════ AMBIENT PARTICLES ═══════
-function createParticles() {
-  const count = 600;
-  const positions = new Float32Array(count * 3);
-  const colors = new Float32Array(count * 3);
-
-  for (let i = 0; i < count; i++) {
-    const theta = Math.random() * Math.PI * 2;
-    const phi = Math.random() * Math.PI * 0.5;
-    const r = 0.5 + Math.random() * 1.5;
-    positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
-    positions[i * 3 + 1] = -0.5 + r * Math.cos(phi);
-    positions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
-
-    const c = new THREE.Color().setHSL(0.52 + Math.random() * 0.08, 1, 0.5 + Math.random() * 0.3);
-    colors[i * 3] = c.r;
-    colors[i * 3 + 1] = c.g;
-    colors[i * 3 + 2] = c.b;
-  }
-
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-
-  const mat = new THREE.PointsMaterial({
-    size: 0.015,
-    vertexColors: true,
-    transparent: true,
-    opacity: 0.6,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false
-  });
-
-  return new THREE.Points(geo, mat);
-}
-const particles = createParticles();
-scene.add(particles);
-
-// ═══════ BRAIN REGIONS — specific connection points ═══════
-const BRAIN_REGIONS = {
-  'Intel Engine':  { x: 0.0,  y: 0.7,  z: 0.35, region: 'Prefrontal' },
-  'Financial':     { x:-0.3,  y: 0.5,  z: 0.2,  region: 'L-Temporal' },
-  'Winnability':   { x: 0.0,  y: 0.75, z: 0.1,  region: 'Motor Cortex' },
-  'CRM':           { x: 0.3,  y: 0.5,  z: 0.2,  region: 'R-Temporal' },
-  'Quality Gate':  { x: 0.0,  y: 0.65, z:-0.25, region: 'Parietal' },
-  'Staffing':      { x:-0.25, y: 0.6,  z: 0.15, region: 'L-Frontal' },
-  'Proposal':      { x: 0.25, y: 0.6,  z: 0.15, region: 'R-Frontal' },
-  'Red Team':      { x: 0.0,  y: 0.4,  z:-0.35, region: 'Occipital' },
-  'Price to Win':  { x:-0.2,  y: 0.55, z:-0.15, region: 'L-Parietal' },
-  'Assembly':      { x: 0.2,  y: 0.55, z:-0.15, region: 'R-Parietal' },
-  'Scanner':       { x: 0.0,  y: 0.1,  z:-0.15, region: 'Cerebellum' },
-  'Disaster Mon':  { x: 0.0,  y: 0.4,  z: 0.0,  region: 'Amygdala' },
-  'Dashboard':     { x: 0.0,  y: 0.55, z: 0.0,  region: 'Corpus Callosum' },
-  'Amendments':    { x: 0.0,  y: 0.05, z:-0.05, region: 'Brainstem' },
-  'Hunter':        { x: 0.0,  y: 0.55, z: 0.4,  region: 'Frontal Pole' }
-};
-
-// Synapse nodes on the brain surface
-function createSynapseNodes() {
-  AGENTS.forEach(a => {
-    const br = BRAIN_REGIONS[a.name];
-    if (!br) return;
-    // Outer glow sphere
-    const glowGeo = new THREE.SphereGeometry(0.06, 12, 12);
-    const glowMat = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(a.color),
-      transparent: true,
-      opacity: 0.8,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      depthTest: false
-    });
-    const glow = new THREE.Mesh(glowGeo, glowMat);
-    glow.position.set(br.x, br.y, br.z);
-    scene.add(glow);
-    // Inner bright core
-    const coreGeo = new THREE.SphereGeometry(0.025, 8, 8);
-    const coreMat = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: 1.0,
-      depthWrite: false,
-      depthTest: false
-    });
-    const core = new THREE.Mesh(coreGeo, coreMat);
-    core.position.set(br.x, br.y, br.z);
-    scene.add(core);
-  });
-}
-createSynapseNodes();
-
-// ═══════ ENERGY TRACES (agent → specific brain region) ═══════
-const traceLines = [];
-function createEnergyTraces() {
-  AGENTS.forEach((a, i) => {
-    const angle = (i / AGENTS.length) * Math.PI * 2;
-    const agentR = 1.4;
-    // Spread vertically in 4 tiers instead of 3
-    const tier = i % 4;
-    const agentY = -0.1 + tier * 0.28;
-    // Elliptical: compress X, keep Z for depth
-    const ellipseX = 0.7; // horizontal squeeze factor
-    const agentPos = new THREE.Vector3(
-      agentR * ellipseX * Math.cos(angle), agentY, agentR * Math.sin(angle)
-    );
-
-    const br = BRAIN_REGIONS[a.name];
-    if (!br) return;
-    const brainPos = new THREE.Vector3(br.x, br.y, br.z);
-
-    // Build curved path from agent → brain region
-    const mid = new THREE.Vector3().lerpVectors(agentPos, brainPos, 0.5);
-    mid.y += 0.15; // slight arc upward
-    const curve = new THREE.CatmullRomCurve3([agentPos, mid, brainPos]);
-
-    const color = new THREE.Color(a.color);
-
-    // Main trace line (renders on top of brain)
-    const geo = new THREE.TubeGeometry(curve, 24, 0.012, 6, false);
-    const mat = new THREE.MeshBasicMaterial({
-      color: color,
-      transparent: true,
-      opacity: 0.7,
-      depthWrite: false,
-      depthTest: false
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    scene.add(mesh);
-
-    // Glow around trace
-    const glowGeo = new THREE.TubeGeometry(curve, 24, 0.04, 6, false);
-    const glowMat = new THREE.MeshBasicMaterial({
-      color: color,
-      transparent: true,
-      opacity: 0.15,
-      blending: THREE.AdditiveBlending
-    });
-    const glowMesh = new THREE.Mesh(glowGeo, glowMat);
-    scene.add(glowMesh);
-
-    // Traveling pulse
-    const pulseGeo = new THREE.SphereGeometry(0.025, 8, 8);
-    const pulseMat = new THREE.MeshBasicMaterial({
-      color: color,
-      transparent: true,
-      opacity: 0.9,
-      blending: THREE.AdditiveBlending
-    });
-    const pulse = new THREE.Mesh(pulseGeo, pulseMat);
-    scene.add(pulse);
-
-    traceLines.push({ mesh, glowMesh, pulse, curve, agent: a, phase: i * 0.3, agentAngle: angle, agentR, agentY });
-  });
-}
-createEnergyTraces();
-
-// ═══════ AGENT CSS2D LABELS ═══════
-const agentLabels = [];
-function createAgentLabels() {
-  AGENTS.forEach((a, i) => {
-    const angle = (i / AGENTS.length) * Math.PI * 2;
-    const r = 1.4;
-    const tier = i % 4;
-    const y = -0.1 + tier * 0.28;
-
-    const div = document.createElement('div');
-    div.className = 'agent-label';
-    div.style.setProperty('--agent-color', a.color);
-    div.innerHTML = `
-      <div class="icon-ring" style="border-color:${a.color};color:${a.color}">${a.icon}</div>
-      <div class="name">${a.name}</div>
-    `;
-    div.addEventListener('click', (e) => {
-      e.stopPropagation();
-      onAgentClick(a);
-    });
-
-    const label = new THREE.CSS2DObject(div);
-    label.position.set(
-      r * 0.7 * Math.cos(angle),
-      y,
-      r * Math.sin(angle)
-    );
-    scene.add(label);
-    agentLabels.push({ label, baseAngle: angle, radius: r, baseY: y, idx: i });
-  });
-}
-createAgentLabels();
-
-// ═══════ PROCEDURAL BRAIN (renders everywhere) ═══════
-let brainMesh = null;
-
-function createBrain() {
-  const group = new THREE.Group();
-
-  // High-poly sphere with noise displacement for sulci/folds
-  function makeHemisphere(isLeft) {
-    const geo = new THREE.SphereGeometry(0.45, 48, 32, 
-      isLeft ? 0 : Math.PI, Math.PI, 0, Math.PI);
-    const pos = geo.attributes.position;
-    
-    // Multi-frequency noise for brain folds
-    for (let i = 0; i < pos.count; i++) {
-      let x = pos.getX(i);
-      let y = pos.getY(i);
-      let z = pos.getZ(i);
-      
-      // Primary sulci (deep folds)
-      const n1 = Math.sin(x * 12 + y * 8) * Math.cos(z * 10) * 0.04;
-      // Secondary gyri (ridges)  
-      const n2 = Math.sin(x * 20 + z * 15) * Math.cos(y * 18) * 0.025;
-      // Tertiary detail
-      const n3 = Math.sin(x * 35 + y * 30 + z * 25) * 0.01;
-      // Overall brain shape: wider at top, narrower at bottom
-      const shapeY = 1 + y * 0.15;
-      // Frontal lobe bulge
-      const frontal = z > 0 ? 1.05 : 1.0;
-      
-      const displacement = n1 + n2 + n3;
-      const r = Math.sqrt(x*x + y*y + z*z);
-      const nx = x/r, ny = y/r, nz = z/r;
-      
-      pos.setXYZ(i, 
-        (x + nx * displacement) * frontal,
-        (y + ny * displacement) * shapeY,
-        z + nz * displacement
-      );
+// Build hemisphere mesh from brain shape function
+function buildHemi(isLeft){
+  const segsT=48,segsP=36;
+  const verts=[],idxs=[],norms=[];
+  const tStart=isLeft?0:Math.PI;
+  const tEnd=isLeft?Math.PI:Math.PI*2;
+  for(let pi=0;pi<=segsP;pi++){
+    const phi=pi/segsP*Math.PI;
+    for(let ti=0;ti<=segsT;ti++){
+      const theta=tStart+ti/segsT*(tEnd-tStart);
+      const r=brainR(theta,phi);
+      const sp=Math.sin(phi),cp=Math.cos(phi),ct=Math.cos(theta),st=Math.sin(theta);
+      verts.push(r*sp*ct, r*cp, r*sp*st);
+      // Approximate normal
+      const eps=0.01;
+      const rT=brainR(theta+eps,phi),rP=brainR(theta,phi+eps);
+      const dx=(rT*Math.sin(phi)*Math.cos(theta+eps)-r*sp*ct)/eps;
+      const dy=(rP*Math.cos(phi+eps)-r*cp)/eps;
+      norms.push(-dx,-dy,1);
     }
-    geo.computeVertexNormals();
-    return geo;
   }
-  
-  // Left hemisphere
-  const leftGeo = makeHemisphere(true);
-  const brainMat = new THREE.MeshBasicMaterial({
-    color: 0x00ccee,
-    transparent: true,
-    opacity: 0.12
-  });
-  const left = new THREE.Mesh(leftGeo, brainMat);
-  left.position.x = -0.03;
-  group.add(left);
-  
-  // Right hemisphere
-  const rightGeo = makeHemisphere(false);
-  const right = new THREE.Mesh(rightGeo, brainMat.clone());
-  right.position.x = 0.03;
-  group.add(right);
-  
-  // Wireframe overlay for holographic look
-  [left, right].forEach(hemi => {
-    const wire = new THREE.Mesh(hemi.geometry.clone(), new THREE.MeshBasicMaterial({
-      color: 0x00f0ff,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.1
-    }));
-    wire.position.copy(hemi.position);
-    group.add(wire);
-  });
-  
-  // Inner glow core
-  const coreGeo = new THREE.SphereGeometry(0.3, 16, 16);
-  const coreMat = new THREE.MeshBasicMaterial({
-    color: 0x00f0ff,
-    transparent: true,
-    opacity: 0.06,
-    blending: THREE.AdditiveBlending
-  });
-  group.add(new THREE.Mesh(coreGeo, coreMat));
-  
-  // Brainstem
-  const stemGeo = new THREE.CylinderGeometry(0.12, 0.08, 0.35, 12);
-  const stemMat = new THREE.MeshBasicMaterial({
-    color: 0x00aacc,
-    transparent: true,
-    opacity: 0.5
-  });
-  const stem = new THREE.Mesh(stemGeo, stemMat);
-  stem.position.y = -0.55;
-  stem.position.z = -0.1;
-  group.add(stem);
-  
-  // Cerebellum (back bump)
-  const cerebGeo = new THREE.SphereGeometry(0.28, 24, 16);
-  const cerebPos = cerebGeo.attributes.position;
-  for (let i = 0; i < cerebPos.count; i++) {
-    const x = cerebPos.getX(i), y = cerebPos.getY(i), z = cerebPos.getZ(i);
-    const ripple = Math.sin(x * 30) * Math.cos(y * 25) * 0.02;
-    cerebPos.setXYZ(i, x + ripple, y * 0.7 + ripple, z + ripple);
+  for(let pi=0;pi<segsP;pi++){
+    for(let ti=0;ti<segsT;ti++){
+      const a=pi*(segsT+1)+ti,b=a+1,c=a+segsT+1,d=c+1;
+      idxs.push(a,b,c,b,d,c);
+    }
   }
-  cerebGeo.computeVertexNormals();
-  const cerebellum = new THREE.Mesh(cerebGeo, brainMat.clone());
-  cerebellum.position.set(0, -0.35, -0.25);
-  group.add(cerebellum);
-  
-  group.position.y = 0.35;
-  group.userData.baseScale = 1;
-  scene.add(group);
-  brainMesh = group;
-  
-  // Point light inside brain for glow
-  const innerLight = new THREE.PointLight(0x00f0ff, 0.8, 3);
-  innerLight.position.set(0, 0.35, 0);
-  scene.add(innerLight);
-  
-  // Remove loading screen
-  const loadEl = document.getElementById('loading');
-  loadEl.style.opacity = '0';
-  setTimeout(() => loadEl.style.display = 'none', 500);
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));
+  g.setAttribute('normal',new THREE.Float32BufferAttribute(norms,3));
+  g.setIndex(idxs);
+  g.computeVertexNormals();
+  return g;
 }
 
-createBrain();
+// Very transparent shell material
+const shellMat=new THREE.ShaderMaterial({
+  uniforms:{uTime:{value:0}},
+  vertexShader:'varying vec3 vN,vV;void main(){vec4 wp=modelMatrix*vec4(position,1.0);vN=normalize(normalMatrix*normal);vV=normalize(cameraPosition-wp.xyz);gl_Position=projectionMatrix*viewMatrix*wp;}',
+  fragmentShader:'uniform float uTime;varying vec3 vN,vV;void main(){float fr=pow(1.0-max(dot(vN,vV),0.0),4.0);vec3 col=vec3(0.0,0.08,0.14)*0.5+vec3(0.0,0.2,0.3)*fr*0.12;gl_FragColor=vec4(col,0.15+fr*0.06);}',
+  transparent:true,depthWrite:false,side:THREE.DoubleSide
+});
 
-// Ambient light
-scene.add(new THREE.AmbientLight(0x112233, 0.5));
+const brainGrp=new THREE.Group();
+brainGrp.add(new THREE.Mesh(buildHemi(true),shellMat));
+brainGrp.add(new THREE.Mesh(buildHemi(false),shellMat.clone()));
+brainGrp.children[1].material.uniforms={uTime:shellMat.uniforms.uTime};
+brainGrp.position.y=0.05;
+scene.add(brainGrp);
 
-// ═══════ ANIMATION LOOP ═══════
-const clock = new THREE.Clock();
+// ════════════════════════════════════════════
+// STRUCTURED FIBER TRACTS (inside brain)
+// ════════════════════════════════════════════
 
-function animate() {
+const fiberVerts=[];const fiberCols=[];
+
+// Helper: sample points on a smooth curve and push line segments
+function addFiber(points,col,brightness){
+  const curve=new THREE.CatmullRomCurve3(points);
+  const samples=curve.getPoints(12);
+  for(let i=0;i<samples.length-1;i++){
+    fiberVerts.push(samples[i].x,samples[i].y,samples[i].z);
+    fiberVerts.push(samples[i+1].x,samples[i+1].y,samples[i+1].z);
+    const b=brightness*(0.8+Math.random()*0.4);
+    fiberCols.push(col[0]*b,col[1]*b,col[2]*b);
+    fiberCols.push(col[0]*b,col[1]*b,col[2]*b);
+  }
+}
+
+const CY=[0,0.6,0.8]; // cyan fiber color
+
+// CORPUS CALLOSUM: Left↔Right fibers through center
+for(let i=0;i<35;i++){
+  const z=(Math.random()-0.5)*0.5;
+  const y=0.1+Math.random()*0.25;
+  const spread=0.3+Math.random()*0.3;
+  addFiber([
+    new THREE.Vector3(-spread-0.15,y+Math.random()*0.1,z),
+    new THREE.Vector3(-0.08,y+0.05,z+Math.random()*0.05),
+    new THREE.Vector3(0.08,y+0.05,z-Math.random()*0.05),
+    new THREE.Vector3(spread+0.15,y+Math.random()*0.1,z)
+  ],CY,0.18+Math.random()*0.1);
+}
+
+// PROJECTION FIBERS: Top↓Bottom in each hemisphere
+for(let h=-1;h<=1;h+=2){
+  for(let i=0;i<20;i++){
+    const x=h*(0.15+Math.random()*0.35);
+    const z=(Math.random()-0.5)*0.45;
+    const topY=0.3+Math.random()*0.35;
+    addFiber([
+      new THREE.Vector3(x+Math.random()*0.05,topY,z),
+      new THREE.Vector3(x*0.7,topY*0.4,z*0.8),
+      new THREE.Vector3(x*0.3,-0.1+Math.random()*0.1,z*0.5),
+      new THREE.Vector3(x*0.15,-0.35,z*0.3)
+    ],CY,0.12+Math.random()*0.08);
+  }
+}
+
+// ASSOCIATION FIBERS: Front↔Back curved within each hemisphere  
+for(let h=-1;h<=1;h+=2){
+  for(let i=0;i<25;i++){
+    const x=h*(0.2+Math.random()*0.25);
+    const y=-0.1+Math.random()*0.45;
+    const arcH=0.1+Math.random()*0.15;
+    addFiber([
+      new THREE.Vector3(x,y,0.25+Math.random()*0.2),
+      new THREE.Vector3(x+Math.random()*0.08,y+arcH,0.1),
+      new THREE.Vector3(x-Math.random()*0.08,y+arcH,-0.1),
+      new THREE.Vector3(x,y,-0.25-Math.random()*0.15)
+    ],CY,0.1+Math.random()*0.08);
+  }
+}
+
+// THALAMIC RADIATIONS: fan from center outward
+for(let i=0;i<20;i++){
+  const angle=Math.random()*Math.PI*2;
+  const elev=(Math.random()-0.3)*0.8;
+  const reach=0.3+Math.random()*0.25;
+  addFiber([
+    new THREE.Vector3(0,0.05,0),
+    new THREE.Vector3(Math.cos(angle)*0.1,0.05+elev*0.3,Math.sin(angle)*0.1),
+    new THREE.Vector3(Math.cos(angle)*reach,0.05+elev,Math.sin(angle)*reach)
+  ],CY,0.15+Math.random()*0.1);
+}
+
+const fGeo=new THREE.BufferGeometry();
+fGeo.setAttribute('position',new THREE.Float32BufferAttribute(fiberVerts,3));
+fGeo.setAttribute('color',new THREE.Float32BufferAttribute(fiberCols,3));
+const fMat=new THREE.LineBasicMaterial({vertexColors:true,transparent:true,opacity:0.45,depthWrite:false});
+const fibers=new THREE.LineSegments(fGeo,fMat);
+fibers.position.y=0.05;scene.add(fibers);
+
+// ════════════════════════════════════════════
+// REGIONAL NODE CLUSTERS
+// ════════════════════════════════════════════
+const regions=[
+  {x:0.0,y:0.4,z:0.3,label:'Planning',density:40,spread:0.15},
+  {x:-0.3,y:0.05,z:0.15,label:'Memory_L',density:35,spread:0.13},
+  {x:0.3,y:0.05,z:0.15,label:'Memory_R',density:35,spread:0.13},
+  {x:0.0,y:0.35,z:-0.2,label:'Validation',density:30,spread:0.12},
+  {x:0.0,y:0.1,z:0.0,label:'Synthesis',density:45,spread:0.12},
+  {x:0.0,y:-0.2,z:-0.1,label:'Routing',density:25,spread:0.1},
+  {x:-0.22,y:0.3,z:0.15,label:'Reasoning_L',density:30,spread:0.12},
+  {x:0.22,y:0.3,z:0.15,label:'Reasoning_R',density:30,spread:0.12}
+];
+
+let totalNodes=0;regions.forEach(r=>totalNodes+=r.density);
+totalNodes+=200; // scattered background nodes
+const nodePos=new Float32Array((totalNodes+200)*3);
+const nodeCol=new Float32Array((totalNodes+200)*3);
+const nodeSz=new Float32Array(totalNodes+200);
+let ni2=0;
+
+// Cluster nodes
+regions.forEach(rg=>{
+  for(let i=0;i<rg.density;i++){
+    const x=rg.x+(Math.random()-0.5)*rg.spread*2;
+    const y=rg.y+(Math.random()-0.5)*rg.spread*2;
+    const z=rg.z+(Math.random()-0.5)*rg.spread*2;
+    nodePos[ni2*3]=x;nodePos[ni2*3+1]=y+0.05;nodePos[ni2*3+2]=z;
+    const isHot=Math.random()<0.15;
+    const b=isHot?(0.6+Math.random()*0.4):(0.15+Math.random()*0.2);
+    nodeCol[ni2*3]=b*0.1;nodeCol[ni2*3+1]=b*0.65;nodeCol[ni2*3+2]=b*0.85;
+    nodeSz[ni2]=isHot?(2.5+Math.random()*2.5):(1.0+Math.random()*1.0);
+    ni2++;
+  }
+});
+
+// Scattered background nodes throughout brain volume
+for(let i=0;i<200;i++){
+  const theta=Math.random()*Math.PI*2;
+  const phi=Math.acos(1-2*Math.random());
+  const r=brainR(theta,phi)*Math.random()*0.85;
+  const sp=Math.sin(phi),cp=Math.cos(phi),ct=Math.cos(theta),st=Math.sin(theta);
+  nodePos[ni2*3]=r*sp*ct;nodePos[ni2*3+1]=r*cp+0.05;nodePos[ni2*3+2]=r*sp*st;
+  const b=0.06+Math.random()*0.08;
+  nodeCol[ni2*3]=b*0.1;nodeCol[ni2*3+1]=b*0.5;nodeCol[ni2*3+2]=b*0.7;
+  nodeSz[ni2]=0.6+Math.random()*0.6;
+  ni2++;
+}
+
+const ndGeo=new THREE.BufferGeometry();
+ndGeo.setAttribute('position',new THREE.BufferAttribute(nodePos.slice(0,ni2*3),3));
+ndGeo.setAttribute('color',new THREE.BufferAttribute(nodeCol.slice(0,ni2*3),3));
+ndGeo.setAttribute('size',new THREE.BufferAttribute(nodeSz.slice(0,ni2),1));
+
+const ndVS=`attribute float size;varying vec3 vC;uniform float uT;void main(){vC=color;float s=size*(1.0+0.2*sin(uT*2.0+position.x*8.0+position.y*6.0));vec4 mv=modelViewMatrix*vec4(position,1.0);gl_PointSize=s*(180.0/(-mv.z));gl_Position=projectionMatrix*mv;}`;
+const ndFS=`varying vec3 vC;void main(){float d=length(gl_PointCoord-vec2(0.5));if(d>0.5)discard;float g=1.0-d*2.0;g=pow(g,1.4);gl_FragColor=vec4(vC*2.2,g*0.85);}`;
+const ndMat=new THREE.ShaderMaterial({uniforms:{uT:{value:0}},vertexShader:ndVS,fragmentShader:ndFS,transparent:true,vertexColors:true,depthWrite:false});
+const nodes=new THREE.Points(ndGeo,ndMat);
+nodes.position.y=0.05;scene.add(nodes);
+
+// Minimal platform
+const pY=-0.68;
+const pDisc=new THREE.Mesh(new THREE.CylinderGeometry(1.1,1.1,0.004,48),new THREE.MeshBasicMaterial({color:0x000810,transparent:true,opacity:0.4}));
+pDisc.position.y=pY;scene.add(pDisc);
+[0.3,0.55,0.8,1.05].forEach((r,i)=>{const rr=new THREE.Mesh(new THREE.TorusGeometry(r,0.0015,6,48),new THREE.MeshBasicMaterial({color:0x00d0f0,transparent:true,opacity:0.02+i*0.008}));rr.rotation.x=Math.PI/2;rr.position.y=pY+0.003;scene.add(rr);});
+
+scene.add(new THREE.AmbientLight(0x060a14,0.15));
+
+const clock=new THREE.Clock();
+function animate(){
   requestAnimationFrame(animate);
-  const t = clock.getElapsedTime();
-
-  // Rotate brain slowly
-  if (brainMesh) {
-    brainMesh.rotation.y = t * 0.1;
-    // Gentle breathing
-    const breathe = 1 + Math.sin(t * 0.8) * 0.02;
-    const bs = brainMesh.userData.baseScale || 1;
-    brainMesh.scale.set(breathe * bs, breathe * bs, breathe * bs);
-  }
-
-  // Animate particles
-  const pPos = particles.geometry.attributes.position;
-  for (let i = 0; i < pPos.count; i++) {
-    let y = pPos.getY(i);
-    y += 0.001;
-    if (y > 1.5) y = -0.5;
-    pPos.setY(i, y);
-  }
-  pPos.needsUpdate = true;
-  particles.rotation.y = t * 0.02;
-
-  // Pulse energy traces + traveling particles
-  traceLines.forEach((tl, i) => {
-    const pulse = 0.3 + Math.sin(t * 2 + i * 0.5) * 0.15;
-    tl.mesh.material.opacity = pulse;
-    tl.glowMesh.material.opacity = pulse * 0.2;
-    
-    // Traveling pulse along curve (agent → brain region)
-    const progress = ((t * 0.4 + tl.phase) % 1);
-    const pt = tl.curve.getPoint(progress);
-    tl.pulse.position.copy(pt);
-    tl.pulse.material.opacity = 0.7 + Math.sin(t * 8) * 0.3;
-    const pScale = 0.8 + Math.sin(t * 6 + i) * 0.4;
-    tl.pulse.scale.setScalar(pScale);
-  });
-
-  // Gentle bob on agent labels (no orbit — keeps traces connected)
-  agentLabels.forEach((al) => {
-    al.label.position.y = al.baseY + Math.sin(t * 0.5 + al.idx) * 0.03;
-  });
-
-  controls.update();
-  composer.render();
-  labelRenderer.render(scene, camera);
+  const t=clock.getElapsedTime();
+  shellMat.uniforms.uTime.value=t;ndMat.uniforms.uT.value=t;
+  const b=1+Math.sin(t*0.7)*0.004;brainGrp.scale.set(b,b,b);
+  controls.update();composer.render();
 }
-
+setTimeout(()=>{const l=document.getElementById('ld');l.style.opacity='0';setTimeout(()=>l.style.display='none',800);},400);
 animate();
-
-// Resize
-window.addEventListener('resize', () => {
-  const w = window.innerWidth;
-  const h = window.innerHeight;
-  camera.aspect = w / h;
-  camera.updateProjectionMatrix();
-  renderer.setSize(w, h);
-  labelRenderer.setSize(w, h);
-  composer.setSize(w, h);
-});
-
-// ═══════ INTERACTION — tap to see detail ═══════
-const API_BASE = window.location.origin;
-const overlay = document.getElementById('detail-overlay');
-const detailTitle = document.getElementById('detail-title');
-const detailBody = document.getElementById('detail-body');
-
-document.getElementById('detail-close').addEventListener('click', () => {
-  overlay.classList.remove('open');
-});
-
-// Close on tap outside
-overlay.addEventListener('click', (e) => {
-  if (e.target === overlay) overlay.classList.remove('open');
-});
-
-function showDetail(title, html) {
-  detailTitle.textContent = title;
-  detailBody.innerHTML = html;
-  overlay.classList.add('open');
-}
-
-function showLoading(title) {
-  detailTitle.textContent = title;
-  detailBody.innerHTML = '<div class="detail-loading">QUERYING ORGANISM...</div>';
-  overlay.classList.add('open');
-}
-
-// Agent click handler
-function onAgentClick(agent) {
-  showLoading(agent.name.toUpperCase());
-  
-  fetch(API_BASE + '/api/memories?limit=50')
-    .then(r => r.json())
-    .then(memories => {
-      // Filter to this agent type
-      const agentKey = agent.name.toLowerCase().replace(/\s+/g, '_');
-      const relevant = (memories || []).filter(m => {
-        const a = (m.agent || '').toLowerCase();
-        return a.includes(agentKey) || a.includes(agent.name.toLowerCase().split(' ')[0]);
-      }).slice(0, 5);
-      
-      if (relevant.length === 0) {
-        showDetail(agent.name.toUpperCase(), `
-          <div style="color:${agent.color}">
-            <span class="detail-tag" style="background:${agent.color}22;border:1px solid ${agent.color}">${agent.type}</span>
-            <span class="detail-tag" style="background:${agent.status === 'gated' ? '#ffffff11' : agent.color + '22'};border:1px solid ${agent.status === 'gated' ? '#ffffff33' : agent.color}">${agent.status}</span>
-          </div>
-          <p style="margin-top:10px;color:rgba(255,255,255,0.5)">No recent memories from this agent. ${agent.status === 'gated' ? 'Agent is gated — requires RFP document to activate.' : 'Run /api/trigger to generate fresh analysis.'}</p>
-        `);
-      } else {
-        const memHTML = relevant.map(m => `
-          <div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05)">
-            <div style="font-size:9px;color:rgba(255,255,255,0.35);margin-bottom:3px">${new Date(m.created_at).toLocaleDateString()} — ${m.opportunity_id ? m.opportunity_id.split('-').slice(0,3).join('-') : 'system'}</div>
-            <div style="font-size:11px;color:rgba(255,255,255,0.75)">${(m.observation || '').substring(0, 300)}${(m.observation || '').length > 300 ? '...' : ''}</div>
-          </div>
-        `).join('');
-        
-        showDetail(agent.name.toUpperCase(), `
-          <div style="margin-bottom:8px">
-            <span class="detail-tag" style="background:${agent.color}22;border:1px solid ${agent.color}">${agent.type}</span>
-            <span class="detail-tag" style="background:${agent.color}22;border:1px solid ${agent.color}">${agent.status}</span>
-            <span class="detail-tag" style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15)">${relevant.length} recent</span>
-          </div>
-          ${memHTML}
-        `);
-      }
-    })
-    .catch(() => {
-      showDetail(agent.name.toUpperCase(), `
-        <div style="color:${agent.color}">
-          <span class="detail-tag" style="background:${agent.color}22;border:1px solid ${agent.color}">${agent.type}</span>
-          <span class="detail-tag" style="background:${agent.color}22;border:1px solid ${agent.color}">${agent.status}</span>
-        </div>
-        <p style="margin-top:10px;color:rgba(255,255,255,0.4)">Brain region: ${BRAIN_REGIONS[agent.name]?.region || 'Unknown'}</p>
-        <p style="color:rgba(255,255,255,0.3);font-size:10px">Could not reach organism API.</p>
-      `);
-    });
-}
-
-// Pipeline click handler
-function onPipelineClick(opp) {
-  showLoading(opp.name);
-  
-  fetch(API_BASE + '/api/pipeline')
-    .then(r => r.json())
-    .then(opps => {
-      const match = (opps || []).find(o => 
-        o.title && o.title.toLowerCase().includes(opp.name.toLowerCase().split(' ')[0])
-      );
-      
-      if (match) {
-        const hasRFP = match.rfp_document_retrieved ? '✓ RFP Retrieved' : '✗ No RFP';
-        const hasProposal = match.proposal_content ? '✓ Proposal (' + Math.round((match.proposal_content||'').length/1000) + 'K)' : '✗ No Proposal';
-        
-        showDetail(opp.name.toUpperCase(), `
-          <div style="margin-bottom:8px">
-            <span class="detail-tag" style="background:${opp.color}22;border:1px solid ${opp.color}">OPI ${match.opi_score}</span>
-            <span class="detail-tag" style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15)">${match.stage}</span>
-            ${match.due_date ? '<span class="detail-tag" style="background:#ef444422;border:1px solid #ef4444">Due ' + new Date(match.due_date).toLocaleDateString() + '</span>' : ''}
-          </div>
-          <p style="font-size:10px;color:rgba(255,255,255,0.5);margin-bottom:6px">${match.agency || ''} — ${match.vertical || ''}</p>
-          <p style="font-size:10px;margin-bottom:4px;color:${match.rfp_document_retrieved ? '#4ade80' : '#ef4444'}">${hasRFP}</p>
-          <p style="font-size:10px;margin-bottom:8px;color:${match.proposal_content ? '#4ade80' : '#ef4444'}">${hasProposal}</p>
-          ${match.scope_analysis ? '<div style="padding:8px 0;border-top:1px solid rgba(255,255,255,0.05)"><div style="font-size:9px;color:rgba(0,240,255,0.5);margin-bottom:3px">SCOPE</div><div style="font-size:11px;color:rgba(255,255,255,0.7)">' + (match.scope_analysis||'').substring(0,400) + '...</div></div>' : ''}
-        `);
-      } else {
-        showDetail(opp.name.toUpperCase(), '<p style="color:rgba(255,255,255,0.4)">Opportunity not found in pipeline.</p>');
-      }
-    })
-    .catch(() => {
-      showDetail(opp.name.toUpperCase(), '<p style="color:rgba(255,255,255,0.4)">Could not reach organism API.</p>');
-    });
-}
-
-// Wire up pipeline row clicks
-document.querySelectorAll('.opp-row').forEach((row, i) => {
-  row.addEventListener('click', () => onPipelineClick(PIPELINE[i]));
-});
+window.addEventListener('resize',()=>{const w=ctr.clientWidth,h=ctr.clientHeight;if(w&&h){camera.aspect=w/h;camera.updateProjectionMatrix();renderer.setSize(w,h);composer.setSize(w,h);}});
 </script>
 </body>
 </html>
