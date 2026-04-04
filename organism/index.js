@@ -41,7 +41,7 @@ const server = http.createServer(async (req, res) => {
 
     if (url === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'alive', uptime_seconds: Math.floor(process.uptime()), timestamp: new Date().toISOString(), version: 'V4.2-lean-15', agents_active: 15 }));
+      res.end(JSON.stringify({ status: 'alive', uptime_seconds: Math.floor(process.uptime()), timestamp: new Date().toISOString(), version: 'V4.3-system-build', agents_active: 15 }));
       return;
     }
 
@@ -1321,6 +1321,125 @@ if (url.startsWith('/api/analytics')) {
     var anlData = await supabase.from('pipeline_analytics').select('*').order('updated_at', { ascending: false }).limit(100);
     res.end(JSON.stringify(anlData.data || []));
   } catch(e) { res.end(JSON.stringify({ error: e.message })); }
+  return;
+}
+
+
+// === DISASTER MONITOR MANUAL TRIGGER — /api/disaster-check ===
+if (url === '/api/disaster-check') {
+  res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
+  try {
+    var state = await loadState();
+    var dmResult = await agentDisasterMonitor(state);
+    res.end(JSON.stringify({ success: true, result: dmResult }));
+  } catch (e) {
+    res.end(JSON.stringify({ error: e.message }));
+  }
+  return;
+}
+
+// === LOSS ANALYSIS — /api/loss-analysis ===
+if (url === '/api/loss-analysis') {
+  res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
+  try {
+    var outcomes = await supabase.from('opportunities').select('id,title,agency,vertical,opi_score,outcome,outcome_notes,stage,estimated_value,due_date').not('outcome', 'is', null).order('last_updated', { ascending: false }).limit(50);
+    var records = outcomes.data || [];
+    var wins = records.filter(function(r) { return r.outcome === 'won'; });
+    var losses = records.filter(function(r) { return r.outcome === 'lost'; });
+    var noBids = records.filter(function(r) { return r.outcome === 'no_bid'; });
+    var cancelled = records.filter(function(r) { return r.outcome === 'cancelled'; });
+    var winRate = records.length > 0 ? Math.round((wins.length / (wins.length + losses.length || 1)) * 100) : 0;
+    var avgWinOPI = wins.length > 0 ? Math.round(wins.reduce(function(s,w) { return s + (w.opi_score || 0); }, 0) / wins.length) : 0;
+    var avgLossOPI = losses.length > 0 ? Math.round(losses.reduce(function(s,l) { return s + (l.opi_score || 0); }, 0) / losses.length) : 0;
+    var verticalBreakdown = {};
+    records.forEach(function(r) { var v = r.vertical || 'unknown'; if (!verticalBreakdown[v]) verticalBreakdown[v] = { wins: 0, losses: 0, no_bids: 0 }; if (r.outcome === 'won') verticalBreakdown[v].wins++; else if (r.outcome === 'lost') verticalBreakdown[v].losses++; else if (r.outcome === 'no_bid') verticalBreakdown[v].no_bids++; });
+    res.end(JSON.stringify({
+      total_outcomes: records.length, wins: wins.length, losses: losses.length,
+      no_bids: noBids.length, cancelled: cancelled.length,
+      win_rate_pct: winRate, avg_win_opi: avgWinOPI, avg_loss_opi: avgLossOPI,
+      vertical_breakdown: verticalBreakdown,
+      opi_calibration: { threshold_suggestion: avgWinOPI > 0 ? Math.max(60, avgWinOPI - 15) : 60 },
+      recent_outcomes: records.slice(0, 10).map(function(r) { return { title: r.title, outcome: r.outcome, opi: r.opi_score, vertical: r.vertical, notes: r.outcome_notes }; })
+    }));
+  } catch (e) { res.end(JSON.stringify({ error: e.message })); }
+  return;
+}
+
+// === EXECUTIVE BRIEFING — /api/exec-brief ===
+if (url === '/api/exec-brief') {
+  res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
+  try {
+    var state = await loadState();
+    var pursuing = state.pipeline.filter(function(o) { return o.stage === 'pursuing' || o.stage === 'proposal'; });
+    var submitted = state.pipeline.filter(function(o) { return o.stage === 'submitted'; });
+    var identified = state.pipeline.filter(function(o) { return o.stage === 'identified'; });
+    var upcoming = pursuing.filter(function(o) { return o.due_date; }).sort(function(a,b) { return new Date(a.due_date) - new Date(b.due_date); });
+    
+    var recentMems = await supabase.from('organism_memory').select('agent,observation,created_at')
+      .in('agent', ['pipeline_scanner','disaster_monitor','amendment_tracker','dashboard_agent','self_awareness'])
+      .order('created_at', { ascending: false }).limit(10);
+    var briefMems = (recentMems.data || []).map(function(m) { return { agent: m.agent, summary: (m.observation || '').slice(0, 300), when: m.created_at }; });
+    
+    var alerts = [];
+    upcoming.forEach(function(o) {
+      var days = o.due_date ? Math.ceil((new Date(o.due_date) - Date.now()) / 86400000) : null;
+      if (days !== null && days <= 14) alerts.push({ type: 'deadline', title: o.title, days_remaining: days, due: o.due_date, opi: o.opi_score });
+    });
+    
+    var newDisasters = await supabase.from('disaster_alerts').select('*').eq('status', 'new').order('created_at', { ascending: false }).limit(5);
+    (newDisasters.data || []).forEach(function(d) { alerts.push({ type: 'disaster', title: 'DR-' + d.disaster_number + ' ' + d.state + ': ' + d.disaster_name, threat_level: d.threat_level }); });
+
+    res.end(JSON.stringify({
+      generated: new Date().toISOString(),
+      pipeline_summary: {
+        total_active: state.pipeline.length,
+        pursuing: pursuing.length, submitted: submitted.length, identified: identified.length,
+        total_estimated_value: state.pipeline.reduce(function(s,o) { return s + (parseFloat(o.estimated_value) || 0); }, 0)
+      },
+      upcoming_deadlines: upcoming.slice(0, 5).map(function(o) {
+        var d = o.due_date ? Math.ceil((new Date(o.due_date) - Date.now()) / 86400000) : null;
+        return { title: (o.title || '').slice(0, 80), opi: o.opi_score, stage: o.stage, due: o.due_date, days_remaining: d };
+      }),
+      alerts: alerts,
+      awaiting_award: submitted.map(function(o) { return { title: o.title, opi: o.opi_score }; }),
+      recent_intel: briefMems,
+      agent_health: { active_agents: 15, version: 'V4.2-lean-15', last_cycle: briefMems.length > 0 ? briefMems[0].when : null }
+    }));
+  } catch (e) { res.end(JSON.stringify({ error: e.message })); }
+  return;
+}
+
+// === COMPLIANCE CHECK — /api/compliance-check?id= ===
+if (url.startsWith('/api/compliance-check')) {
+  var ccId = new URL('http://x' + url).searchParams.get('id');
+  if (!ccId) { res.writeHead(400, corsHeaders); res.end(JSON.stringify({ error: 'id required' })); return; }
+  res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
+  try {
+    var ccOpp = await supabase.from('opportunities').select('*').eq('id', ccId).single();
+    if (!ccOpp.data) { res.end(JSON.stringify({ error: 'not found' })); return; }
+    var opp = ccOpp.data;
+    var rfpText = (opp.rfp_text || '').slice(0, 80000);
+    if (rfpText.length < 500) { res.end(JSON.stringify({ error: 'No RFP text available', rfp_chars: rfpText.length })); return; }
+    
+    var ccPrompt = 'You are a compliance analyst. Extract EVERY submission requirement from this RFP. Return ONLY a JSON array where each item has: requirement (text), section (RFP section reference), category (one of: format, content, certification, insurance, legal, pricing, personnel, deadline, delivery), mandatory (true/false), hgi_status (one of: ready, needs_action, unknown).\n\nFor hgi_status: mark "ready" for standard items HGI can easily provide (insurance certs, W-9, drug-free workplace, etc). Mark "needs_action" for items requiring specific preparation (past performance refs with contacts, specific certifications, project-specific methodology). Mark "unknown" for items you cannot assess.\n\nRFP TEXT:\n' + rfpText;
+    var ccOut = await claudeCall('compliance extraction', ccPrompt, 8000, { model: 'claude-haiku-4-5-20251001' });
+    var ccMatch = ccOut.match(/\[[\s\S]*\]/);
+    var requirements = [];
+    if (ccMatch) { try { requirements = JSON.parse(ccMatch[0]); } catch(e) {} }
+    
+    var ready = requirements.filter(function(r) { return r.hgi_status === 'ready'; }).length;
+    var action = requirements.filter(function(r) { return r.hgi_status === 'needs_action'; }).length;
+    var unknown = requirements.filter(function(r) { return r.hgi_status === 'unknown'; }).length;
+    
+    res.end(JSON.stringify({
+      opportunity: opp.title,
+      total_requirements: requirements.length,
+      ready: ready, needs_action: action, unknown: unknown,
+      compliance_score: requirements.length > 0 ? Math.round((ready / requirements.length) * 100) : 0,
+      requirements: requirements,
+      categories: requirements.reduce(function(acc, r) { var c = r.category || 'other'; if (!acc[c]) acc[c] = 0; acc[c]++; return acc; }, {})
+    }));
+  } catch (e) { res.end(JSON.stringify({ error: e.message })); }
   return;
 }
 
@@ -3243,14 +3362,104 @@ async function agentDiscovery(state) {
 }
 
 async function agentDisasterMonitor(state) {
-  log('DISASTER MONITOR...');
-  var task = 'TASK: Check for NEW disaster declarations and emergency procurement in LA, MS, TX, FL, AL, GA. Search FEMA.gov/disasters, GOHSEP, MEMA, NWS. For each: type, location, date, procurement timeline, HGI response recommendation.';
-  var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1500, { webSearch: true });
-  if (!out || out.length < 100) return null;
-  var hasUrl = /https?:\/\//.test(out);
-  await storeMemory('disaster_monitor', null, 'disaster,fema', out, 'analysis', hasUrl ? 'fema.gov' : null, hasUrl ? 'high' : 'inferred');
-  return { agent: 'disaster_monitor', opp: 'system', chars: out.length };
+  log('DISASTER MONITOR (direct FEMA API + auto-intake)...');
+  var hgiStates = ['Louisiana', 'Texas', 'Florida', 'Mississippi', 'Alabama', 'Georgia'];
+  var stateAbbr = { Louisiana: 'LA', Texas: 'TX', Florida: 'FL', Mississippi: 'MS', Alabama: 'AL', Georgia: 'GA' };
+  var newDisasters = [];
+  var knownDRs = state.pipeline.map(function(o) { var m = (o.title || '').match(/DR-(\d+)/); return m ? m[1] : null; }).filter(Boolean);
+  
+  for (var si = 0; si < hgiStates.length; si++) {
+    try {
+      var cutoff = new Date(Date.now() - 120 * 86400000).toISOString().slice(0, 10);
+      var fUrl = 'https://www.fema.gov/api/open/v2/DisasterDeclarationsSummaries?' +
+        '%24filter=state%20eq%20%27' + hgiStates[si] + '%27%20and%20declarationDate%20gt%20%27' + cutoff + 'T00:00:00.000z%27' +
+        '&%24orderby=declarationDate%20desc&%24top=20';
+      var fResp = await fetch(fUrl, { headers: { Accept: 'application/json' } });
+      if (!fResp.ok) continue;
+      var fData = await fResp.json();
+      var decls = fData.DisasterDeclarationsSummaries || [];
+      for (var di = 0; di < decls.length; di++) {
+        var d = decls[di];
+        if (knownDRs.indexOf(String(d.disasterNumber)) >= 0) continue;
+        var existing = await supabase.from('disaster_alerts').select('id').eq('disaster_number', String(d.disasterNumber)).limit(1);
+        if (existing.data && existing.data.length > 0) continue;
+        newDisasters.push({
+          disaster_number: String(d.disasterNumber),
+          state: stateAbbr[hgiStates[si]] || hgiStates[si],
+          state_full: hgiStates[si],
+          title: d.declarationTitle || '',
+          type: d.incidentType || '',
+          declaration_date: d.declarationDate || null,
+          counties: d.designatedArea || '',
+          pa: d.paProgramDeclared || false,
+          ia: d.ihProgramDeclared || false,
+          hm: d.hmProgramDeclared || false,
+          fema_url: 'https://www.fema.gov/disaster/' + d.disasterNumber
+        });
+      }
+    } catch (e) { log('DM FEMA err ' + hgiStates[si] + ': ' + e.message); }
+  }
+  log('DISASTER MONITOR: ' + newDisasters.length + ' new declarations from ' + hgiStates.length + ' states');
+  
+  if (newDisasters.length === 0) {
+    await storeMemory('disaster_monitor', null, 'disaster,fema',
+      'FEMA API scan: 0 new declarations in HGI states (last 120 days). All known DRs already tracked.',
+      'analysis', 'fema.gov', 'high');
+    return { agent: 'disaster_monitor', opp: 'system', chars: 80, new_disasters: 0 };
+  }
+  
+  var autoIntaked = 0;
+  for (var ni = 0; ni < newDisasters.length; ni++) {
+    var nd = newDisasters[ni];
+    var programs = (nd.pa ? 'PA ' : '') + (nd.ia ? 'IA ' : '') + (nd.hm ? 'HM' : '');
+    try {
+      await supabase.from('disaster_alerts').insert({
+        id: 'fema-dr-' + nd.disaster_number,
+        disaster_number: nd.disaster_number,
+        disaster_name: nd.title,
+        state: nd.state,
+        declaration_date: nd.declaration_date,
+        incident_type: nd.type,
+        counties: nd.counties,
+        fema_programs: programs.trim(),
+        procurement_window: nd.pa ? '3-18 months post-declaration' : 'Monitor',
+        hgi_recommendation: nd.pa ? 'PURSUE: PA-TAC procurement expected. Position for CM/PM/grant admin.' : 'WATCH: No PA program. Monitor for state-level procurement.',
+        hgi_vertical: 'disaster',
+        threat_level: nd.pa ? 'high' : 'medium',
+        source_url: nd.fema_url,
+        source_agent: 'disaster_monitor'
+      });
+    } catch (e) { log('DA insert err: ' + e.message); }
+    
+    if (nd.pa) {
+      var oppTitle = 'DR-' + nd.disaster_number + ' ' + nd.state + ' \u2014 ' + nd.title;
+      var dupCheck = await supabase.from('opportunities').select('id').ilike('title', '%DR-' + nd.disaster_number + '%').limit(1);
+      if (!dupCheck.data || dupCheck.data.length === 0) {
+        try {
+          await supabase.from('opportunities').insert({
+            id: 'fema-dr-' + nd.disaster_number + '-' + nd.state.toLowerCase(),
+            title: oppTitle, agency: 'FEMA / ' + nd.state_full,
+            vertical: 'disaster', state: nd.state,
+            opi_score: 75, stage: 'identified', status: 'active',
+            source_url: nd.fema_url,
+            description: 'FEMA DR-' + nd.disaster_number + '. ' + nd.type + ' (' + (nd.declaration_date || '').slice(0,10) + '). Programs: ' + programs + '. Auto-discovered by organism disaster monitor.',
+            discovered_at: new Date().toISOString(), last_updated: new Date().toISOString()
+          });
+          autoIntaked++;
+          log('AUTO-INTAKE: DR-' + nd.disaster_number + ' ' + nd.state + ' added (OPI 75)');
+        } catch (e) { log('Auto-intake err: ' + e.message); }
+      }
+    }
+  }
+  
+  var summary = 'DISASTER MONITOR \u2014 ' + newDisasters.length + ' NEW:\\n';
+  newDisasters.forEach(function(d) {
+    summary += '  DR-' + d.disaster_number + ' ' + d.state + ': ' + d.title + ' (' + d.type + ') Programs: ' + ((d.pa?'PA ':'')+(d.ia?'IA ':'')+(d.hm?'HM':'')) + '\\n';
+  });
+  if (autoIntaked > 0) summary += 'AUTO-INTAKE: ' + autoIntaked + ' PA disasters \u2192 pipeline (OPI 75)\\n';
+  
+  await storeMemory('disaster_monitor', null, 'disaster,fema,auto_intake', summary, 'analysis', 'fema.gov', 'high');
+  return { agent: 'disaster_monitor', opp: 'system', chars: summary.length, new_disasters: newDisasters.length, auto_intaked: autoIntaked };
 }
 
 async function agentSourceExpansion(state) {
@@ -4567,5 +4776,5 @@ process.on('unhandledRejection', function(reason) {
 // No setInterval. No autonomous API calls. Period.
 // The skeleton mode code is preserved in runSession for when Christopher re-enables crons.
 
-log('V4.1-zero-cost ready. ALL crons disabled. Manual /api/trigger only. $0 autonomous spend.');
+log('V4.3-system-build ready. Endpoints: disaster-check, loss-analysis, exec-brief, compliance-check. Manual /api/trigger only.');
 
