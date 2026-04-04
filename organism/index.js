@@ -1587,6 +1587,7 @@ if (url.startsWith('/api/compliance-check')) {
         try { requirements = JSON.parse(ccMatch[0]); log('COMPLIANCE-CHECK: Extracted ' + requirements.length + ' requirements'); } 
         catch(e) { log('COMPLIANCE-CHECK: JSON parse failed: ' + e.message); } 
       } else { log('COMPLIANCE-CHECK: No JSON array in response. First 200: ' + cleaned.slice(0,200)); }
+    }
     
     var ready = requirements.filter(function(r) { return r.hgi_status === 'ready'; }).length;
     var action = requirements.filter(function(r) { return r.hgi_status === 'needs_action'; }).length;
