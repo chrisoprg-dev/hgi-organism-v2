@@ -1325,6 +1325,87 @@ if (url.startsWith('/api/analytics')) {
 }
 
 
+
+// === SYSTEM STATUS — /api/system-status ===
+if (url === '/api/system-status') {
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+  try {
+    var state = await loadState();
+    var memCount = await supabase.from('organism_memory').select('id', { count: 'exact', head: true });
+    var ciCount = await supabase.from('competitive_intelligence').select('id', { count: 'exact', head: true });
+    var rgCount = await supabase.from('relationship_graph').select('id', { count: 'exact', head: true });
+    var daCount = await supabase.from('disaster_alerts').select('id', { count: 'exact', head: true });
+    var bcCount = await supabase.from('budget_cycles').select('id', { count: 'exact', head: true });
+    var rcCount = await supabase.from('recompete_tracker').select('id', { count: 'exact', head: true });
+    var regCount = await supabase.from('regulatory_changes').select('id', { count: 'exact', head: true });
+    var tmCount = await supabase.from('teaming_partners').select('id', { count: 'exact', head: true });
+    var agCount = await supabase.from('agency_profiles').select('id', { count: 'exact', head: true });
+    var paCount = await supabase.from('pipeline_analytics').select('id', { count: 'exact', head: true });
+    var outcomes = await supabase.from('opportunities').select('outcome').not('outcome', 'is', null);
+    var outcomeData = outcomes.data || [];
+    
+    var pursuing = state.pipeline.filter(function(o) { return o.stage === 'pursuing'; });
+    var withRFP = state.pipeline.filter(function(o) { return o.rfp_document_retrieved === true; });
+    
+    res.end(JSON.stringify({
+      version: 'V4.3-system-build',
+      uptime_seconds: Math.floor(process.uptime()),
+      timestamp: new Date().toISOString(),
+      
+      pipeline: {
+        total_active: state.pipeline.length,
+        pursuing: pursuing.length,
+        submitted: state.pipeline.filter(function(o) { return o.stage === 'submitted'; }).length,
+        identified: state.pipeline.filter(function(o) { return o.stage === 'identified'; }).length,
+        with_rfp: withRFP.length,
+        avg_opi: state.pipeline.length > 0 ? Math.round(state.pipeline.reduce(function(s,o) { return s + (o.opi_score || 0); }, 0) / state.pipeline.length) : 0
+      },
+      
+      intelligence: {
+        organism_memories: (memCount.count || 0),
+        competitive_intelligence: (ciCount.count || 0),
+        relationship_contacts: (rgCount.count || 0),
+        disaster_alerts: (daCount.count || 0),
+        budget_cycles: (bcCount.count || 0),
+        recompete_tracker: (rcCount.count || 0),
+        regulatory_changes: (regCount.count || 0),
+        teaming_partners: (tmCount.count || 0),
+        agency_profiles: (agCount.count || 0),
+        pipeline_analytics: (paCount.count || 0)
+      },
+      
+      outcomes: {
+        total: outcomeData.length,
+        wins: outcomeData.filter(function(o) { return o.outcome === 'won'; }).length,
+        losses: outcomeData.filter(function(o) { return o.outcome === 'lost'; }).length,
+        no_bids: outcomeData.filter(function(o) { return o.outcome === 'no_bid'; }).length
+      },
+      
+      agents: {
+        active: 15,
+        per_opp: ['intelligence_engine', 'financial_agent', 'winnability_agent', 'crm_agent', 'quality_gate'],
+        gated: ['staffing_plan', 'proposal_writer', 'red_team', 'price_to_win', 'proposal_assembly'],
+        system: ['pipeline_scanner', 'disaster_monitor', 'dashboard_agent', 'amendment_tracker', 'hunting_agent'],
+        cut_available: 21
+      },
+      
+      endpoints: {
+        core: ['/health', '/api/pipeline', '/api/memories', '/api/diagnostics', '/api/trigger'],
+        proposal: ['/api/produce-proposal', '/api/proposal-doc', '/api/compliance-matrix', '/api/rate-table', '/api/org-chart'],
+        intelligence: ['/api/disaster-check', '/api/loss-analysis', '/api/exec-brief', '/api/compliance-check', '/api/phase3'],
+        data: ['/api/competitors', '/api/contacts', '/api/regulatory', '/api/teaming', '/api/agencies', '/api/recompetes', '/api/analytics'],
+        system: ['/api/system-status', '/api/fetch-rfp', '/api/hunt-stats', '/api/crash-log']
+      },
+      
+      sources: {
+        active: ['Central Bidding (authenticated)', 'SAM.gov', 'OpenFEMA', 'USAspending', 'Grants.gov', 'Federal Register'],
+        disabled: ['LaPAC (ColdFusion, no API)']
+      }
+    }));
+  } catch (e) { res.end(JSON.stringify({ error: e.message })); }
+  return;
+}
+
 // === DISASTER MONITOR MANUAL TRIGGER — /api/disaster-check ===
 if (url === '/api/disaster-check') {
   res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
@@ -1411,7 +1492,7 @@ if (url === '/api/exec-brief') {
 
 // === COMPLIANCE CHECK — /api/compliance-check?id= ===
 if (url.startsWith('/api/compliance-check')) {
-  var ccId = new URL('http://x' + url).searchParams.get('id');
+  var ccId = (req.url.split('?id=')[1]||'').split('&')[0];
   if (!ccId) { res.writeHead(400, { 'Access-Control-Allow-Origin': '*' }); res.end(JSON.stringify({ error: 'id required' })); return; }
   res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
   try {
