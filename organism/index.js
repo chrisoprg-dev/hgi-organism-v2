@@ -342,6 +342,16 @@ if (url === '/' || url === '/dashboard' || url === '/interface' || url === '/int
       return;
     }
 
+    if (url === '/prototype' || url === '/prototype.html') {
+      try {
+        const protoHtml = fs.readFileSync(path.join(process.cwd(), 'organism', 'prototype.html'), 'utf8');
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache, no-store, must-revalidate' });
+        res.end(protoHtml);
+        return;
+      } catch(e) { res.writeHead(500); res.end('Prototype not found'); return; }
+    }
+
+
     if (url === '/manifest.json') {
       res.writeHead(200, { 'Content-Type': 'application/manifest+json' });
       res.end(JSON.stringify({
