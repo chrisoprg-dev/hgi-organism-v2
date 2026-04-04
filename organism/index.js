@@ -41,7 +41,7 @@ const server = http.createServer(async (req, res) => {
 
     if (url === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'alive', uptime_seconds: Math.floor(process.uptime()), timestamp: new Date().toISOString(), version: 'V4.4-daily-cron', agents_active: 19 }));
+      res.end(JSON.stringify({ status: 'alive', uptime_seconds: Math.floor(process.uptime()), timestamp: new Date().toISOString(), version: 'V4.5-full-intel', agents_active: 29 }));
       return;
     }
 
@@ -419,6 +419,34 @@ if (url === '/api/crash-log') {
   var cr = await supabase.from('organism_memory').select('observation,created_at').eq('agent','v3_engine').order('created_at',{ascending:false}).limit(10);
   res.writeHead(200, {'Content-Type':'application/json'});
   res.end(JSON.stringify(cr.data || []));
+  return;
+}
+
+// === CYCLE HISTORY — /api/cycle-history ===
+if (url === '/api/cycle-history') {
+  res.writeHead(200, {'Content-Type':'application/json','Access-Control-Allow-Origin':'*'});
+  try {
+    var chMems = await supabase.from('organism_memory')
+      .select('observation,created_at')
+      .eq('agent','v4_engine')
+      .order('created_at',{ascending:false}).limit(30);
+    var cycles = (chMems.data || []).map(function(m) {
+      var obs = m.observation || '';
+      var parts = {};
+      var matches = obs.match(/trigger:(\S+)/); if (matches) parts.trigger = matches[1];
+      matches = obs.match(/pipeline:(\d+)/); if (matches) parts.pipeline = parseInt(matches[1]);
+      matches = obs.match(/agents:(\d+)/); if (matches) parts.agents_fired = parseInt(matches[1]);
+      matches = obs.match(/opps_analyzed:(\d+)/); if (matches) parts.opps_analyzed = parseInt(matches[1]);
+      matches = obs.match(/newOpps:(\d+)/); if (matches) parts.new_opps = parseInt(matches[1]);
+      matches = obs.match(/newRFPs:(\d+)/); if (matches) parts.new_rfps = parseInt(matches[1]);
+      matches = obs.match(/uptime:(\d+)/); if (matches) parts.uptime_s = parseInt(matches[1]);
+      parts.timestamp = m.created_at;
+      parts.mode = obs.indexOf('SKELETON') >= 0 ? 'skeleton' : obs.indexOf('SMART') >= 0 ? 'smart' : 'full';
+      parts.zero_cost = obs.indexOf('Zero API calls') >= 0 || obs.indexOf('$0 API cost') >= 0;
+      return parts;
+    });
+    res.end(JSON.stringify({ total_cycles: cycles.length, cycles: cycles }));
+  } catch(e) { res.end(JSON.stringify({error:e.message})); }
   return;
 }
 
@@ -1348,7 +1376,7 @@ if (url === '/api/system-status') {
     var withRFP = state.pipeline.filter(function(o) { return o.rfp_document_retrieved === true; });
     
     res.end(JSON.stringify({
-      version: 'V4.4-daily-cron',
+      version: 'V4.5-full-intel',
       uptime_seconds: Math.floor(process.uptime()),
       timestamp: new Date().toISOString(),
       
@@ -1382,11 +1410,12 @@ if (url === '/api/system-status') {
       },
       
       agents: {
-        active: 15,
+        active: 29,
         per_opp: ['intelligence_engine', 'financial_agent', 'winnability_agent', 'crm_agent', 'quality_gate'],
         gated: ['staffing_plan', 'proposal_writer', 'red_team', 'price_to_win', 'proposal_assembly'],
-        system: ['pipeline_scanner', 'disaster_monitor', 'dashboard_agent', 'amendment_tracker', 'hunting_agent'],
-        cut_available: 21
+        system_core: ['pipeline_scanner', 'disaster_monitor', 'dashboard_agent', 'amendment_tracker', 'hunting_agent', 'opi_calibration', 'executive_brief', 'recruiting_bench', 'learning_loop'],
+        system_intel: ['discovery_agent', 'content_engine', 'knowledge_base_agent', 'scraper_insights', 'teaming_agent', 'budget_cycle', 'loss_analysis', 'recompete_agent', 'competitor_deep_dive', 'agency_profile_agent'],
+        cut_available: 7
       },
       
       endpoints: {
@@ -1394,7 +1423,7 @@ if (url === '/api/system-status') {
         proposal: ['/api/produce-proposal', '/api/proposal-doc', '/api/compliance-matrix', '/api/rate-table', '/api/org-chart'],
         intelligence: ['/api/disaster-check', '/api/loss-analysis', '/api/exec-brief', '/api/compliance-check', '/api/phase3'],
         data: ['/api/competitors', '/api/contacts', '/api/regulatory', '/api/teaming', '/api/agencies', '/api/recompetes', '/api/analytics'],
-        system: ['/api/system-status', '/api/fetch-rfp', '/api/hunt-stats', '/api/crash-log']
+        system: ['/api/system-status', '/api/fetch-rfp', '/api/hunt-stats', '/api/crash-log', '/api/cycle-history', '/api/record-outcome']
       },
       
       sources: {
@@ -1484,7 +1513,7 @@ if (url === '/api/exec-brief') {
       alerts: alerts,
       awaiting_award: submitted.map(function(o) { return { title: o.title, opi: o.opi_score }; }),
       recent_intel: briefMems,
-      agent_health: { active_agents: 15, version: 'V4.2-lean-15', last_cycle: briefMems.length > 0 ? briefMems[0].when : null }
+      agent_health: { active_agents: 29, version: 'V4.5-full-intel', last_cycle: briefMems.length > 0 ? briefMems[0].when : null }
     }));
   } catch (e) { res.end(JSON.stringify({ error: e.message })); }
   return;
@@ -3742,8 +3771,18 @@ async function agentPipelineScanner(state) {
 async function agentOPICalibration(state) {
   log('OPI CALIBRATION...');
   var ctx = buildAgentCtx(state, 'scanner_opi', null);
-  var task = 'TASK: Review OPI scores vs accumulated intelligence. Any opps scored too high or low? Recommend adjustments with rationale.';
-  var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
+  // Load outcome history for calibration
+  var outcomeData = '';
+  try {
+    var outcomes = await supabase.from('opportunities').select('title,agency,vertical,opi_score,outcome,outcome_notes').not('outcome','is',null).order('last_updated',{ascending:false}).limit(20);
+    if (outcomes.data && outcomes.data.length > 0) {
+      outcomeData = '\n\nRECORDED OUTCOMES (use for calibration):\n' + outcomes.data.map(function(o) {
+        return '- ' + (o.title||'').slice(0,60) + ' | OPI:' + (o.opi_score||'?') + ' | ' + (o.outcome||'?').toUpperCase() + ' | ' + (o.vertical||'?') + (o.outcome_notes ? ' | Notes: ' + JSON.stringify(o.outcome_notes).slice(0,200) : '');
+      }).join('\n');
+    }
+  } catch(e) {}
+  var task = 'TASK: Review OPI scores vs accumulated intelligence AND recorded outcomes. HTHA lost at OPI 78 — what does this teach about Housing/HUD scoring? Any opps scored too high or low? Recommend specific OPI adjustments with rationale. If an outcome shows OPI was wrong, explain why and how to fix the model.';
+  var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + outcomeData + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
   var out = await claudeCall(task, prompt, 1200, { model: HAIKU });
   if (!out || out.length < 100) return null;
   await storeMemory('scanner_opi', null, 'opi', out, 'analysis', null, 'medium');
@@ -4566,7 +4605,7 @@ async function runSession(trigger) {
     }
 
     // 4. SYSTEM-WIDE AGENTS — SESSION 81 AUDIT: 4 keepers, 21 cut
-    log('--- System-wide agents (8 active) ---');
+    log('--- System-wide agents (18 active) ---');
     try { var rPS = await agentPipelineScanner(state); if (rPS) allResults.push(rPS); } catch (e) { log('PS err: ' + e.message); }
     try { var rDM = await agentDisasterMonitor(state); if (rDM) allResults.push(rDM); } catch (e) { log('DM err: ' + e.message); }
     try { var rDA = await agentDashboard(state); if (rDA) allResults.push(rDA); } catch (e) { log('Dash err: ' + e.message); }
@@ -4576,28 +4615,29 @@ async function runSession(trigger) {
     try { var rEB = await agentExecutiveBrief(state); if (rEB) allResults.push(rEB); } catch (e) { log('EB err: ' + e.message); }
     try { var rRec = await agentRecruiting(state); if (rRec) allResults.push(rRec); } catch (e) { log('Rec err: ' + e.message); }
     try { var rLL = await agentLearningLoop(state); if (rLL) allResults.push(rLL); } catch (e) { log('LL err: ' + e.message); }
-    // STILL CUT — re-enable when needed:
-    // try { var rDis = await agentDiscovery(state); if (rDis) allResults.push(rDis); } catch (e) { log('Disc err: ' + e.message); }
+    // RE-ENABLED (Session 84) — 10 more system agents for full intelligence:
+    log('--- Extended intelligence agents (10) ---');
+    try { var rDis = await agentDiscovery(state); if (rDis) allResults.push(rDis); } catch (e) { log('Disc err: ' + e.message); }
     // try { var rOPI = await agentOPICalibration(state); if (rOPI) allResults.push(rOPI); } catch (e) { log('OPI err: ' + e.message); }
-    // try { var rCE = await agentContentEngine(state); if (rCE) allResults.push(rCE); } catch (e) { log('CE err: ' + e.message); }
+    try { var rCE = await agentContentEngine(state); if (rCE) allResults.push(rCE); } catch (e) { log('CE err: ' + e.message); }
     // try { var rRec = await agentRecruiting(state); if (rRec) allResults.push(rRec); } catch (e) { log('Rec err: ' + e.message); }
-    // try { var rKB = await agentKnowledgeBase(state); if (rKB) allResults.push(rKB); } catch (e) { log('KB err: ' + e.message); }
-    // try { var rSI = await agentScraperInsights(state); if (rSI) allResults.push(rSI); } catch (e) { log('SI err: ' + e.message); }
+    try { var rKB = await agentKnowledgeBase(state); if (rKB) allResults.push(rKB); } catch (e) { log('KB err: ' + e.message); }
+    try { var rSI = await agentScraperInsights(state); if (rSI) allResults.push(rSI); } catch (e) { log('SI err: ' + e.message); }
     // try { var rEB = await agentExecutiveBrief(state); if (rEB) allResults.push(rEB); } catch (e) { log('EB err: ' + e.message); }
     // try { var rDV = await agentDesignVisual(state); if (rDV) allResults.push(rDV); } catch (e) { log('DV err: ' + e.message); }
-    // try { var rTM = await agentTeaming(state); if (rTM) allResults.push(rTM); } catch (e) { log('Team err: ' + e.message); }
+    try { var rTM = await agentTeaming(state); if (rTM) allResults.push(rTM); } catch (e) { log('Team err: ' + e.message); }
     // try { var rSE = await agentSourceExpansion(state); if (rSE) allResults.push(rSE); } catch (e) { log('SE err: ' + e.message); }
     // try { var rCX = await agentContractExpiration(state); if (rCX) allResults.push(rCX); } catch (e) { log('CX err: ' + e.message); }
-    // try { var rBC = await agentBudgetCycle(state); if (rBC) allResults.push(rBC); } catch (e) { log('BC err: ' + e.message); }
-    // try { var rLA = await agentLossAnalysis(state); if (rLA) allResults.push(rLA); } catch (e) { log('LA err: ' + e.message); }
+    try { var rBC = await agentBudgetCycle(state); if (rBC) allResults.push(rBC); } catch (e) { log('BC err: ' + e.message); }
+    try { var rLA = await agentLossAnalysis(state); if (rLA) allResults.push(rLA); } catch (e) { log('LA err: ' + e.message); }
     // try { var rWR = await agentWinRateAnalytics(state); if (rWR) allResults.push(rWR); } catch (e) { log('WR err: ' + e.message); }
     // try { var rRM = await agentRegulatoryMonitor(state); if (rRM) allResults.push(rRM); } catch (e) { log('RM err: ' + e.message); }
     // try { var rOA = await agentOutreachAutomation(state); if (rOA) allResults.push(rOA); } catch (e) { log('OA err: ' + e.message); }
     // try { var rLL = await agentLearningLoop(state); if (rLL) allResults.push(rLL); } catch (e) { log('LL err: ' + e.message); }
     // try { var rEN = await agentEntrepreneurial(state); if (rEN) allResults.push(rEN); } catch (e) { log('EN err: ' + e.message); }
-    // try { var rRC = await agentRecompete(state); if (rRC) allResults.push(rRC); } catch (e) { log('RC err: ' + e.message); }
-    // try { var rCD = await agentCompetitorDeepDive(state); if (rCD) allResults.push(rCD); } catch (e) { log('CD err: ' + e.message); }
-    // try { var rAP = await agentAgencyProfile(state); if (rAP) allResults.push(rAP); } catch (e) { log('AP err: ' + e.message); }
+    try { var rRC = await agentRecompete(state); if (rRC) allResults.push(rRC); } catch (e) { log('RC err: ' + e.message); }
+    try { var rCD = await agentCompetitorDeepDive(state); if (rCD) allResults.push(rCD); } catch (e) { log('CD err: ' + e.message); }
+    try { var rAP = await agentAgencyProfile(state); if (rAP) allResults.push(rAP); } catch (e) { log('AP err: ' + e.message); }
     // try { var rSD = await agentSubcontractorDB(state); if (rSD) allResults.push(rSD); } catch (e) { log('SD err: ' + e.message); }
 
     // 5. EVAL SCORING
@@ -4879,6 +4919,62 @@ async function runSession(trigger) {
       } else { log('ANALYTICS AUTO-EXTRACT: No new memories in last 24h'); }
     } catch (anAutoErr) { log('ANALYTICS AUTO-EXTRACT failed: ' + anAutoErr.message); }
 
+    // === BUDGET CYCLE AUTO-EXTRACT ===
+    try {
+      var recentBud = await supabase.from('organism_memory').select('id,observation').eq('agent','budget_cycle').gte('created_at', new Date(Date.now()-24*60*60*1000).toISOString()).order('created_at',{ascending:false}).limit(5);
+      if (recentBud.data && recentBud.data.length > 0) {
+        var budAutoTotal = 0;
+        for (var bai = 0; bai < recentBud.data.length; bai++) {
+          var bam = recentBud.data[bai];
+          if (!bam.observation || bam.observation.length < 200) continue;
+          try {
+            var baResp = await claudeCall('Extract budget cycles. JSON array only.', 'Extract government budget cycle data. JSON array: agency_name, state, fiscal_year_start, fiscal_year_end, procurement_window, budget_amount, funding_sources, procurement_timeline, notes.\n\n' + (bam.observation || '').substring(0, 4000), 3000, { model: 'claude-haiku-4-5-20251001' });
+            var baMatch = baResp.match(/\[[\s\S]*\]/);
+            if (!baMatch) continue;
+            var baBuds = JSON.parse(baMatch[0]);
+            for (var bab = 0; bab < baBuds.length; bab++) {
+              var bu2 = baBuds[bab];
+              if (!bu2.agency_name) continue;
+              var bu2Ex = await supabase.from('budget_cycles').select('id').eq('agency_name', bu2.agency_name).limit(1);
+              var bu2Rec = { agency_name: bu2.agency_name, state: bu2.state, fiscal_year_start: bu2.fiscal_year_start, fiscal_year_end: bu2.fiscal_year_end, procurement_window: bu2.procurement_window, budget_amount: bu2.budget_amount, funding_sources: bu2.funding_sources, procurement_timeline: bu2.procurement_timeline, notes: bu2.notes, source_agent: 'budget_auto_extract', updated_at: new Date().toISOString() };
+              if (bu2Ex.data && bu2Ex.data.length > 0) { await supabase.from('budget_cycles').update(bu2Rec).eq('id', bu2Ex.data[0].id); }
+              else { bu2Rec.id = 'bud-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6); bu2Rec.created_at = new Date().toISOString(); await supabase.from('budget_cycles').insert(bu2Rec); }
+              budAutoTotal++;
+            }
+          } catch (bae) { log('BUDGET AUTO-EXTRACT error: ' + bae.message); }
+        }
+        log('BUDGET AUTO-EXTRACT: ' + budAutoTotal + ' cycles from ' + recentBud.data.length + ' memories');
+      } else { log('BUDGET AUTO-EXTRACT: No new memories in last 24h'); }
+    } catch (budAutoErr) { log('BUDGET AUTO-EXTRACT failed: ' + budAutoErr.message); }
+
+    // === RECOMPETE AUTO-EXTRACT ===
+    try {
+      var recentRec2 = await supabase.from('organism_memory').select('id,observation').in('agent',['recompete_agent','contract_expiration']).gte('created_at', new Date(Date.now()-24*60*60*1000).toISOString()).order('created_at',{ascending:false}).limit(5);
+      if (recentRec2.data && recentRec2.data.length > 0) {
+        var recAutoTotal = 0;
+        for (var rai2 = 0; rai2 < recentRec2.data.length; rai2++) {
+          var ram2 = recentRec2.data[rai2];
+          if (!ram2.observation || ram2.observation.length < 200) continue;
+          try {
+            var raResp2 = await claudeCall('Extract recompete opportunities. JSON array only.', 'Extract contract recompete/expiration data. JSON array: contract_title, agency, incumbent, contract_value, end_date, recompete_window, hgi_verticals, competitive_landscape, notes.\n\n' + (ram2.observation || '').substring(0, 4000), 3000, { model: 'claude-haiku-4-5-20251001' });
+            var raMatch2 = raResp2.match(/\[[\s\S]*\]/);
+            if (!raMatch2) continue;
+            var raRecs = JSON.parse(raMatch2[0]);
+            for (var rar2 = 0; rar2 < raRecs.length; rar2++) {
+              var rc2 = raRecs[rar2];
+              if (!rc2.contract_title) continue;
+              var rc2Ex = await supabase.from('recompete_tracker').select('id').eq('contract_title', rc2.contract_title).limit(1);
+              var rc2Rec = { contract_title: rc2.contract_title, agency: rc2.agency, incumbent: rc2.incumbent, contract_value: rc2.contract_value, end_date: rc2.end_date, recompete_window: rc2.recompete_window, hgi_verticals: rc2.hgi_verticals, competitive_landscape: rc2.competitive_landscape, notes: rc2.notes, source_agent: 'recompete_auto_extract', updated_at: new Date().toISOString() };
+              if (rc2Ex.data && rc2Ex.data.length > 0) { await supabase.from('recompete_tracker').update(rc2Rec).eq('id', rc2Ex.data[0].id); }
+              else { rc2Rec.id = 'rec-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6); rc2Rec.created_at = new Date().toISOString(); await supabase.from('recompete_tracker').insert(rc2Rec); }
+              recAutoTotal++;
+            }
+          } catch (rae2) { log('RECOMPETE AUTO-EXTRACT error: ' + rae2.message); }
+        }
+        log('RECOMPETE AUTO-EXTRACT: ' + recAutoTotal + ' contracts from ' + recentRec2.data.length + ' memories');
+      } else { log('RECOMPETE AUTO-EXTRACT: No new memories in last 24h'); }
+    } catch (recAutoErr) { log('RECOMPETE AUTO-EXTRACT failed: ' + recAutoErr.message); }
+
   } catch (e) {
     log('SESSION ERROR: ' + e.message);
     try {
@@ -4899,8 +4995,8 @@ async function runSession(trigger) {
 // STARTUP
 // ============================================================
 log('==========================================================');
-log('HGI ORGANISM V4.4-daily-cron - STARTING');
-log('15 active agents. Direct FEMA API. Smart trigger cron. 6 new endpoints.');
+log('HGI ORGANISM V4.5-full-intel - STARTING');
+log('29 active agents. Direct FEMA API. Full intelligence suite. Smart trigger cron. 6 new endpoints.');
 log('12h dedup guard. Crash logging. Test endpoints.');
 log('==========================================================');
 
@@ -4953,5 +5049,5 @@ function scheduleWeekdayCron() {
 }
 scheduleWeekdayCron();
 
-log('V4.4-daily-cron ready. Weekday cron: 7AM CST smart trigger. Manual: /api/trigger. Endpoints: disaster-check, loss-analysis, exec-brief, compliance-check, system-status, record-outcome.');
+log('V4.5-full-intel ready. Weekday cron: 7AM CST smart trigger. Manual: /api/trigger. Endpoints: disaster-check, loss-analysis, exec-brief, compliance-check, system-status, record-outcome.');
 
