@@ -130,16 +130,16 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(
 <script>
 // ═══ DATA ═══
 var AG=[
-  {n:'Intelligence Engine',s:'Scanning',mode:'planning',gated:false,c:'#00d0f0',region:'frontal_L',task:'OPSB CM — 3 competitors identified',role:'Competitive Intelligence',finding:'CSRS confirmed bidding, Jacobs holds 2 JP contracts'},
-  {n:'Financial Agent',s:'Benchmarking',mode:'planning',gated:false,c:'#3cd9a0',region:'parietal_L',task:'Washington Parish — $95-165/hr range',role:'Price-to-Win',finding:'Average base rate $127/hr across 4 comparable DR contracts'},
-  {n:'Winnability Agent',s:'Scoring',mode:'planning',gated:false,c:'#d4a020',region:'frontal_R',task:'OPSB CM — PWIN 62%',role:'GO/NO-GO Scoring',finding:'Location 10/10, experience 6/10'},
-  {n:'CRM Agent',s:'Mapping',mode:'memory',gated:false,c:'#a78bfa',region:'temporal',task:'NOLA — 2 SWBNO contacts confirmed',role:'Relationship Intel',finding:'Operations director warm, need engineering contact'},
-  {n:'Quality Gate',s:'Auditing',mode:'gate',gated:true,c:'#d4a020',region:'cerebellum',task:'St. George — Exhibit D missing',role:'Compliance Audit',finding:'3 blocking: insurance cert, Exhibit D, W-9'},
-  {n:'Proposal Writer',s:'Drafting',mode:'synthesis',gated:false,c:'#60a5fa',region:'broca',task:'NOLA exec summary — 47K chars',role:'Proposal Production',finding:'Draft pending quality review'},
-  {n:'Red Team',s:'Blocked',mode:'gate',gated:true,c:'#c84848',region:'occipital',task:'Awaiting proposals for review',role:'Adversarial Review',finding:'Blocked on proposal completion'},
-  {n:'Dashboard Agent',s:'Compiling',mode:'memory',gated:false,c:'#818cf8',region:'occipital',task:'8 new memories overnight',role:'Executive Briefing',finding:'6 events, 2 gates, 1 new opp detected'},
-  {n:'Pipeline Scanner',s:'Monitoring',mode:'planning',gated:false,c:'#06b6d4',region:'frontal_L',task:'5 deadlines tracked, 2 approaching',role:'Deadline Watch',finding:'OPSB Apr 30, Wash Parish May 8'},
-  {n:'Staffing Agent',s:'Blocked',mode:'gate',gated:true,c:'#f59e0b',region:'parietal_R',task:'Position matching Wash Parish',role:'Talent Planning',finding:'Gated — awaiting position requirements'}
+  {n:'Intelligence Engine',s:'Scanning',mode:'planning',gated:false,c:'#00d0f0',region:'frontal_L',task:'OPSB CM — 3 competitors identified',role:'Competitive Intelligence',finding:'CSRS confirmed bidding, Jacobs holds 2 JP contracts',plabel:'INTEL'},
+  {n:'Financial Agent',s:'Benchmarking',mode:'planning',gated:false,c:'#3cd9a0',region:'parietal_L',task:'Washington Parish — $95-165/hr range',role:'Price-to-Win',finding:'Average base rate $127/hr across 4 comparable DR contracts',plabel:'PRICE'},
+  {n:'Winnability Agent',s:'Scoring',mode:'planning',gated:false,c:'#d4a020',region:'frontal_R',task:'OPSB CM — PWIN 62%',role:'GO/NO-GO Scoring',finding:'Location 10/10, experience 6/10',plabel:'PWIN'},
+  {n:'CRM Agent',s:'Mapping',mode:'memory',gated:false,c:'#a78bfa',region:'temporal',task:'NOLA — 2 SWBNO contacts confirmed',role:'Relationship Intel',finding:'Operations director warm, need engineering contact',plabel:'CRM'},
+  {n:'Quality Gate',s:'Auditing',mode:'gate',gated:true,c:'#d4a020',region:'cerebellum',task:'St. George — Exhibit D missing',role:'Compliance Audit',finding:'3 blocking: insurance cert, Exhibit D, W-9',plabel:'GATE'},
+  {n:'Proposal Writer',s:'Drafting',mode:'synthesis',gated:false,c:'#60a5fa',region:'broca',task:'NOLA exec summary — 47K chars',role:'Proposal Production',finding:'Draft pending quality review',plabel:'DRAFT'},
+  {n:'Red Team',s:'Blocked',mode:'gate',gated:true,c:'#c84848',region:'occipital',task:'Awaiting proposals for review',role:'Adversarial Review',finding:'Blocked on proposal completion',plabel:'REVIEW'},
+  {n:'Dashboard Agent',s:'Compiling',mode:'memory',gated:false,c:'#818cf8',region:'occipital',task:'8 new memories overnight',role:'Executive Briefing',finding:'6 events, 2 gates, 1 new opp detected',plabel:'BRIEF'},
+  {n:'Pipeline Scanner',s:'Monitoring',mode:'planning',gated:false,c:'#06b6d4',region:'frontal_L',task:'5 deadlines tracked, 2 approaching',role:'Deadline Watch',finding:'OPSB Apr 30, Wash Parish May 8',plabel:'SCAN'},
+  {n:'Staffing Agent',s:'Blocked',mode:'gate',gated:true,c:'#f59e0b',region:'parietal_R',task:'Position matching Wash Parish',role:'Talent Planning',finding:'Gated — awaiting position requirements',plabel:'STAFF'}
 ];
 
 var PIPE=[
@@ -160,7 +160,7 @@ var EVT=[
   {t:'14:48',a:'Financial',w:'Match',d:'Rate benchmark updated: DR PM vertical',mode:'planning'}
 ];
 
-// ═══ BRAIN REGIONS (positioned over the brain image) ═══
+// ═══ BRAIN REGIONS ═══
 var REGIONS=[
   {id:'frontal_L',label:'Planning / Intel',x:0.32,y:0.26,rx:0.08,ry:0.08,c:'0,210,240',modes:['planning']},
   {id:'frontal_R',label:'Winnability',x:0.58,y:0.24,rx:0.07,ry:0.07,c:'212,180,60',modes:['planning']},
@@ -186,18 +186,37 @@ var MODE_REGIONS={
   gate:['cerebellum','frontal_R']
 };
 
+// Mode visual signatures
+var MODE_VIS={
+  planning:{heartbeat:2.0,particleDir:'lateral',flashRate:0.06,flashSpeed:0.04,col:'0,210,240'},
+  memory:{heartbeat:0.8,particleDir:'converge',flashRate:0.02,flashSpeed:0.02,col:'167,139,250'},
+  synthesis:{heartbeat:1.2,particleDir:'outward',flashRate:0.05,flashSpeed:0.035,col:'96,180,250'},
+  gate:{heartbeat:1.5,particleDir:'stall',flashRate:0.01,flashSpeed:0.015,col:'212,160,32'}
+};
+
+// Outbound path definitions
+var OUTBOUND=[
+  {rx:'parietal_L',fy:0.12,c:'#60a5fa',label:'SYNTHESIS'},
+  {rx:'cerebellum',fy:0.50,c:'#d4a020',label:'VALIDATION'},
+  {rx:'occipital',fy:0.82,c:'#818cf8',label:'BRIEFING'}
+];
+
 // ═══ STATE ═══
 var selAgent=-1, selMode='', selPipe=-1;
 
 function regionAct(rId){
   if(selAgent>=0) return AG[selAgent].region===rId ? 1.0 : 0.03;
   if(selMode) return (MODE_REGIONS[selMode]||[]).indexOf(rId)>=0 ? 0.85 : 0.05;
-  return 0.20;
+  return 0.18;
 }
 function pathAct(aIdx){
   if(selAgent>=0) return aIdx===selAgent;
   if(selMode) return AG[aIdx] && AG[aIdx].mode===selMode;
   return true;
+}
+function getModeVis(){
+  if(selMode && MODE_VIS[selMode]) return MODE_VIS[selMode];
+  return {heartbeat:1.0,particleDir:'ambient',flashRate:0.014,flashSpeed:0.028,col:'140,215,245'};
 }
 
 // ═══ LEFT RAIL ═══
@@ -268,7 +287,6 @@ updateTL();
 function updateRR(){
   var el=document.getElementById('rr');
   var h='';
-  // Context hierarchy
   var p=selPipe>=0?PIPE[selPipe]:PIPE[0];
   var oc=p.opi>=90?'var(--gn)':p.opi>=80?'var(--cy)':'var(--am)';
   h+='<div class="ctx">';
@@ -276,13 +294,11 @@ function updateRR(){
   h+='<div class="ctx-row"><div class="ctx-dot" style="background:'+(selMode?'var(--cy)':'var(--mc)')+'"></div> <span style="color:'+(selMode?'var(--cy)':'var(--mc)')+'">MODE: '+(selMode?selMode.toUpperCase():'None')+'</span></div>';
   h+='<div class="ctx-row"><div class="ctx-dot" style="background:'+(selAgent>=0?'var(--cy)':'var(--mc)')+'"></div> <span style="color:'+(selAgent>=0?'var(--cy)':'var(--mc)')+'">AGENT: '+(selAgent>=0?AG[selAgent].n:'None')+'</span></div>';
   h+='</div>';
-  // Pursuit
   h+='<div class="rb"><div class="rl">'+(selPipe>=0?'SELECTED PURSUIT':'PRIORITY PURSUIT')+'</div>';
   h+='<div class="ro" style="color:'+oc+'">'+p.opi+'</div>';
   h+='<div class="rn">'+p.n+'</div><div class="ra">'+p.agency+'</div>';
   h+='<span class="rtag">'+p.due+'</span><span class="rtag hi">'+p.stage+'</span>';
   h+='<div style="font-size:8px;color:var(--tx);margin-top:4px">'+p.obj+'</div></div>';
-  // Agent or Mode detail
   if(selAgent>=0){
     var a=AG[selAgent];
     h+='<div class="rb"><div class="rl">AGENT INSPECTION</div>';
@@ -318,82 +334,129 @@ var cv=document.getElementById('cv'),cx=cv.getContext('2d');
 function rs(){cv.width=cv.parentElement.clientWidth;cv.height=cv.parentElement.clientHeight;}
 rs(); window.addEventListener('resize',rs);
 
-// Particles
+// Micro-particles (Layer 2a)
 var PARTS=[];
-for(var i=0;i<60;i++){
+for(var i=0;i<55;i++){
   var rr=REGIONS[Math.floor(Math.random()*REGIONS.length)];
   PARTS.push({x:rr.x+(Math.random()-0.5)*rr.rx*1.4, y:rr.y+(Math.random()-0.5)*rr.ry*1.4,
-    vx:(Math.random()-0.5)*0.0004, vy:(Math.random()-0.5)*0.0004, life:Math.random(), sz:2+Math.random()*2.5});
+    vx:(Math.random()-0.5)*0.0004, vy:(Math.random()-0.5)*0.0004, life:Math.random(), sz:2+Math.random()*2});
 }
+
+// Activity waves (Layer 2b) — larger, slower, fewer
+var WAVES=[];
+for(var i=0;i<14;i++){
+  var rr=REGIONS[Math.floor(Math.random()*REGIONS.length)];
+  WAVES.push({x:rr.x+(Math.random()-0.5)*rr.rx, y:rr.y+(Math.random()-0.5)*rr.ry,
+    vx:(Math.random()-0.5)*0.00015, vy:(Math.random()-0.5)*0.00015, life:Math.random(),
+    sz:5+Math.random()*3, phase:Math.random()*Math.PI*2, region:rr.id});
+}
+
 var FLASHES=[];
 
 function inBrain(px,py){var dx=(px-0.50)/0.26,dy=(py-0.42)/0.24;return dx*dx+dy*dy<1;}
 
 var t=0;
-function bez2(ax,ay,mx,my,bx,by,t){var u=1-t;return{x:u*u*ax+2*u*t*mx+t*t*bx,y:u*u*ay+2*u*t*my+t*t*by};}
+function bez2(ax,ay,mx,my,bx,by,tt){var u=1-tt;return{x:u*u*ax+2*u*tt*mx+tt*tt*bx,y:u*u*ay+2*u*tt*my+tt*tt*by};}
 
 function anim(){
   requestAnimationFrame(anim); t+=0.016;
   var W=cv.width,H=cv.height;
   cx.clearRect(0,0,W,H);
   var hasSel=selAgent>=0||selMode!=='';
+  var mv=getModeVis();
 
-  // ── LAYER 1: REGIONAL ACTIVITY ──
+  // ═══ LAYER 1: REGIONAL ACTIVITY + HEARTBEAT ═══
   REGIONS.forEach(function(r){
     var act=regionAct(r.id);
     if(act<0.02)return;
     var rx=r.x*W, ry=r.y*H, rrx=r.rx*W, rry=r.ry*H;
-    var breath=0.7+0.3*Math.sin(t*1.1+r.x*8);
-    var al=act*0.50*breath; // MUCH stronger than before
     var col=r.c;
     var isGated=selAgent>=0&&AG[selAgent]&&AG[selAgent].gated&&AG[selAgent].region===r.id;
     if(isGated) col='212,160,32';
 
+    // Heartbeat: rhythmic brightness oscillation
+    var hbRate=mv.heartbeat;
+    var heartbeat;
+    if(selMode==='gate'){
+      // Irregular stuttered heartbeat for gate mode
+      heartbeat=0.5+0.5*Math.sin(t*hbRate*Math.PI)*Math.sin(t*3.7);
+    }else{
+      heartbeat=0.6+0.4*Math.sin(t*hbRate*Math.PI*2);
+    }
+    var al=act*0.55*heartbeat;
+
     // Pursuit gold wash
     if(selPipe>=0&&act>0.1){
       var gg=cx.createRadialGradient(rx,ry,0,rx,ry,Math.max(rrx,rry)*1.4);
-      gg.addColorStop(0,'rgba(212,180,80,0.04)'); gg.addColorStop(1,'rgba(212,180,80,0)');
+      gg.addColorStop(0,'rgba(212,180,80,0.05)'); gg.addColorStop(1,'rgba(212,180,80,0)');
       cx.fillStyle=gg; cx.beginPath(); cx.ellipse(rx,ry,rrx*1.4,rry*1.4,0,0,Math.PI*2); cx.fill();
     }
 
-    // Main glow
+    // Main regional glow
     var g=cx.createRadialGradient(rx,ry,0,rx,ry,Math.max(rrx,rry)*2);
-    g.addColorStop(0,'rgba('+col+','+Math.min(al,0.50)+')');
-    g.addColorStop(0.4,'rgba('+col+','+Math.min(al*0.5,0.25)+')');
+    g.addColorStop(0,'rgba('+col+','+Math.min(al,0.55)+')');
+    g.addColorStop(0.4,'rgba('+col+','+Math.min(al*0.45,0.25)+')');
     g.addColorStop(1,'rgba('+col+',0)');
     cx.fillStyle=g; cx.beginPath(); cx.ellipse(rx,ry,rrx*2,rry*2,0,0,Math.PI*2); cx.fill();
 
-    // Core shimmer
-    if(act>0.5){
-      var sh=0.5+0.5*Math.sin(t*4+r.y*15);
-      cx.fillStyle='rgba('+col+','+(0.12*sh)+')';
-      cx.beginPath(); cx.ellipse(rx,ry,rrx*0.6,rry*0.6,0,0,Math.PI*2); cx.fill();
+    // Hot core — visible when active
+    if(act>0.4){
+      var coreAl=act*0.18*heartbeat;
+      cx.fillStyle='rgba('+col+','+coreAl+')';
+      cx.beginPath(); cx.ellipse(rx,ry,rrx*0.5,rry*0.5,0,0,Math.PI*2); cx.fill();
     }
 
-    // Pulsing ring
-    if(act>0.4){
+    // Pulsing ring on active regions
+    if(act>0.35){
       var pulse=0.5+0.5*Math.sin(t*3+r.x*6);
-      var ringR=Math.max(rrx,rry)*0.8;
-      cx.beginPath(); cx.arc(rx,ry,ringR*(1+0.15*pulse),0,Math.PI*2);
+      var ringR=Math.max(rrx,rry)*(0.7+0.2*pulse);
+      cx.beginPath(); cx.arc(rx,ry,ringR,0,Math.PI*2);
       var rcol=isGated?'212,160,32':r.c;
-      cx.strokeStyle='rgba('+rcol+','+(0.15+0.12*pulse)+')';
-      cx.lineWidth=1.5; cx.stroke();
+      cx.strokeStyle='rgba('+rcol+','+(0.12+0.15*pulse*act)+')';
+      cx.lineWidth=isGated?2.5:1.5; cx.stroke();
+    }
+
+    // Gate mode: checkpoint ring on cerebellum
+    if(selMode==='gate'&&r.id==='cerebellum'){
+      var cp=0.5+0.5*Math.sin(t*4);
+      cx.beginPath(); cx.arc(rx,ry,Math.max(rrx,rry)*1.2,0,Math.PI*2);
+      cx.strokeStyle='rgba(212,160,32,'+(0.3+0.2*cp)+')';
+      cx.lineWidth=2; cx.setLineDash([4,4]); cx.stroke(); cx.setLineDash([]);
     }
   });
 
-  // ── LAYER 2: INTERNAL MOTION ──
+  // ═══ LAYER 2a: MICRO-PARTICLES ═══
   cx.globalCompositeOperation='screen';
-
   PARTS.forEach(function(p){
-    // Attract to active regions
-    if(Math.random()<0.02){
+    // Mode-dependent particle behavior
+    if(Math.random()<0.025){
       var target=null;
       if(selAgent>=0) target=REGIONS.find(function(r){return r.id===AG[selAgent].region;});
       else if(selMode){
         var ar=REGIONS.filter(function(r){return r.modes.indexOf(selMode)>=0;});
         if(ar.length) target=ar[Math.floor(Math.random()*ar.length)];
       }
-      if(target){var dx=target.x-p.x,dy=target.y-p.y,d=Math.sqrt(dx*dx+dy*dy);if(d>0.01){p.vx+=dx/d*0.0002;p.vy+=dy/d*0.0002;}}
+      if(target){
+        var dx=target.x-p.x,dy=target.y-p.y,d=Math.sqrt(dx*dx+dy*dy);
+        if(d>0.01){
+          if(mv.particleDir==='converge'){
+            // Memory: strong inward pull
+            p.vx+=dx/d*0.00035; p.vy+=dy/d*0.00035;
+          }else if(mv.particleDir==='outward'){
+            // Synthesis: push away from center
+            p.vx-=dx/d*0.00015; p.vy-=dy/d*0.00015;
+          }else if(mv.particleDir==='lateral'){
+            // Planning: lateral scanning
+            p.vx+=dy/d*0.0003*(Math.random()>0.5?1:-1);
+            p.vy+=dx/d*0.00005;
+          }else if(mv.particleDir==='stall'){
+            // Gate: decelerate
+            p.vx*=0.95; p.vy*=0.95;
+          }else{
+            p.vx+=dx/d*0.0002; p.vy+=dy/d*0.0002;
+          }
+        }
+      }
     }
     p.x+=p.vx; p.y+=p.vy; p.life-=0.001;
     p.vx*=0.996; p.vy*=0.996;
@@ -405,22 +468,53 @@ function anim(){
     }
     var nearAct=false;
     REGIONS.forEach(function(r){var dx=(p.x-r.x)/r.rx,dy=(p.y-r.y)/r.ry;if(dx*dx+dy*dy<2&&regionAct(r.id)>0.3)nearAct=true;});
-    var al=nearAct?0.30+0.15*p.life:0.06*p.life;
-    var sz=p.sz*(nearAct?1.5:0.7);
+    var al=nearAct?0.28+0.15*p.life:0.05*p.life;
+    var sz=p.sz*(nearAct?1.4:0.6);
     cx.fillStyle='rgba(140,215,245,'+al+')';
     cx.beginPath(); cx.arc(p.x*W,p.y*H,sz,0,Math.PI*2); cx.fill();
   });
 
+  // ═══ LAYER 2b: ACTIVITY WAVES ═══
+  WAVES.forEach(function(w){
+    var rAct=regionAct(w.region);
+    if(rAct<0.1){
+      // Respawn in an active region
+      var actRegs=REGIONS.filter(function(r){return regionAct(r.id)>0.15;});
+      if(actRegs.length){
+        var nr=actRegs[Math.floor(Math.random()*actRegs.length)];
+        w.x=nr.x+(Math.random()-0.5)*nr.rx*0.8;
+        w.y=nr.y+(Math.random()-0.5)*nr.ry*0.8;
+        w.region=nr.id;
+      }
+      return;
+    }
+    w.phase+=0.02;
+    w.x+=w.vx; w.y+=w.vy;
+    w.vx+=(Math.random()-0.5)*0.00004; w.vy+=(Math.random()-0.5)*0.00004;
+    w.vx*=0.99; w.vy*=0.99;
+    if(!inBrain(w.x,w.y)){
+      var nr=REGIONS.find(function(r){return r.id===w.region;});
+      if(nr){w.x=nr.x;w.y=nr.y;}
+    }
+    var pulse=0.5+0.5*Math.sin(w.phase);
+    var al=rAct*0.22*pulse;
+    var sz=w.sz*pulse;
+    var g=cx.createRadialGradient(w.x*W,w.y*H,0,w.x*W,w.y*H,sz*2);
+    g.addColorStop(0,'rgba('+mv.col+','+al+')');
+    g.addColorStop(1,'rgba('+mv.col+',0)');
+    cx.fillStyle=g;
+    cx.beginPath(); cx.arc(w.x*W,w.y*H,sz*2,0,Math.PI*2); cx.fill();
+  });
+
   // Neural flashes
-  var fRate=hasSel?0.04:0.014;
-  if(Math.random()<fRate){
+  if(Math.random()<mv.flashRate){
     var conn=CONNECTIONS[Math.floor(Math.random()*CONNECTIONS.length)];
     var r1=REGIONS.find(function(r){return r.id===conn[0];}),r2=REGIONS.find(function(r){return r.id===conn[1];});
     if(r1&&r2&&regionAct(r1.id)>0.06&&regionAct(r2.id)>0.06){
       FLASHES.push({x1:r1.x,y1:r1.y,x2:r2.x,y2:r2.y,life:1,c:regionAct(r1.id)>0.5?r1.c:r2.c});
     }
   }
-  for(var fi=FLASHES.length-1;fi>=0;fi--){FLASHES[fi].life-=0.028;if(FLASHES[fi].life<=0)FLASHES.splice(fi,1);}
+  for(var fi=FLASHES.length-1;fi>=0;fi--){FLASHES[fi].life-=mv.flashSpeed;if(FLASHES[fi].life<=0)FLASHES.splice(fi,1);}
   FLASHES.forEach(function(f){
     var prog=1-f.life, head=prog, tail=Math.max(0,prog-0.3);
     var hx=f.x1+(f.x2-f.x1)*head, hy=f.y1+(f.y2-f.y1)*head;
@@ -432,58 +526,141 @@ function anim(){
   });
   cx.globalCompositeOperation='source-over';
 
-  // ── LAYER 3: PATHWAYS ──
+  // ═══ LAYER 3: PATHWAYS WITH LABELS ═══
+  // Inbound paths
   AG.forEach(function(a,i){
-    if(i>=7) return; // first 7 get visible inbound paths
+    if(i>=8) return;
     var r=REGIONS.find(function(rr){return rr.id===a.region;});if(!r)return;
     var active=pathAct(i);
-    var ax=0, ay=H*(0.08+i*0.125);
+    var ax=0, ay=H*(0.06+i*0.115);
     var bx2=r.x*W, by2=r.y*H;
     var mx=W*0.08, my=ay*0.5+by2*0.5;
     var la,lw;
-    if(!hasSel){la=0.05;lw=0.8;}
-    else if(active){la=a.gated?0.25:0.45;lw=a.gated?1.5:2.5;}
-    else{la=0.012;lw=0.4;}
+    if(!hasSel){la=0.045;lw=0.7;}
+    else if(active){la=a.gated?0.30:0.50;lw=a.gated?1.8:2.8;}
+    else{la=0.010;lw=0.3;}
+
+    // Channel glow on active paths
+    if(active&&hasSel&&!a.gated){
+      cx.beginPath(); cx.moveTo(ax,ay); cx.quadraticCurveTo(mx,my,bx2,by2);
+      cx.strokeStyle=a.c; cx.globalAlpha=0.08; cx.lineWidth=12;
+      cx.stroke(); cx.globalAlpha=1;
+    }
+
     cx.beginPath(); cx.moveTo(ax,ay); cx.quadraticCurveTo(mx,my,bx2,by2);
     cx.strokeStyle=a.gated&&active?'#d4a020':a.c;
     cx.globalAlpha=la; cx.lineWidth=lw;
     if(a.gated&&active) cx.setLineDash([5,3]);
     cx.stroke(); cx.setLineDash([]); cx.globalAlpha=1;
-    // Pulse particles
+
+    // Gated barrier marker
+    if(a.gated&&active&&hasSel){
+      var bp=bez2(ax,ay,mx,my,bx2,by2,0.85);
+      cx.beginPath();
+      var perp=Math.atan2(by2-ay,bx2-ax)+Math.PI/2;
+      cx.moveTo(bp.x+Math.cos(perp)*8,bp.y+Math.sin(perp)*8);
+      cx.lineTo(bp.x-Math.cos(perp)*8,bp.y-Math.sin(perp)*8);
+      cx.strokeStyle='#d4a020'; cx.lineWidth=2.5; cx.globalAlpha=0.6+0.3*Math.sin(t*4);
+      cx.stroke(); cx.globalAlpha=1;
+    }
+
+    // Pulse particles on paths
     if(active||!hasSel){
-      var n=active&&hasSel?2:1;
+      var n=active&&hasSel?3:1;
+      var spd=a.gated?0.15:0.3;
       for(var k=0;k<n;k++){
-        var prog=((t*0.3+i*0.5+k*0.9)%2)/2;
+        var prog=((t*spd+i*0.5+k*0.7)%2)/2;
         if(prog<1){
           var pt=bez2(ax,ay,mx,my,bx2,by2,prog);
-          var sz=hasSel&&active?10:4;
+          var sz=hasSel&&active?11:4;
           var pc=a.gated?'#d4a020':a.c;
           var g=cx.createRadialGradient(pt.x,pt.y,0,pt.x,pt.y,sz);
           g.addColorStop(0,pc);g.addColorStop(1,'rgba(0,0,0,0)');
           cx.fillStyle=g;cx.beginPath();cx.arc(pt.x,pt.y,sz,0,Math.PI*2);cx.fill();
           cx.fillStyle='#fff';cx.globalAlpha=hasSel&&active?0.9:0.3;
-          cx.beginPath();cx.arc(pt.x,pt.y,hasSel&&active?2:0.8,0,Math.PI*2);cx.fill();cx.globalAlpha=1;
+          cx.beginPath();cx.arc(pt.x,pt.y,hasSel&&active?2.2:0.8,0,Math.PI*2);cx.fill();cx.globalAlpha=1;
         }
       }
     }
-  });
 
-  // Outbound paths
-  [{rx:'parietal_L',fy:0.12,c:'#60a5fa'},{rx:'cerebellum',fy:0.50,c:'#d4a020'},{rx:'occipital',fy:0.82,c:'#818cf8'}].forEach(function(p){
-    var r=REGIONS.find(function(rr){return rr.id===p.rx;});if(!r)return;
-    var show=selAgent<0;
-    var ax2=r.x*W,ay2=r.y*H,bx3=W,by3=H*p.fy;
-    var mx2=W*0.88,my2=ay2*0.4+by3*0.6;
-    cx.beginPath();cx.moveTo(ax2,ay2);cx.quadraticCurveTo(mx2,my2,bx3,by3);
-    cx.strokeStyle=p.c;cx.globalAlpha=show?0.05:0.012;cx.lineWidth=0.8;cx.stroke();cx.globalAlpha=1;
-    if(show){
-      var prog=((t*0.25+p.fy*3)%2)/2;
-      if(prog<1){var pt=bez2(ax2,ay2,mx2,my2,bx3,by3,prog);
-        var g=cx.createRadialGradient(pt.x,pt.y,0,pt.x,pt.y,4);
-        g.addColorStop(0,p.c);g.addColorStop(1,'rgba(0,0,0,0)');
-        cx.fillStyle=g;cx.beginPath();cx.arc(pt.x,pt.y,4,0,Math.PI*2);cx.fill();}
+    // Path label at origin
+    if(active&&hasSel){
+      cx.font='600 8px "Share Tech Mono",monospace';
+      cx.fillStyle=a.gated?'rgba(212,160,32,0.7)':'rgba('+r.c+',0.6)';
+      cx.textAlign='left';
+      cx.fillText(a.plabel,6,ay+3);
     }
   });
+
+  // Outbound paths with labels
+  var showOut=!selAgent>=0&&(selMode==='synthesis'||selMode===''||!selMode);
+  OUTBOUND.forEach(function(p,oi){
+    var r=REGIONS.find(function(rr){return rr.id===p.rx;});if(!r)return;
+    var outActive=selMode==='synthesis';
+    var ax2=r.x*W,ay2=r.y*H,bx3=W,by3=H*p.fy;
+    var mx2=W*0.88,my2=ay2*0.4+by3*0.6;
+
+    // Channel glow for synthesis mode
+    if(outActive){
+      cx.beginPath();cx.moveTo(ax2,ay2);cx.quadraticCurveTo(mx2,my2,bx3,by3);
+      cx.strokeStyle=p.c;cx.globalAlpha=0.06;cx.lineWidth=10;
+      cx.stroke();cx.globalAlpha=1;
+    }
+
+    cx.beginPath();cx.moveTo(ax2,ay2);cx.quadraticCurveTo(mx2,my2,bx3,by3);
+    cx.strokeStyle=p.c;cx.globalAlpha=outActive?0.35:(selAgent<0&&!selMode?0.04:0.01);
+    cx.lineWidth=outActive?2:0.7;cx.stroke();cx.globalAlpha=1;
+
+    if(outActive||(!hasSel)){
+      var spd2=outActive?0.35:0.2;
+      var prog=((t*spd2+oi*1.2)%2)/2;
+      if(prog<1){var pt=bez2(ax2,ay2,mx2,my2,bx3,by3,prog);
+        var sz2=outActive?8:3;
+        var g=cx.createRadialGradient(pt.x,pt.y,0,pt.x,pt.y,sz2);
+        g.addColorStop(0,p.c);g.addColorStop(1,'rgba(0,0,0,0)');
+        cx.fillStyle=g;cx.beginPath();cx.arc(pt.x,pt.y,sz2,0,Math.PI*2);cx.fill();
+      }
+    }
+
+    // Outbound label
+    if(outActive){
+      cx.font='600 7px "Share Tech Mono",monospace';
+      cx.fillStyle='rgba('+r.c+',0.5)';
+      cx.textAlign='right';
+      cx.fillText('\u2192 '+p.label,W-6,by3+3);
+    }
+  });
+
+  // ═══ LAYER 4: UI-STATE OVERLAYS ═══
+  // Pursuit label on brain
+  if(selPipe>=0){
+    var pp=PIPE[selPipe];
+    cx.font='700 9px "Orbitron",sans-serif';
+    cx.textAlign='center';
+    cx.fillStyle='rgba(212,180,80,0.55)';
+    cx.fillText('\u25B6 '+pp.n.toUpperCase(),W*0.48,H*0.10);
+    cx.font='500 7px "Share Tech Mono",monospace';
+    cx.fillStyle='rgba(212,180,80,0.35)';
+    cx.fillText('OPI '+pp.opi+' · '+pp.stage.toUpperCase()+' · '+pp.due,W*0.48,H*0.13);
+  }
+
+  // Mode label
+  if(selMode){
+    cx.font='700 8px "Orbitron",sans-serif';
+    cx.textAlign='center';
+    var modeCol=mv.col;
+    cx.fillStyle='rgba('+modeCol+',0.40)';
+    cx.fillText(selMode.toUpperCase()+' MODE',W*0.48,H*0.92);
+  }
+
+  // Agent focus label
+  if(selAgent>=0){
+    var sa=AG[selAgent];
+    cx.font='600 8px "Share Tech Mono",monospace';
+    cx.textAlign='center';
+    cx.fillStyle='rgba('+REGIONS.find(function(r){return r.id===sa.region;}).c+',0.5)';
+    cx.fillText(sa.n.toUpperCase()+' — '+sa.role.toUpperCase(),W*0.48,H*0.92);
+  }
 }
 
 // ═══ TOOLTIP ═══
@@ -493,7 +670,11 @@ function findTarget(mx,my){
   var found=null;
   REGIONS.forEach(function(r){
     var dx=(mx-r.x)/r.rx, dy=(my-r.y)/r.ry;
-    if(dx*dx+dy*dy<1.5) found={tip:r.label,detail:'Region: '+r.id+' — '+(regionAct(r.id)>0.5?'HIGH':'ambient')+' activity'};
+    if(dx*dx+dy*dy<1.5){
+      var act=regionAct(r.id);
+      var status=act>0.5?'HIGH':act>0.15?'ambient':'dim';
+      found={tip:r.label,detail:status+' activity'+(selMode?' · '+selMode+' mode':'')};
+    }
   });
   return found;
 }
