@@ -41,7 +41,7 @@ const server = http.createServer(async (req, res) => {
 
     if (url === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'alive', uptime_seconds: Math.floor(process.uptime()), timestamp: new Date().toISOString(), version: 'V4.3-system-build', agents_active: 15 }));
+      res.end(JSON.stringify({ status: 'alive', uptime_seconds: Math.floor(process.uptime()), timestamp: new Date().toISOString(), version: 'V4.4-daily-cron', agents_active: 15 }));
       return;
     }
 
@@ -1348,7 +1348,7 @@ if (url === '/api/system-status') {
     var withRFP = state.pipeline.filter(function(o) { return o.rfp_document_retrieved === true; });
     
     res.end(JSON.stringify({
-      version: 'V4.3-system-build',
+      version: 'V4.4-daily-cron',
       uptime_seconds: Math.floor(process.uptime()),
       timestamp: new Date().toISOString(),
       
@@ -1490,16 +1490,81 @@ if (url === '/api/exec-brief') {
   return;
 }
 
+
+// === RECORD OUTCOME + AUTO-ANALYSIS — /api/record-outcome ===
+if (url === '/api/record-outcome' && req.method === 'POST') {
+  var body = '';
+  req.on('data', function(c) { body += c; });
+  req.on('end', async function() {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    try {
+      var params = JSON.parse(body);
+      if (!params.id || !params.outcome) { res.end(JSON.stringify({ error: 'id and outcome required (won/lost/no_bid/cancelled)' })); return; }
+      var validOutcomes = ['won', 'lost', 'no_bid', 'cancelled'];
+      if (validOutcomes.indexOf(params.outcome) < 0) { res.end(JSON.stringify({ error: 'outcome must be: ' + validOutcomes.join(', ') })); return; }
+      
+      // Record outcome
+      var upd = { outcome: params.outcome, outcome_notes: params.notes || null, last_updated: new Date().toISOString() };
+      if (params.outcome === 'won' || params.outcome === 'lost') upd.stage = 'closed';
+      if (params.outcome === 'no_bid') upd.stage = 'no_bid';
+      await supabase.from('opportunities').update(upd).eq('id', params.id);
+      log('OUTCOME: ' + params.id.slice(0,40) + ' → ' + params.outcome);
+      
+      // Auto-analyze: get the opp data for analysis
+      var oppData = await supabase.from('opportunities').select('*').eq('id', params.id).single();
+      var opp = oppData.data;
+      
+      if (opp && (params.outcome === 'won' || params.outcome === 'lost')) {
+        // Get all memories for this opp to understand what we predicted
+        var oppMems = await supabase.from('organism_memory').select('agent,observation').eq('opportunity_id', params.id).order('created_at', { ascending: false }).limit(20);
+        var memSummary = (oppMems.data || []).map(function(m) { return m.agent + ': ' + (m.observation || '').slice(0, 200); }).join('\n');
+        
+        // Run loss/win analysis
+        var analysisPrompt = 'OUTCOME ANALYSIS: HGI ' + params.outcome.toUpperCase() + ' on "' + (opp.title || '') + '"\n' +
+          'Agency: ' + (opp.agency || '') + ' | Vertical: ' + (opp.vertical || '') + ' | OPI: ' + (opp.opi_score || '?') + '\n' +
+          'Notes: ' + (params.notes || 'none') + '\n\n' +
+          'AGENT PREDICTIONS:\n' + memSummary.slice(0, 3000) + '\n\n' +
+          'TASK: Analyze this outcome. What did the organism predict correctly? What did it miss? ' +
+          'What patterns should inform future OPI scoring and pursuit decisions? ' +
+          'Specific lessons for: (1) OPI calibration, (2) competitive positioning, (3) proposal strategy, (4) pricing. ' +
+          'Be brutally honest about prediction accuracy.';
+        
+        var analysis = await claudeCall('outcome analysis', analysisPrompt, 2000, { model: 'claude-haiku-4-5-20251001' });
+        if (analysis && analysis.length > 100) {
+          await storeMemory('loss_analysis', params.id, (opp.agency || '') + ',outcome,' + params.outcome, analysis, 'analysis', null, 'high');
+          log('OUTCOME ANALYSIS: ' + analysis.length + ' chars generated for ' + params.outcome);
+        }
+        
+        // Update OPI calibration data
+        await supabase.from('pipeline_analytics').insert({
+          id: 'outcome-' + Date.now(),
+          metric_name: 'outcome_' + params.outcome,
+          metric_value: opp.opi_score || 0,
+          context: JSON.stringify({ title: opp.title, agency: opp.agency, vertical: opp.vertical, opi: opp.opi_score }),
+          source_agent: 'outcome_recorder',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
+      }
+      
+      res.end(JSON.stringify({ success: true, outcome: params.outcome, analysis_generated: params.outcome === 'won' || params.outcome === 'lost' }));
+    } catch (e) { res.end(JSON.stringify({ error: e.message })); }
+  });
+  return;
+}
+
 // === COMPLIANCE CHECK — /api/compliance-check?id= ===
 if (url.startsWith('/api/compliance-check')) {
-  var ccId = (req.url.split('?id=')[1]||'').split('&')[0];
-  if (!ccId) { res.writeHead(400, { 'Access-Control-Allow-Origin': '*' }); res.end(JSON.stringify({ error: 'id required' })); return; }
+  var ccRawUrl = req.url || '';
+  var ccId = ccRawUrl.indexOf('?id=') >= 0 ? ccRawUrl.split('?id=')[1].split('&')[0] : '';
+  log('COMPLIANCE-CHECK: raw=' + ccRawUrl.slice(0,80) + ' id=' + (ccId || 'EMPTY'));
+  if (!ccId) { res.writeHead(400, { 'Access-Control-Allow-Origin': '*' }); res.end(JSON.stringify({ error: 'id required', raw_url: ccRawUrl.slice(0,100) })); return; }
   res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
   try {
     var ccOpp = await supabase.from('opportunities').select('*').eq('id', ccId).single();
     if (!ccOpp.data) { res.end(JSON.stringify({ error: 'not found' })); return; }
     var opp = ccOpp.data;
-    var rfpText = (opp.rfp_text || '').slice(0, 80000);
+    var rfpText = (opp.rfp_text || '').slice(0, 30000);
     if (rfpText.length < 500) { res.end(JSON.stringify({ error: 'No RFP text available', rfp_chars: rfpText.length })); return; }
     
     var ccPrompt = 'You are a compliance analyst. Extract EVERY submission requirement from this RFP. Return ONLY a JSON array where each item has: requirement (text), section (RFP section reference), category (one of: format, content, certification, insurance, legal, pricing, personnel, deadline, delivery), mandatory (true/false), hgi_status (one of: ready, needs_action, unknown).\n\nFor hgi_status: mark "ready" for standard items HGI can easily provide (insurance certs, W-9, drug-free workplace, etc). Mark "needs_action" for items requiring specific preparation (past performance refs with contacts, specific certifications, project-specific methodology). Mark "unknown" for items you cannot assess.\n\nRFP TEXT:\n' + rfpText;
@@ -4849,13 +4914,25 @@ process.on('unhandledRejection', function(reason) {
   } catch (e2) {}
 });
 
-// STARTUP SESSION DISABLED (Session 68) — deploys no longer trigger agent cycles.
-// setTimeout(function() { runSession('startup').catch(console.error); }, 3000);
+// === WEEKDAY DAILY CRON — 7 AM CST (13:00 UTC) ===
+function scheduleWeekdayCron() {
+  var now = new Date();
+  var target = new Date(now);
+  target.setUTCHours(13, 0, 0, 0);
+  if (now >= target) target.setDate(target.getDate() + 1);
+  while (target.getUTCDay() === 0 || target.getUTCDay() === 6) {
+    target.setDate(target.getDate() + 1);
+  }
+  var msUntil = target - now;
+  var hoursUntil = Math.round(msUntil / 3600000);
+  log('CRON: Next run ' + target.toISOString() + ' (' + hoursUntil + 'h)');
+  setTimeout(function() {
+    log('=== WEEKDAY CRON FIRING ===');
+    runSession('smart_trigger_cron').catch(function(e) { log('CRON error: ' + e.message); });
+    scheduleWeekdayCron();
+  }, msUntil);
+}
+scheduleWeekdayCron();
 
-// SESSION 80: ALL CRONS DISABLED — $0 autonomous API spend.
-// Agents ONLY run when: (1) Christopher hits /api/trigger manually, (2) Claude triggers in-session.
-// No setInterval. No autonomous API calls. Period.
-// The skeleton mode code is preserved in runSession for when Christopher re-enables crons.
-
-log('V4.3-system-build ready. Endpoints: disaster-check, loss-analysis, exec-brief, compliance-check. Manual /api/trigger only.');
+log('V4.4-daily-cron ready. Weekday cron: 7AM CST smart trigger. Manual: /api/trigger. Endpoints: disaster-check, loss-analysis, exec-brief, compliance-check, system-status, record-outcome.');
 
