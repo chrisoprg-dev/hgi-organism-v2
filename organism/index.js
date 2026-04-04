@@ -41,7 +41,7 @@ const server = http.createServer(async (req, res) => {
 
     if (url === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'alive', uptime_seconds: Math.floor(process.uptime()), timestamp: new Date().toISOString(), version: 'V4.4-daily-cron', agents_active: 15 }));
+      res.end(JSON.stringify({ status: 'alive', uptime_seconds: Math.floor(process.uptime()), timestamp: new Date().toISOString(), version: 'V4.4-daily-cron', agents_active: 19 }));
       return;
     }
 
@@ -4460,12 +4460,13 @@ async function runSession(trigger) {
 
     // SKELETON GATE: In skeleton mode, only run essential system agents + event-triggered opps
     if (isSkeleton) {
-      log('SKELETON MODE: Skipping full agent passes. Running pipeline scanner + amendment tracker + dashboard only.');
+      log('SKELETON MODE: Running essential system agents (5).');
       
-      // Run only 3 essential system-wide agents
       try { var rPS = await agentPipelineScanner(state); if (rPS) allResults.push(rPS); } catch (e) { log('PS err: ' + e.message); }
       try { var rAT = await agentAmendmentTracker(state); if (rAT) allResults.push(rAT); } catch (e) { log('AT err: ' + e.message); }
       try { var rDA = await agentDashboard(state); if (rDA) allResults.push(rDA); } catch (e) { log('Dash err: ' + e.message); }
+      try { var rDM2 = await agentDisasterMonitor(state); if (rDM2) allResults.push(rDM2); } catch (e) { log('DM err: ' + e.message); }
+      try { var rOPI2 = await agentOPICalibration(state); if (rOPI2) allResults.push(rOPI2); } catch (e) { log('OPI err: ' + e.message); }
       
       // EVENT-DRIVEN: If new opps or RFPs found, run full analysis ONLY on those opps
       if (newOppsFound > 0 || eventTriggeredOpps.length > 0) {
@@ -4565,12 +4566,17 @@ async function runSession(trigger) {
     }
 
     // 4. SYSTEM-WIDE AGENTS — SESSION 81 AUDIT: 4 keepers, 21 cut
-    log('--- System-wide agents (4 active) ---');
+    log('--- System-wide agents (8 active) ---');
     try { var rPS = await agentPipelineScanner(state); if (rPS) allResults.push(rPS); } catch (e) { log('PS err: ' + e.message); }
     try { var rDM = await agentDisasterMonitor(state); if (rDM) allResults.push(rDM); } catch (e) { log('DM err: ' + e.message); }
     try { var rDA = await agentDashboard(state); if (rDA) allResults.push(rDA); } catch (e) { log('Dash err: ' + e.message); }
     try { var rAT = await agentAmendmentTracker(state); if (rAT) allResults.push(rAT); } catch (e) { log('AT err: ' + e.message); }
-    // CUT (Session 81) — 21 agents commented out, re-enable as needed:
+    // RE-ENABLED (Session 83) — high-value Haiku agents (~$0.001/call each):
+    try { var rOPI = await agentOPICalibration(state); if (rOPI) allResults.push(rOPI); } catch (e) { log('OPI err: ' + e.message); }
+    try { var rEB = await agentExecutiveBrief(state); if (rEB) allResults.push(rEB); } catch (e) { log('EB err: ' + e.message); }
+    try { var rRec = await agentRecruiting(state); if (rRec) allResults.push(rRec); } catch (e) { log('Rec err: ' + e.message); }
+    try { var rLL = await agentLearningLoop(state); if (rLL) allResults.push(rLL); } catch (e) { log('LL err: ' + e.message); }
+    // STILL CUT — re-enable when needed:
     // try { var rDis = await agentDiscovery(state); if (rDis) allResults.push(rDis); } catch (e) { log('Disc err: ' + e.message); }
     // try { var rOPI = await agentOPICalibration(state); if (rOPI) allResults.push(rOPI); } catch (e) { log('OPI err: ' + e.message); }
     // try { var rCE = await agentContentEngine(state); if (rCE) allResults.push(rCE); } catch (e) { log('CE err: ' + e.message); }
@@ -4893,8 +4899,8 @@ async function runSession(trigger) {
 // STARTUP
 // ============================================================
 log('==========================================================');
-log('HGI LIVING ORGANISM V3.4 - STARTING');
-log('43 researcher-agents. Task instructions. Sourced intelligence. RFP gate.');
+log('HGI ORGANISM V4.4-daily-cron - STARTING');
+log('15 active agents. Direct FEMA API. Smart trigger cron. 6 new endpoints.');
 log('12h dedup guard. Crash logging. Test endpoints.');
 log('==========================================================');
 
