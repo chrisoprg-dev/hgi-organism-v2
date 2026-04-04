@@ -1568,10 +1568,19 @@ if (url.startsWith('/api/compliance-check')) {
     if (rfpText.length < 500) { res.end(JSON.stringify({ error: 'No RFP text available', rfp_chars: rfpText.length })); return; }
     
     var ccPrompt = 'You are a compliance analyst. Extract EVERY submission requirement from this RFP. Return ONLY a JSON array where each item has: requirement (text), section (RFP section reference), category (one of: format, content, certification, insurance, legal, pricing, personnel, deadline, delivery), mandatory (true/false), hgi_status (one of: ready, needs_action, unknown).\n\nFor hgi_status: mark "ready" for standard items HGI can easily provide (insurance certs, W-9, drug-free workplace, etc). Mark "needs_action" for items requiring specific preparation (past performance refs with contacts, specific certifications, project-specific methodology). Mark "unknown" for items you cannot assess.\n\nRFP TEXT:\n' + rfpText;
-    var ccOut = await claudeCall('compliance extraction', ccPrompt, 8000, { model: 'claude-haiku-4-5-20251001' });
-    var ccMatch = ccOut.match(/\[[\s\S]*\]/);
+    log('COMPLIANCE-CHECK: Calling Haiku with ' + rfpText.length + ' chars of RFP text...');
+    var ccOut = await claudeCall('compliance extraction', ccPrompt, 4000, { model: 'claude-haiku-4-5-20251001' });
+    log('COMPLIANCE-CHECK: Haiku returned ' + (ccOut ? ccOut.length : 0) + ' chars');
     var requirements = [];
-    if (ccMatch) { try { requirements = JSON.parse(ccMatch[0]); } catch(e) {} }
+    if (ccOut && ccOut.length > 50) {
+      // Strip markdown code blocks if present
+      var cleaned = ccOut.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      var ccMatch = cleaned.match(/\[[\s\S]*\]/);
+      if (ccMatch) { 
+        try { requirements = JSON.parse(ccMatch[0]); log('COMPLIANCE-CHECK: Extracted ' + requirements.length + ' requirements'); } 
+        catch(e) { log('COMPLIANCE-CHECK: JSON parse failed: ' + e.message + ' | first 200: ' + cleaned.slice(0,200)); } 
+      } else { log('COMPLIANCE-CHECK: No JSON array found in response. First 300: ' + cleaned.slice(0,300)); }
+    } else { log('COMPLIANCE-CHECK: Haiku returned empty or too short'); }
     
     var ready = requirements.filter(function(r) { return r.hgi_status === 'ready'; }).length;
     var action = requirements.filter(function(r) { return r.hgi_status === 'needs_action'; }).length;
