@@ -1327,7 +1327,7 @@ if (url.startsWith('/api/analytics')) {
 
 // === DISASTER MONITOR MANUAL TRIGGER — /api/disaster-check ===
 if (url === '/api/disaster-check') {
-  res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
   try {
     var state = await loadState();
     var dmResult = await agentDisasterMonitor(state);
@@ -1340,7 +1340,7 @@ if (url === '/api/disaster-check') {
 
 // === LOSS ANALYSIS — /api/loss-analysis ===
 if (url === '/api/loss-analysis') {
-  res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
   try {
     var outcomes = await supabase.from('opportunities').select('id,title,agency,vertical,opi_score,outcome,outcome_notes,stage,estimated_value,due_date').not('outcome', 'is', null).order('last_updated', { ascending: false }).limit(50);
     var records = outcomes.data || [];
@@ -1367,7 +1367,7 @@ if (url === '/api/loss-analysis') {
 
 // === EXECUTIVE BRIEFING — /api/exec-brief ===
 if (url === '/api/exec-brief') {
-  res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
   try {
     var state = await loadState();
     var pursuing = state.pipeline.filter(function(o) { return o.stage === 'pursuing' || o.stage === 'proposal'; });
@@ -1412,8 +1412,8 @@ if (url === '/api/exec-brief') {
 // === COMPLIANCE CHECK — /api/compliance-check?id= ===
 if (url.startsWith('/api/compliance-check')) {
   var ccId = new URL('http://x' + url).searchParams.get('id');
-  if (!ccId) { res.writeHead(400, corsHeaders); res.end(JSON.stringify({ error: 'id required' })); return; }
-  res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
+  if (!ccId) { res.writeHead(400, { 'Access-Control-Allow-Origin': '*' }); res.end(JSON.stringify({ error: 'id required' })); return; }
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
   try {
     var ccOpp = await supabase.from('opportunities').select('*').eq('id', ccId).single();
     if (!ccOpp.data) { res.end(JSON.stringify({ error: 'not found' })); return; }
