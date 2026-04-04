@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>HGI ORGANISM — Command Center</title>
+<style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#040a14}</style>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useRef, useEffect, useCallback } = React;
+
+/* ═══════════════════════════════════════════════════════════════
+   HGI ORGANISM — COMMAND CENTER PROTOTYPE
+   Standalone high-fidelity prototype with living orchestration brain
+   ═══════════════════════════════════════════════════════════════ */
+
+// ── THEME ──
+const TH = {
+  bg:'#040a14', panel:'#0a1228', panelAlt:'#0d1530',
+  border:'rgba(0,160,220,0.06)', borderLit:'rgba(0,180,240,0.12)',
+  cy:'#00d0f0', gn:'#3cd9a0', am:'#d4a020', rd:'#c84848', gold:'#d4a020',
+  wh:'#d0dce8', tx:'rgba(185,205,225,0.85)', dm:'rgba(145,170,195,0.3)',
+  mc:'rgba(120,145,170,0.2)',
+};
+const FONT = {
+  brand:"'Orbitron',sans-serif", ui:"'Rajdhani',sans-serif", mono:"'Share Tech Mono',monospace",
+};
+
+// ── AGENTS (10 visible + 5 system = 15 total) ──
+const AGENTS = [
+  {id:0,name:'Intelligence Engine',status:'Scanning',mode:'planning',gated:false,color:'#00d0f0',regionId:'frontal',task:'OPSB CM — 3 competitors identified (CSRS, Jacobs, Providence)',role:'Competitive Intelligence',finding:'CSRS confirmed bidding, Jacobs holds 2 active JP contracts'},
+  {id:1,name:'Financial Agent',status:'Benchmarking',mode:'planning',gated:false,color:'#3cd9a0',regionId:'parietal',task:'Washington Parish — $95-165/hr comparable range established',role:'Price-to-Win Analysis',finding:'Average base rate $127/hr across 4 comparable DR contracts'},
+  {id:2,name:'Winnability Agent',status:'Scoring',mode:'planning',gated:false,color:'#d4a020',regionId:'prefrontal',task:'OPSB CM — PWIN 62%, strong location advantage',role:'GO/NO-GO Scoring',finding:'Location 10/10, experience 6/10, past performance gap'},
+  {id:3,name:'CRM Agent',status:'Mapping',mode:'memory',gated:false,color:'#a78bfa',regionId:'temporal',task:'NOLA — 2 existing SWBNO contacts confirmed',role:'Relationship Intelligence',finding:'Operations director relationship warm, need engineering contact'},
+  {id:4,name:'Quality Gate',status:'Auditing',mode:'gate',gated:true,color:'#d4a020',regionId:'cerebellum',task:'St. George — missing Exhibit D flagged',role:'Compliance Audit',finding:'3 items blocking: insurance cert, Exhibit D, W-9'},
+  {id:5,name:'Proposal Writer',status:'Drafting',mode:'synthesis',gated:false,color:'#60a5fa',regionId:'broca',task:'NOLA executive summary — 47K chars generated',role:'Proposal Production',finding:'Draft pending quality review, technical approach strong'},
+  {id:6,name:'Red Team',status:'Blocked',mode:'gate',gated:true,color:'#c84848',regionId:'occipital',task:'Awaiting proposal drafts for adversarial review',role:'Adversarial Review',finding:'Blocked on proposal completion'},
+  {id:7,name:'Dashboard Agent',status:'Compiling',mode:'memory',gated:false,color:'#818cf8',regionId:'occipital',task:'8 new memories across 4 pursuits overnight',role:'Executive Briefing',finding:'6 events, 2 active gates, 1 new opportunity detected'},
+  {id:8,name:'Pipeline Scanner',status:'Monitoring',mode:'planning',gated:false,color:'#06b6d4',regionId:'frontal',task:'5 active deadlines tracked, 2 approaching',role:'Deadline Watch',finding:'OPSB CM due Apr 30, Washington Parish due May 8'},
+  {id:9,name:'Staffing Agent',status:'Blocked',mode:'synthesis',gated:true,color:'#f59e0b',regionId:'parietal',task:'Position matching for Washington Parish',role:'Talent Planning',finding:'Gated — awaiting RFP position requirements'},
+];
+
+// ── PURSUITS ──
+const PURSUITS = [
+  {id:0,title:'NOLA Water Infrastructure',agency:'SWBNO',opi:94,stage:'pursuing',due:'Unsolicited',obj:'Deliver compliant unsolicited proposal',bottleneck:null},
+  {id:1,title:'DR-4900 Louisiana',agency:'FEMA',opi:92,stage:'identified',due:'TBD',obj:'Monitor for RFP release',bottleneck:null},
+  {id:2,title:'Washington Parish',agency:'WPSB',opi:88,stage:'pursuing',due:'May 8',obj:'Complete intel package and GO/NO-GO',bottleneck:null},
+  {id:3,title:'St. George DR PM',agency:'City of St. George',opi:85,stage:'watching',due:'Apr 24',obj:'Quality review of generated proposal',bottleneck:'Missing Exhibit D'},
+  {id:4,title:'OPSB Construction Mgmt',agency:'OPSB',opi:78,stage:'new',due:'Apr 30',obj:'Initial competitive scan and research',bottleneck:null},
+];
+
+// ── REGIONS (mapped to brain anatomy) ──
+const REGIONS = [
+  {id:'prefrontal',label:'Planning Cortex',x:0.18,y:0.30,rx:0.07,ry:0.09,c:'0,208,240',modes:['planning']},
+  {id:'frontal',label:'Intelligence Hub',x:0.30,y:0.18,rx:0.08,ry:0.07,c:'0,210,240',modes:['planning']},
+  {id:'parietal',label:'Synthesis Core',x:0.53,y:0.13,rx:0.09,ry:0.06,c:'96,165,250',modes:['synthesis']},
+  {id:'temporal',label:'Memory / CRM',x:0.36,y:0.57,rx:0.08,ry:0.06,c:'167,139,250',modes:['memory']},
+  {id:'occipital',label:'Executive Output',x:0.78,y:0.30,rx:0.06,ry:0.07,c:'130,140,250',modes:['memory']},
+  {id:'broca',label:'Proposal Language',x:0.22,y:0.48,rx:0.05,ry:0.05,c:'96,165,250',modes:['synthesis']},
+  {id:'cerebellum',label:'Quality / Validation',x:0.76,y:0.65,rx:0.06,ry:0.05,c:'212,160,32',modes:['gate']},
+];
+
+// ── EVENTS ──
+const EVENTS = [
+  {t:'14:52',agent:'Pipeline Scanner',type:'Match',text:'Detected addendum on JP SOQ 26-005',mode:'planning',severity:'info'},
+  {t:'14:54',agent:'Quality Gate',type:'Warning',text:'Missing insurance certificate — St. George',mode:'gate',severity:'warn'},
+  {t:'14:56',agent:'Winnability',type:'Match',text:'OPSB CM winnability aggregation complete',mode:'planning',severity:'info'},
+  {t:'14:55',agent:'Proposal Writer',type:'Warning',text:'Executive summary exceeds page limit',mode:'synthesis',severity:'warn'},
+  {t:'14:53',agent:'Intelligence',type:'Match',text:'CSRS confirmed bidding on OPSB CM',mode:'planning',severity:'info'},
+  {t:'14:50',agent:'CRM Agent',type:'Match',text:'SWBNO contact responded to outreach',mode:'memory',severity:'info'},
+  {t:'14:48',agent:'Financial',type:'Match',text:'Rate benchmark updated: DR PM vertical',mode:'planning',severity:'info'},
+];
+
+// ── BRAIN GEOMETRY (lateral view, normalized 0-1) ──
+// Main cerebrum outline: cubic bezier segments [cp1x,cp1y,cp2x,cp2y,ex,ey]
+const BRAIN_START = [0.10, 0.46];
+const BRAIN_SEGS = [
+  [0.07,0.38, 0.07,0.26, 0.14,0.18],
+  [0.22,0.10, 0.32,0.05, 0.43,0.04],
+  [0.54,0.03, 0.62,0.04, 0.69,0.08],
+  [0.76,0.12, 0.83,0.20, 0.86,0.30],
+  [0.88,0.38, 0.87,0.45, 0.82,0.49],
+  [0.78,0.52, 0.74,0.53, 0.70,0.52],
+  [0.64,0.56, 0.54,0.63, 0.44,0.66],
+  [0.34,0.68, 0.22,0.66, 0.15,0.58],
+  [0.11,0.54, 0.10,0.50, 0.10,0.46],
+];
+// Cerebellum
+const CRB_START = [0.70, 0.53];
+const CRB_SEGS = [
+  [0.74,0.55, 0.81,0.57, 0.84,0.62],
+  [0.86,0.66, 0.84,0.73, 0.80,0.76],
+  [0.76,0.78, 0.70,0.76, 0.65,0.72],
+  [0.62,0.68, 0.62,0.60, 0.65,0.56],
+  [0.67,0.54, 0.68,0.53, 0.70,0.53],
+];
+// Brain stem
+const STEM_START = [0.64, 0.70];
+const STEM_SEGS = [
+  [0.60,0.74, 0.57,0.80, 0.57,0.86],
+  [0.57,0.89, 0.62,0.89, 0.63,0.86],
+  [0.64,0.82, 0.66,0.76, 0.66,0.72],
+  [0.66,0.71, 0.65,0.70, 0.64,0.70],
+];
+// Sulci [startX,startY, cpX,cpY, endX,endY] (quadratic bezier)
+const SULCI = [
+  [0.44,0.06, 0.41,0.26, 0.38,0.47],  // Central sulcus
+  [0.24,0.46, 0.42,0.42, 0.63,0.39],  // Lateral fissure
+  [0.36,0.10, 0.33,0.26, 0.30,0.43],  // Precentral
+  [0.52,0.08, 0.50,0.24, 0.47,0.41],  // Postcentral
+  [0.16,0.22, 0.25,0.18, 0.35,0.14],  // Superior frontal
+  [0.14,0.33, 0.23,0.29, 0.33,0.26],  // Inferior frontal
+  [0.30,0.55, 0.42,0.53, 0.56,0.50],  // Superior temporal
+  [0.56,0.12, 0.64,0.16, 0.72,0.22],  // Intraparietal
+  [0.72,0.14, 0.74,0.24, 0.79,0.34],  // Parieto-occipital
+  [0.27,0.62, 0.37,0.63, 0.47,0.58],  // Inferior temporal
+  [0.79,0.28, 0.82,0.36, 0.84,0.44],  // Calcarine
+  [0.18,0.38, 0.23,0.36, 0.29,0.36],  // Short frontal
+];
+// Cerebellum folia (horizontal lines)
+const FOLIA = [
+  [0.67,0.60, 0.76,0.58, 0.82,0.62],
+  [0.66,0.66, 0.74,0.64, 0.81,0.67],
+  [0.67,0.71, 0.74,0.71, 0.79,0.73],
+];
+// Region connections for neural flashes
+const CONNECTIONS = [
+  ['frontal','parietal'],['prefrontal','frontal'],['frontal','temporal'],
+  ['parietal','occipital'],['temporal','broca'],['broca','parietal'],
+  ['parietal','cerebellum'],['prefrontal','broca'],['temporal','occipital'],
+];
+// Inbound pathways: [agentIdx, targetY_frac, regionId]
+const INBOUND = [0,1,2,3,4,5,8].map((ai,i) => ({agentIdx:ai, fy:0.08+i*0.13, regionId:AGENTS[ai].regionId}));
+// Outbound pathways
+const OUTBOUND = [
+  {regionId:'parietal',label:'Synthesis Output',fy:0.15,color:'#60a5fa'},
+  {regionId:'cerebellum',label:'Validation Route',fy:0.50,color:'#d4a020'},
+  {regionId:'occipital',label:'Executive Briefing',fy:0.80,color:'#818cf8'},
+];
+
+// ── HELPERS ──
+function regionActivity(rId, st) {
+  if (st.selectedAgent !== null) {
+    return AGENTS[st.selectedAgent]?.regionId === rId ? 1.0 : 0.04;
+  }
+  if (st.selectedMode) {
+    const r = REGIONS.find(r => r.id === rId);
+    return r?.modes.includes(st.selectedMode) ? 0.8 : 0.06;
+  }
+  return 0.18;
+}
+function pathActive(aIdx, st) {
+  if (st.selectedAgent !== null) return aIdx === st.selectedAgent;
+  if (st.selectedMode) return AGENTS[aIdx]?.mode === st.selectedMode;
+  return true;
+}
+
+// ═══ BRAIN CANVAS ═══
+function BrainCanvas({ state }) {
+  const cvRef = useRef(null);
+  const stRef = useRef(state);
+  const tRef = useRef(0);
+  const animRef = useRef(0);
+  const partRef = useRef([]);
+  const flashRef = useRef([]);
+  useEffect(() => { stRef.current = state; }, [state]);
+
+  useEffect(() => {
+    const cv = cvRef.current; if (!cv) return;
+    // Init particles
+    const pts = [];
+    for (let i = 0; i < 55; i++) {
+      const r = REGIONS[Math.floor(Math.random()*REGIONS.length)];
+      pts.push({x:r.x+(Math.random()-0.5)*r.rx*1.6, y:r.y+(Math.random()-0.5)*r.ry*1.6,
+        vx:(Math.random()-0.5)*0.0003, vy:(Math.random()-0.5)*0.0003, life:Math.random(), sz:0.8+Math.random()*1.2});
+    }
+    partRef.current = pts;
+
+    const resize = () => { cv.width=cv.parentElement.clientWidth; cv.height=cv.parentElement.clientHeight; };
+    resize(); window.addEventListener('resize', resize);
+
+    // Brain boundary check (rough ellipse)
+    const inBrain = (px,py) => { const dx=(px-0.48)/0.42,dy=(py-0.42)/0.42; return dx*dx+dy*dy<1; };
+
+    // Drawing helpers
+    const bp = (cx,w,h,pts) => { // bezier path from segments
+      cx.moveTo(pts.start[0]*w, pts.start[1]*h);
+      pts.segs.forEach(s => cx.bezierCurveTo(s[0]*w,s[1]*h, s[2]*w,s[3]*h, s[4]*w,s[5]*h));
+    };
+    const qb = (cx,w,h,s) => { cx.moveTo(s[0]*w,s[1]*h); cx.quadraticCurveTo(s[2]*w,s[3]*h, s[4]*w,s[5]*h); };
+    const bez2 = (ax,ay,mx,my,bx,by,t) => { const u=1-t; return {x:u*u*ax+2*u*t*mx+t*t*bx, y:u*u*ay+2*u*t*my+t*t*by}; };
+
+    const animate = () => {
+      animRef.current = requestAnimationFrame(animate);
+      const t = tRef.current += 0.016;
+      const s = stRef.current;
+      const cx = cv.getContext('2d');
+      const W = cv.width, H = cv.height;
+      // Brain bounding box
+      const bx=W*0.15, by=H*0.05, bw=W*0.70, bh=H*0.90;
+      cx.clearRect(0,0,W,H);
+
+      // Breathing scale
+      const breath = 1 + 0.006*Math.sin(t*0.8);
+      cx.save();
+      cx.translate(bx+bw/2, by+bh/2);
+      cx.scale(breath, breath);
+      cx.translate(-(bx+bw/2), -(by+bh/2));
+
+      // ── LAYER 0: Brain Form ──
+      // Cerebrum fill
+      const drawShape = (start, segs) => {
+        cx.beginPath();
+        cx.moveTo(bx+bw*start[0], by+bh*start[1]);
+        segs.forEach(s => cx.bezierCurveTo(bx+bw*s[0],by+bh*s[1], bx+bw*s[2],by+bh*s[3], bx+bw*s[4],by+bh*s[5]));
+        cx.closePath();
+      };
+
+      // Main brain gradient
+      const grd = cx.createRadialGradient(bx+bw*0.42,by+bh*0.28, bw*0.05, bx+bw*0.42,by+bh*0.38, bw*0.50);
+      grd.addColorStop(0, 'rgba(22,38,62,0.95)');
+      grd.addColorStop(0.5, 'rgba(14,26,48,0.95)');
+      grd.addColorStop(1, 'rgba(8,16,32,0.92)');
+
+      // Cerebrum
+      drawShape(BRAIN_START, BRAIN_SEGS);
+      cx.fillStyle = grd; cx.fill();
+      cx.strokeStyle = 'rgba(60,100,140,0.12)'; cx.lineWidth = 1; cx.stroke();
+
+      // Cerebellum
+      drawShape(CRB_START, CRB_SEGS);
+      const cgrd = cx.createRadialGradient(bx+bw*0.75,by+bh*0.65,bw*0.02, bx+bw*0.75,by+bh*0.65,bw*0.12);
+      cgrd.addColorStop(0,'rgba(18,32,52,0.92)'); cgrd.addColorStop(1,'rgba(10,20,38,0.90)');
+      cx.fillStyle = cgrd; cx.fill();
+      cx.strokeStyle = 'rgba(60,100,140,0.10)'; cx.lineWidth = 0.8; cx.stroke();
+
+      // Brain stem
+      drawShape(STEM_START, STEM_SEGS);
+      cx.fillStyle = 'rgba(12,22,40,0.88)'; cx.fill();
+
+      // Sulci (brain folds)
+      cx.lineCap = 'round';
+      SULCI.forEach((s,i) => {
+        const alpha = 0.08 + 0.04*Math.sin(t*0.3+i);
+        cx.beginPath();
+        cx.moveTo(bx+bw*s[0], by+bh*s[1]);
+        cx.quadraticCurveTo(bx+bw*s[2], by+bh*s[3], bx+bw*s[4], by+bh*s[5]);
+        cx.strokeStyle = `rgba(30,55,85,${alpha})`; cx.lineWidth = 0.8; cx.stroke();
+        // Subtle highlight on one side
+        cx.beginPath();
+        cx.moveTo(bx+bw*s[0], by+bh*s[1]-0.8);
+        cx.quadraticCurveTo(bx+bw*s[2], by+bh*s[3]-0.8, bx+bw*s[4], by+bh*s[5]-0.8);
+        cx.strokeStyle = `rgba(70,110,155,${alpha*0.5})`; cx.lineWidth = 0.5; cx.stroke();
+      });
+
+      // Cerebellum folia
+      FOLIA.forEach((s,i) => {
+        cx.beginPath();
+        cx.moveTo(bx+bw*s[0], by+bh*s[1]);
+        cx.quadraticCurveTo(bx+bw*s[2], by+bh*s[3], bx+bw*s[4], by+bh*s[5]);
+        cx.strokeStyle = 'rgba(35,60,90,0.10)'; cx.lineWidth = 0.6; cx.stroke();
+      });
+
+      // ── LAYER 1: Regional Activity ──
+      REGIONS.forEach(r => {
+        const act = regionActivity(r.id, s);
+        if (act < 0.02) return;
+        const rx = bx+bw*r.x, ry2 = by+bh*r.y;
+        const rrx = bw*r.rx, rry = bh*r.ry;
+        const brth = 0.7+0.3*Math.sin(t*1.1+r.x*10);
+        let al = act*0.30*brth;
+        let col = r.c;
+        // Gated region
+        if (s.selectedAgent!==null && AGENTS[s.selectedAgent]?.gated && AGENTS[s.selectedAgent]?.regionId===r.id) col='212,160,32';
+        // Pursuit gold wash
+        if (s.selectedPursuit!==null && act>0.1) {
+          const gg = cx.createRadialGradient(rx,ry2,0, rx,ry2,Math.max(rrx,rry)*1.3);
+          gg.addColorStop(0,'rgba(212,180,80,0.02)'); gg.addColorStop(1,'rgba(212,180,80,0)');
+          cx.fillStyle=gg; cx.beginPath(); cx.ellipse(rx,ry2,rrx*1.3,rry*1.3,0,0,Math.PI*2); cx.fill();
+        }
+        const g = cx.createRadialGradient(rx,ry2,0, rx,ry2,Math.max(rrx,rry)*1.6);
+        g.addColorStop(0,`rgba(${col},${Math.min(al,0.30)})`);
+        g.addColorStop(0.5,`rgba(${col},${al*0.35})`);
+        g.addColorStop(1,`rgba(${col},0)`);
+        cx.fillStyle=g; cx.beginPath(); cx.ellipse(rx,ry2,rrx*1.6,rry*1.6,0,0,Math.PI*2); cx.fill();
+        // Active core shimmer
+        if (act>0.5) {
+          const sh = 0.5+0.5*Math.sin(t*3.5+r.y*20);
+          cx.fillStyle=`rgba(${col},${0.06*sh})`; cx.beginPath(); cx.ellipse(rx,ry2,rrx*0.5,rry*0.5,0,0,Math.PI*2); cx.fill();
+        }
+        // Pulsing ring for active regions
+        if (act>0.4) {
+          const p = 0.5+0.5*Math.sin(t*2.5+r.x*8);
+          const ringR = Math.max(rrx,rry)*0.7;
+          cx.beginPath(); cx.arc(rx,ry2,ringR*(1+0.12*p),0,Math.PI*2);
+          cx.strokeStyle=`rgba(${col},${0.10+0.08*p})`; cx.lineWidth=1; cx.stroke();
+        }
+      });
+
+      // ── LAYER 2: Internal Particles + Neural Flashes ──
+      cx.globalCompositeOperation = 'screen';
+      const parts = partRef.current;
+      parts.forEach(p => {
+        // Drift toward active regions
+        if (Math.random()<0.015) {
+          let target = null;
+          if (s.selectedAgent!==null) target = REGIONS.find(r=>r.id===AGENTS[s.selectedAgent]?.regionId);
+          else if (s.selectedMode) {
+            const active = REGIONS.filter(r=>r.modes.includes(s.selectedMode));
+            if (active.length) target = active[Math.floor(Math.random()*active.length)];
+          }
+          if (target) { const dx=target.x-p.x,dy=target.y-p.y,d=Math.sqrt(dx*dx+dy*dy); if(d>0.01){p.vx+=dx/d*0.00015;p.vy+=dy/d*0.00015;} }
+        }
+        p.x+=p.vx*0.8; p.y+=p.vy*0.8; p.life-=0.0008;
+        p.vx*=0.997; p.vy*=0.997;
+        p.vx+=(Math.random()-0.5)*0.00006; p.vy+=(Math.random()-0.5)*0.00006;
+        if (!inBrain(p.x,p.y)||p.life<=0) {
+          const r=REGIONS[Math.floor(Math.random()*REGIONS.length)];
+          p.x=r.x+(Math.random()-0.5)*r.rx*1.4; p.y=r.y+(Math.random()-0.5)*r.ry*1.4;
+          p.vx=(Math.random()-0.5)*0.0003; p.vy=(Math.random()-0.5)*0.0003; p.life=1;
+        }
+        // Check if near active region
+        let nearActive = false;
+        REGIONS.forEach(r => { const dx=(p.x-r.x)/r.rx,dy=(p.y-r.y)/r.ry; if(dx*dx+dy*dy<2)if(regionActivity(r.id,s)>0.3)nearActive=true; });
+        const al = nearActive ? 0.20+0.12*p.life : 0.05*p.life;
+        const sz = p.sz*(nearActive?1.3:0.8);
+        cx.fillStyle=`rgba(140,210,240,${al})`; cx.beginPath(); cx.arc(bx+bw*p.x,by+bh*p.y,sz,0,Math.PI*2); cx.fill();
+      });
+
+      // Fire neural flashes
+      const flashes = flashRef.current;
+      const flashRate = (s.selectedAgent!==null||s.selectedMode) ? 0.035 : 0.012;
+      if (Math.random()<flashRate) {
+        const conn = CONNECTIONS[Math.floor(Math.random()*CONNECTIONS.length)];
+        const r1=REGIONS.find(r=>r.id===conn[0]), r2=REGIONS.find(r=>r.id===conn[1]);
+        if (r1&&r2 && regionActivity(r1.id,s)>0.08 && regionActivity(r2.id,s)>0.08) {
+          flashes.push({x1:r1.x,y1:r1.y,x2:r2.x,y2:r2.y,life:1,c:regionActivity(r1.id,s)>0.5?r1.c:r2.c});
+        }
+      }
+      for (let i=flashes.length-1;i>=0;i--) { flashes[i].life-=0.035; if(flashes[i].life<=0)flashes.splice(i,1); }
+      flashes.forEach(f => {
+        const prog=1-f.life, head=prog, tail=Math.max(0,prog-0.25);
+        const hx=bx+bw*(f.x1+(f.x2-f.x1)*head), hy=by+bh*(f.y1+(f.y2-f.y1)*head);
+        const tx2=bx+bw*(f.x1+(f.x2-f.x1)*tail), ty2=by+bh*(f.y1+(f.y2-f.y1)*tail);
+        cx.beginPath(); cx.moveTo(tx2,ty2); cx.lineTo(hx,hy);
+        cx.strokeStyle=`rgba(${f.c},${f.life*0.30})`; cx.lineWidth=0.8; cx.stroke();
+        cx.fillStyle=`rgba(${f.c},${f.life*0.45})`; cx.beginPath(); cx.arc(hx,hy,1.5,0,Math.PI*2); cx.fill();
+      });
+      cx.globalCompositeOperation = 'source-over';
+
+      cx.restore(); // end breathing transform
+
+      // ── LAYER 3: Pathways (outside breathing transform) ──
+      const hasSel = s.selectedAgent!==null || !!s.selectedMode;
+      INBOUND.forEach(p => {
+        const r = REGIONS.find(rr=>rr.id===p.regionId); if(!r) return;
+        const active = pathActive(p.agentIdx, s);
+        const isGated = AGENTS[p.agentIdx]?.gated;
+        const ax=0, ay=H*(0.08+AGENTS.findIndex(a=>a.id===p.agentIdx)*0.092);
+        const bxx=bx+bw*r.x*breath, byy=by+bh*r.y*breath;
+        const mx=W*0.10, my=ay*0.5+byy*0.5;
+        // Line
+        let la,lw;
+        if(!hasSel){la=0.05;lw=0.8;}
+        else if(active){la=isGated?0.22:0.32;lw=isGated?1.5:2.2;}
+        else{la=0.012;lw=0.4;}
+        cx.beginPath(); cx.moveTo(ax,ay); cx.quadraticCurveTo(mx,my,bxx,byy);
+        cx.strokeStyle=isGated&&active?TH.am:AGENTS[p.agentIdx].color;
+        cx.globalAlpha=la; cx.lineWidth=lw;
+        if(isGated&&active){cx.setLineDash([5,3]);} cx.stroke(); cx.setLineDash([]); cx.globalAlpha=1;
+        // Pulse
+        if(active||!hasSel){
+          const n=active&&hasSel?2:1;
+          for(let k=0;k<n;k++){
+            const prog=((t*0.3+p.agentIdx*0.4+k*0.8)%2)/2;
+            if(prog<1){const pt=bez2(ax,ay,mx,my,bxx,byy,prog);const sz=hasSel&&active?7:3.5;
+              const g=cx.createRadialGradient(pt.x,pt.y,0,pt.x,pt.y,sz);
+              const pc=isGated?TH.am:AGENTS[p.agentIdx].color;
+              g.addColorStop(0,pc);g.addColorStop(1,'rgba(0,0,0,0)');
+              cx.fillStyle=g;cx.beginPath();cx.arc(pt.x,pt.y,sz,0,Math.PI*2);cx.fill();
+              cx.fillStyle='#fff';cx.globalAlpha=hasSel&&active?0.8:0.35;
+              cx.beginPath();cx.arc(pt.x,pt.y,hasSel&&active?1.5:0.8,0,Math.PI*2);cx.fill();cx.globalAlpha=1;
+            }
+          }
+        }
+      });
+      // Outbound
+      OUTBOUND.forEach(p => {
+        const r=REGIONS.find(rr=>rr.id===p.regionId); if(!r) return;
+        const show = s.selectedAgent===null;
+        const ax2=bx+bw*r.x*breath, ay2=by+bh*r.y*breath;
+        const bx3=W, by3=H*p.fy;
+        const mx2=W*0.88, my2=ay2*0.4+by3*0.6;
+        cx.beginPath(); cx.moveTo(ax2,ay2); cx.quadraticCurveTo(mx2,my2,bx3,by3);
+        cx.strokeStyle=p.color; cx.globalAlpha=show?0.05:0.012; cx.lineWidth=0.8; cx.stroke(); cx.globalAlpha=1;
+        if(show){
+          const prog=((t*0.25+p.fy*3)%2)/2;
+          if(prog<1){const pt=bez2(ax2,ay2,mx2,my2,bx3,by3,prog);
+            const g=cx.createRadialGradient(pt.x,pt.y,0,pt.x,pt.y,3.5);
+            g.addColorStop(0,p.color);g.addColorStop(1,'rgba(0,0,0,0)');
+            cx.fillStyle=g;cx.beginPath();cx.arc(pt.x,pt.y,3.5,0,Math.PI*2);cx.fill();}
+        }
+      });
+    };
+    animate();
+    return () => { cancelAnimationFrame(animRef.current); window.removeEventListener('resize',resize); };
+  }, []);
+
+  return <canvas ref={cvRef} style={{position:'absolute',inset:0,width:'100%',height:'100%'}} />;
+}
+
+// ═══ SHELL COMPONENTS ═══
+function TopBar() {
+  return (
+    <div style={{gridArea:'top',background:TH.panel,borderBottom:`1px solid ${TH.borderLit}`,display:'flex',alignItems:'center',padding:'0 20px',gap:16,zIndex:10}}>
+      <span style={{fontFamily:FONT.brand,fontSize:11,fontWeight:700,color:TH.cy,letterSpacing:3}}>HGI ORGANISM</span>
+      <span style={{width:1,height:14,background:TH.borderLit}}/>
+      <span style={{fontFamily:FONT.mono,fontSize:9,color:TH.dm}}>Agents: <b style={{color:TH.cy,fontFamily:FONT.brand,fontSize:10}}>15</b></span>
+      <span style={{fontFamily:FONT.mono,fontSize:9,color:TH.dm}}>Active: <b style={{color:TH.gn,fontFamily:FONT.brand,fontSize:10}}>10</b></span>
+      <span style={{fontFamily:FONT.mono,fontSize:9,color:TH.dm}}>Gated: <b style={{color:TH.am,fontFamily:FONT.brand,fontSize:10}}>3</b></span>
+      <span style={{fontFamily:FONT.mono,fontSize:9,color:TH.dm}}>Pipeline: <b style={{color:TH.cy,fontFamily:FONT.brand,fontSize:10}}>5</b></span>
+      <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:8}}>
+        <div style={{width:6,height:6,borderRadius:'50%',background:TH.gn,boxShadow:`0 0 6px ${TH.gn}`}}/>
+        <span style={{fontFamily:FONT.mono,fontSize:8,color:TH.dm}}>LIVE</span>
+      </div>
+    </div>
+  );
+}
+
+function LeftRail({ agents, state, onSelect }) {
+  return (
+    <div style={{gridArea:'left',background:TH.panel,borderRight:`1px solid ${TH.border}`,overflowY:'auto',zIndex:5}}>
+      <div style={{padding:'8px 14px',fontFamily:FONT.mono,fontSize:8,letterSpacing:2,color:TH.dm,borderBottom:`1px solid ${TH.border}`,position:'sticky',top:0,background:TH.panel,zIndex:2}}>
+        AGENT ROSTER <span style={{float:'right',color:TH.mc}}>10 / 15</span>
+      </div>
+      {agents.map((a,i) => {
+        const isSel = state.selectedAgent===a.id;
+        const isModeMatch = state.selectedMode && a.mode===state.selectedMode;
+        const borderColor = isSel ? TH.cy : isModeMatch ? 'rgba(0,200,230,0.3)' : a.gated ? TH.am : 'transparent';
+        const bgColor = isSel ? 'rgba(0,200,230,0.08)' : isModeMatch ? 'rgba(0,180,220,0.04)' : 'transparent';
+        return (
+          <div key={a.id} onClick={()=>onSelect(a.id)} style={{padding:'7px 14px',borderBottom:'1px solid rgba(255,255,255,0.015)',cursor:'pointer',display:'flex',alignItems:'flex-start',gap:8,borderLeft:`3px solid ${borderColor}`,background:bgColor,transition:'all 0.15s',position:'relative'}}>
+            <div style={{width:3,minHeight:32,borderRadius:1,background:a.color,flexShrink:0,marginTop:1}}/>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:11,fontWeight:600,color:isSel?'#fff':isModeMatch?TH.tx:TH.dm,transition:'color 0.15s'}}>{a.name}</div>
+              <div style={{fontSize:8,color:TH.dm,marginTop:2,fontFamily:FONT.mono}}>
+                <b style={{color:a.gated?TH.am:a.color,fontWeight:600}}>{a.status}</b> · {a.mode}
+              </div>
+            </div>
+            {a.gated && <span style={{fontSize:9,color:TH.am}}>⚠</span>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ModeTiles({ state, onSelect }) {
+  const modes = [
+    {id:'planning',icon:'◆',label:'PLANNING',detail:'3 agents active'},
+    {id:'memory',icon:'⬡',label:'MEMORY',detail:'2 agents active'},
+    {id:'synthesis',icon:'◇',label:'SYNTHESIS',detail:'Proposal bundle'},
+    {id:'gate',icon:'⬢',label:'QUALITY GATE',detail:'3 items gated'},
+  ];
+  return (
+    <div style={{gridArea:'tiles',display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:6,padding:'2px 10px 6px',zIndex:5}}>
+      {modes.map(m => {
+        const sel = state.selectedMode===m.id;
+        return (
+          <div key={m.id} onClick={()=>onSelect(m.id)} style={{background:TH.panel,border:`1px solid ${sel?'rgba(0,208,240,0.5)':TH.border}`,borderRadius:3,padding:'6px 8px',display:'flex',alignItems:'center',gap:8,cursor:'pointer',transition:'all 0.2s',background:sel?'rgba(0,200,230,0.10)':TH.panel}}>
+            <span style={{fontSize:16,filter:sel?'drop-shadow(0 0 4px rgba(0,200,230,0.4))':'none'}}>{m.icon}</span>
+            <div>
+              <div style={{fontFamily:FONT.mono,fontSize:8,letterSpacing:1,color:sel?TH.cy:TH.dm}}>{m.label}</div>
+              <div style={{fontSize:9,color:TH.tx,marginTop:2}}>{m.detail}</div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function RightRail({ state, agents, pursuits }) {
+  const p = state.selectedPursuit!==null ? pursuits[state.selectedPursuit] : pursuits[0];
+  const oc = p.opi>=90?TH.gn:p.opi>=80?TH.cy:TH.am;
+  const agent = state.selectedAgent!==null ? agents[state.selectedAgent] : null;
+
+  return (
+    <div style={{gridArea:'right',background:TH.panel,borderLeft:`1px solid ${TH.border}`,overflowY:'auto',zIndex:5}}>
+      {/* Context Hierarchy */}
+      <div style={{padding:'8px 14px',borderBottom:`1px solid ${TH.border}`,fontFamily:FONT.mono,fontSize:7,letterSpacing:1}}>
+        <div style={{color:state.selectedPursuit!==null?TH.gold:TH.mc,marginBottom:2}}>
+          ● PURSUIT: {state.selectedPursuit!==null ? p.title : 'Default (NOLA)'}
+        </div>
+        <div style={{color:state.selectedMode?TH.cy:TH.mc,marginBottom:2}}>
+          ● MODE: {state.selectedMode ? state.selectedMode.toUpperCase() : 'None'}
+        </div>
+        <div style={{color:state.selectedAgent!==null?TH.cy:TH.mc}}>
+          ● AGENT: {agent ? agent.name : 'None'}
+        </div>
+      </div>
+
+      {/* Pursuit Context */}
+      <div style={{padding:'10px 14px',borderBottom:`1px solid ${TH.border}`}}>
+        <div style={{fontFamily:FONT.mono,fontSize:7,letterSpacing:2,color:TH.mc,marginBottom:6}}>
+          {state.selectedPursuit!==null ? 'SELECTED PURSUIT' : 'PRIORITY PURSUIT'}
+        </div>
+        <div style={{fontFamily:FONT.brand,fontSize:34,fontWeight:900,color:oc,lineHeight:1}}>{p.opi}</div>
+        <div style={{fontSize:13,fontWeight:700,color:TH.wh,marginTop:4}}>{p.title}</div>
+        <div style={{fontSize:9,color:TH.dm,marginTop:2}}>{p.agency}</div>
+        <div style={{display:'flex',gap:4,marginTop:6,flexWrap:'wrap'}}>
+          <span style={{fontSize:8,padding:'2px 6px',borderRadius:2,fontFamily:FONT.mono,border:`1px solid ${TH.border}`,color:TH.dm}}>{p.due}</span>
+          <span style={{fontSize:8,padding:'2px 6px',borderRadius:2,fontFamily:FONT.mono,border:`1px solid rgba(0,208,240,0.2)`,color:TH.cy}}>{p.stage}</span>
+        </div>
+        <div style={{fontSize:9,color:TH.tx,marginTop:6}}>{p.obj}</div>
+        {p.bottleneck && (
+          <div style={{background:'rgba(200,72,72,0.04)',border:'1px solid rgba(200,72,72,0.12)',borderRadius:3,padding:'6px 10px',marginTop:6}}>
+            <div style={{fontFamily:FONT.mono,fontSize:8,color:TH.rd,fontWeight:600}}>⚠ BOTTLENECK</div>
+            <div style={{fontSize:9,color:TH.dm,marginTop:2}}>{p.bottleneck}</div>
+          </div>
+        )}
+      </div>
+
+      {/* Agent Inspection or Mode Diagnostics */}
+      {agent ? (
+        <div style={{padding:'10px 14px',borderBottom:`1px solid ${TH.border}`}}>
+          <div style={{fontFamily:FONT.mono,fontSize:7,letterSpacing:2,color:TH.mc,marginBottom:6}}>AGENT INSPECTION</div>
+          <div style={{fontSize:12,fontWeight:700,color:agent.color}}>{agent.name}</div>
+          <div style={{fontSize:9,color:TH.dm,marginTop:2}}>Role: {agent.role}</div>
+          <div style={{marginTop:8}}>
+            <div style={{fontFamily:FONT.mono,fontSize:7,letterSpacing:2,color:TH.mc,marginBottom:3}}>STATUS</div>
+            <div style={{fontSize:9,color:agent.gated?TH.am:agent.color,fontWeight:600}}>{agent.status}{agent.gated?' — GATED':''}</div>
+          </div>
+          <div style={{marginTop:8}}>
+            <div style={{fontFamily:FONT.mono,fontSize:7,letterSpacing:2,color:TH.mc,marginBottom:3}}>CURRENT TASK</div>
+            <div style={{fontSize:9,color:TH.tx,lineHeight:1.4}}>{agent.task}</div>
+          </div>
+          <div style={{marginTop:8}}>
+            <div style={{fontFamily:FONT.mono,fontSize:7,letterSpacing:2,color:TH.mc,marginBottom:3}}>LATEST FINDING</div>
+            <div style={{fontSize:9,color:TH.tx,lineHeight:1.4}}>{agent.finding}</div>
+          </div>
+          {agent.gated && (
+            <div style={{background:'rgba(212,160,32,0.06)',border:'1px solid rgba(212,160,32,0.15)',borderRadius:3,padding:'6px 10px',marginTop:8}}>
+              <div style={{fontFamily:FONT.mono,fontSize:8,color:TH.am,fontWeight:600}}>⚠ GATED STATE</div>
+              <div style={{fontSize:9,color:TH.dm,marginTop:2}}>Blocked pending prerequisite completion</div>
+            </div>
+          )}
+        </div>
+      ) : state.selectedMode ? (
+        <div style={{padding:'10px 14px',borderBottom:`1px solid ${TH.border}`}}>
+          <div style={{fontFamily:FONT.mono,fontSize:7,letterSpacing:2,color:TH.mc,marginBottom:6}}>{state.selectedMode.toUpperCase()} MODE</div>
+          {agents.filter(a=>a.mode===state.selectedMode).map(a => (
+            <div key={a.id} style={{marginBottom:6}}>
+              <div style={{fontSize:10,fontWeight:600,color:a.gated?TH.am:a.color}}>{a.name}{a.gated?' ⚠':''}</div>
+              <div style={{fontSize:9,color:TH.tx,marginTop:1}}>{a.task}</div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={{padding:'10px 14px',borderBottom:`1px solid ${TH.border}`}}>
+          <div style={{fontFamily:FONT.mono,fontSize:7,letterSpacing:2,color:TH.mc,marginBottom:6}}>OPI FACTORS</div>
+          {[['KB Match',95],['Competitive',92],['Relationship',98],['Staff Avail',85],['Strategic Fit',90],['Eval Align',88]].map(([l,v]) => (
+            <div key={l}>
+              <div style={{fontSize:7,color:TH.mc,fontFamily:FONT.mono,display:'flex',justifyContent:'space-between',marginTop:2}}><span>{l}</span><span>{v}%</span></div>
+              <div style={{height:3,borderRadius:1,background:'rgba(0,160,200,0.06)',marginTop:2,overflow:'hidden'}}><div style={{height:'100%',background:TH.cy,borderRadius:1,width:v+'%'}}/></div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Memory Flow */}
+      <div style={{padding:'10px 14px'}}>
+        <div style={{fontFamily:FONT.mono,fontSize:7,letterSpacing:2,color:TH.mc,marginBottom:6}}>MEMORY FLOW</div>
+        {[['intelligence',11,'competitive'],['financial',5,'pricing benchmarks'],['pattern',3,'cross-pursuit']].map(([type,ct,desc],i) => (
+          <div key={i} style={{display:'flex',alignItems:'center',gap:5,padding:'2px 0',fontSize:9}}>
+            <span style={{color:TH.cy,fontSize:10}}>→</span>
+            <span style={{fontFamily:FONT.mono,color:TH.cy,fontWeight:700,fontSize:9}}>{ct}</span>
+            <span style={{color:TH.dm,flex:1}}>{type}</span>
+            <span style={{fontFamily:FONT.brand,fontSize:9,fontWeight:700,color:TH.gn}}>{desc}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BottomZone({ events, pursuits, state, onSelectPursuit }) {
+  return (
+    <div style={{gridArea:'bot',background:TH.panel,borderTop:`1px solid ${TH.borderLit}`,display:'grid',gridTemplateColumns:'1.3fr 0.7fr',zIndex:5}}>
+      <div style={{padding:'7px 14px',overflowY:'auto',borderRight:`1px solid ${TH.border}`}}>
+        <div style={{fontFamily:FONT.mono,fontSize:7,letterSpacing:2,color:TH.mc,marginBottom:5,paddingBottom:3,borderBottom:`1px solid ${TH.border}`}}>ROUTING TIMELINE</div>
+        {events.map((e,i) => {
+          const faded = state.selectedMode && e.mode!==state.selectedMode;
+          return (
+            <div key={i} style={{display:'flex',alignItems:'center',gap:6,padding:'2px 0',borderBottom:'1px solid rgba(255,255,255,0.012)',fontSize:9,opacity:faded?0.15:1,transition:'opacity 0.3s'}}>
+              <div style={{width:8,height:8,borderRadius:2,flexShrink:0,background:e.severity==='warn'?TH.am:TH.cy}}/>
+              <span style={{fontFamily:FONT.mono,color:TH.dm,minWidth:32,fontSize:8}}>{e.t}</span>
+              <span style={{fontWeight:600,color:TH.tx,flexShrink:0}}>{e.agent}</span>
+              <span style={{fontSize:8,fontFamily:FONT.mono,fontWeight:600,padding:'1px 4px',borderRadius:2,background:e.severity==='warn'?'rgba(212,160,32,0.08)':'rgba(0,208,240,0.08)',color:e.severity==='warn'?TH.am:TH.cy}}>{e.type}</span>
+              <span style={{fontSize:8,color:TH.dm,flex:1,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{e.text}</span>
+            </div>
+          );
+        })}
+        <div style={{fontFamily:FONT.mono,fontSize:7,letterSpacing:2,color:TH.mc,marginTop:6,marginBottom:5,paddingBottom:3,borderBottom:`1px solid ${TH.border}`}}>PIPELINE</div>
+        {pursuits.map((p,i) => {
+          const sel = state.selectedPursuit===p.id;
+          const oc = p.opi>=90?TH.gn:p.opi>=80?TH.cy:TH.am;
+          return (
+            <div key={p.id} onClick={()=>onSelectPursuit(p.id)} style={{cursor:'pointer',padding:'2px 6px',display:'flex',alignItems:'center',gap:6,fontSize:9,borderBottom:'1px solid rgba(255,255,255,0.02)',borderLeft:sel?`3px solid ${TH.gold}`:'3px solid transparent',background:sel?'rgba(212,160,32,0.06)':'transparent',transition:'all 0.12s'}}>
+              <span style={{fontFamily:FONT.brand,fontWeight:700,color:oc,minWidth:24}}>{p.opi}</span>
+              <span style={{fontWeight:600,color:sel?TH.gold:TH.tx,flexShrink:0}}>{p.title}</span>
+              <span style={{fontSize:8,fontFamily:FONT.mono,fontWeight:600,padding:'1px 4px',borderRadius:2,background:'rgba(0,208,240,0.08)',color:TH.cy}}>{p.stage}</span>
+              <span style={{fontSize:8,color:TH.dm,flex:1}}>{p.due}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{padding:'7px 14px',overflowY:'auto'}}>
+        <div style={{fontFamily:FONT.mono,fontSize:7,letterSpacing:2,color:TH.mc,marginBottom:5,paddingBottom:3,borderBottom:`1px solid ${TH.border}`}}>SYSTEM STATUS</div>
+        <div style={{fontFamily:FONT.brand,fontSize:22,fontWeight:900,color:TH.wh,margin:'4px 0'}}>15 agents deployed</div>
+        <div style={{display:'flex',gap:16,marginTop:6}}>
+          <div><div style={{fontFamily:FONT.brand,fontSize:14,fontWeight:700,color:TH.gn}}>10</div><div style={{fontSize:8,color:TH.dm,fontFamily:FONT.mono}}>Active</div></div>
+          <div><div style={{fontFamily:FONT.brand,fontSize:14,fontWeight:700,color:TH.am}}>3</div><div style={{fontSize:8,color:TH.dm,fontFamily:FONT.mono}}>Gated</div></div>
+          <div><div style={{fontFamily:FONT.brand,fontSize:14,fontWeight:700,color:TH.cy}}>5</div><div style={{fontSize:8,color:TH.dm,fontFamily:FONT.mono}}>Pursuits</div></div>
+          <div><div style={{fontFamily:FONT.brand,fontSize:14,fontWeight:700,color:TH.wh}}>5.6K</div><div style={{fontSize:8,color:TH.dm,fontFamily:FONT.mono}}>Memories</div></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══ MAIN APP ═══
+function App() {
+  const [state, setState] = useState({ selectedPursuit:null, selectedMode:null, selectedAgent:null });
+  const selectAgent = useCallback(id => setState(s => ({...s, selectedAgent:s.selectedAgent===id?null:id, selectedMode:null})), []);
+  const selectMode = useCallback(mode => setState(s => ({...s, selectedMode:s.selectedMode===mode?null:mode, selectedAgent:null})), []);
+  const selectPursuit = useCallback(id => setState(s => ({...s, selectedPursuit:s.selectedPursuit===id?null:id})), []);
+
+  return (
+    <>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Rajdhani:wght@300;400;500;600;700&family=Share+Tech+Mono&display=swap');
+        *{margin:0;padding:0;box-sizing:border-box}
+        ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:rgba(0,160,200,0.1)}
+      `}</style>
+      <div style={{
+        width:'100vw',height:'100vh',overflow:'hidden',background:TH.bg,color:TH.tx,fontFamily:FONT.ui,fontWeight:500,
+        display:'grid',
+        gridTemplateColumns:'240px 1fr 270px',
+        gridTemplateRows:'38px 1fr auto 148px',
+        gridTemplateAreas:'"top top top" "left center right" "left tiles right" "bot bot bot"',
+      }}>
+        <TopBar />
+        <LeftRail agents={AGENTS} state={state} onSelect={selectAgent} />
+        <div style={{gridArea:'center',position:'relative',overflow:'hidden',background:'#040a14'}}>
+          <BrainCanvas state={state} />
+        </div>
+        <ModeTiles state={state} onSelect={selectMode} />
+        <RightRail state={state} agents={AGENTS} pursuits={PURSUITS} />
+        <BottomZone events={EVENTS} pursuits={PURSUITS} state={state} onSelectPursuit={selectPursuit} />
+      </div>
+    </>
+  );
+}
+
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(React.createElement(App));
+</script>
+</body>
+</html>
