@@ -5,45 +5,40 @@
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Rajdhani:wght@300;400;500;600;700&family=Share+Tech+Mono&display=swap');
 *{margin:0;padding:0;box-sizing:border-box}
-:root{--bg:#030810;--panel:#08111e;--border:rgba(0,140,200,0.05);--bb:rgba(0,160,220,0.10);--cy:#00d0f0;--gn:#3cd9a0;--am:#d4a020;--wh:#d0dce8;--tx:rgba(175,195,215,0.82);--dm:rgba(130,155,180,0.28);--mc:rgba(100,125,150,0.18);--mo:'Share Tech Mono',monospace;--ui:'Rajdhani',sans-serif;--br:'Orbitron',sans-serif}
+:root{--bg:#030810;--panel:#07101c;--card:#0a1424;--border:rgba(0,140,200,0.06);--bb:rgba(0,160,220,0.10);--cy:#00c8e8;--gn:#3cd9a0;--am:#d4a020;--wh:#d0dce8;--tx:rgba(175,195,215,0.82);--dm:rgba(130,155,180,0.28);--mc:rgba(100,125,150,0.18);--mo:'Share Tech Mono',monospace;--ui:'Rajdhani',sans-serif;--br:'Orbitron',sans-serif}
 html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-family:var(--ui)}
 ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:rgba(0,140,180,0.08)}
-#app{display:grid;width:100%;height:100%;grid-template-columns:210px 1fr 240px;grid-template-rows:34px 1fr auto 130px;grid-template-areas:"top top top" "left center right" "left tiles right" "bot bot bot"}
+#app{display:grid;width:100%;height:100%;grid-template-columns:210px 1fr 240px;grid-template-rows:34px 1fr 130px;grid-template-areas:"top top top" "left center right" "bot bot bot"}
 #top{grid-area:top;background:var(--panel);border-bottom:1px solid var(--bb);display:flex;align-items:center;padding:0 14px;gap:10px;z-index:10}
 .tb{font-family:var(--br);font-size:9px;font-weight:700;color:var(--cy);letter-spacing:3px}.ts{font-size:7.5px;font-family:var(--mo);color:var(--dm)}.ts b{color:var(--cy);font-family:var(--br);font-size:8px}.tsp{width:1px;height:10px;background:var(--bb);margin:0 5px}
 #left{grid-area:left;background:var(--panel);border-right:1px solid var(--border);overflow-y:auto;z-index:5}
 .lh{padding:5px 10px;font-family:var(--mo);font-size:6.5px;letter-spacing:2px;color:var(--dm);border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--panel);z-index:2}
-.ag{padding:5px 10px;border-bottom:1px solid rgba(255,255,255,0.008);cursor:pointer;display:flex;align-items:center;gap:5px;border-left:2px solid transparent;transition:all .15s}
+.ag{padding:5px 10px;border-bottom:1px solid rgba(255,255,255,0.008);cursor:pointer;display:flex;align-items:center;gap:5px;border-left:2px solid transparent;transition:all .12s}
 .ag:hover{background:rgba(0,160,200,0.015)}.ag.sel{background:rgba(0,180,220,0.06);border-left-color:var(--cy)}.ag.sel .an{color:#fff}.ag.msel{background:rgba(0,160,200,0.03);border-left-color:rgba(0,180,220,0.25)}.ag.gated{border-left-color:var(--am)!important}
-.an{font-size:9px;font-weight:600;color:var(--dm);transition:color .15s;flex:1}.as{font-size:6.5px;font-family:var(--mo);color:var(--dm)}.aw{font-size:7px;color:var(--am)}
+.an{font-size:9px;font-weight:600;color:var(--dm);transition:color .12s;flex:1}.as{font-size:6.5px;font-family:var(--mo);color:var(--dm)}.aw{font-size:7px;color:var(--am)}
 #center{grid-area:center;position:relative;overflow:hidden;background:var(--bg)}#cv{position:absolute;inset:0;z-index:2}
-#tiles{grid-area:tiles;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:2px 6px 4px;z-index:5}
-.tile{background:var(--panel);border:1px solid var(--border);border-radius:3px;padding:4px 6px;display:flex;align-items:center;gap:5px;cursor:pointer;transition:all .2s}.tile.sel{border-color:rgba(0,190,230,0.4);background:rgba(0,180,220,0.08)}
-.tile .tl{font-family:var(--mo);font-size:6.5px;letter-spacing:1px;color:var(--dm)}.tile.sel .tl{color:var(--cy)}.tile .tv{font-size:7px;color:var(--tx);margin-top:1px}
 #right{grid-area:right;background:var(--panel);border-left:1px solid var(--border);overflow-y:auto;z-index:5}
 .rb{padding:7px 10px;border-bottom:1px solid var(--border)}.rl{font-family:var(--mo);font-size:5.5px;letter-spacing:2px;color:var(--mc);margin-bottom:3px}.ro{font-family:var(--br);font-size:26px;font-weight:900;line-height:1}.rn{font-size:11px;font-weight:700;color:var(--wh);margin-top:2px}.ra{font-size:7px;color:var(--dm);margin-top:1px}
 .rtag{font-size:6px;padding:1px 4px;border-radius:2px;font-family:var(--mo);border:1px solid var(--border);color:var(--dm);display:inline-block;margin:2px 2px 0 0}.rtag.hi{border-color:rgba(0,190,230,0.2);color:var(--cy)}
 .rbar{height:2px;border-radius:1px;background:rgba(0,140,180,0.05);margin-top:2px;overflow:hidden}.rbar .f{height:100%;background:var(--cy);border-radius:1px}.rbl{font-size:5.5px;color:var(--mc);font-family:var(--mo);display:flex;justify-content:space-between;margin-top:1px}
 .ralt{background:rgba(180,60,60,0.03);border:1px solid rgba(180,60,60,0.10);border-radius:3px;padding:4px 7px;margin-top:3px}
+.ctx{padding:5px 10px;border-bottom:1px solid var(--border);font-family:var(--mo);font-size:5.5px;letter-spacing:1px}.ctx-row{margin-bottom:1px;display:flex;gap:3px;align-items:center}.ctx-dot{width:4px;height:4px;border-radius:50%}
 #bot{grid-area:bot;background:var(--panel);border-top:1px solid var(--bb);display:grid;grid-template-columns:1.3fr 0.7fr;z-index:5}
 .bz{padding:5px 10px;overflow-y:auto}.bz:first-child{border-right:1px solid var(--border)}.bt{font-family:var(--mo);font-size:5.5px;letter-spacing:2px;color:var(--mc);margin-bottom:3px;padding-bottom:2px;border-bottom:1px solid var(--border)}
-.pr{display:flex;align-items:center;gap:4px;padding:1px 0;font-size:7px;transition:opacity .3s}.pr.faded{opacity:.10}
 .pip{cursor:pointer;padding:2px 4px;display:flex;align-items:center;gap:4px;font-size:7px;border-left:2px solid transparent;transition:all .12s}.pip:hover{background:rgba(0,160,200,0.015)}.pip.sel{background:rgba(200,155,30,0.05);border-left-color:var(--am)}.pip.sel .pn{color:var(--am)}
 .pw{font-size:6px;font-family:var(--mo);font-weight:600;padding:1px 3px;border-radius:2px}.pw.m{background:rgba(0,190,230,0.06);color:var(--cy)}.pw.w{background:rgba(200,155,30,0.06);color:var(--am)}
-.ctx{padding:5px 10px;border-bottom:1px solid var(--border);font-family:var(--mo);font-size:5.5px;letter-spacing:1px}.ctx-row{margin-bottom:1px;display:flex;gap:3px;align-items:center}.ctx-dot{width:4px;height:4px;border-radius:50%}
-@media(max-width:900px){#app{grid-template-columns:1fr;grid-template-rows:34px 1fr auto 170px;grid-template-areas:"top" "center" "tiles" "bot"}#left,#right{display:none}#tiles{grid-template-columns:repeat(2,1fr)}#center{min-height:340px}}
+@media(max-width:900px){#app{grid-template-columns:1fr;grid-template-rows:34px 1fr 170px;grid-template-areas:"top" "center" "bot"}#left,#right{display:none}#center{min-height:400px}}
 </style></head><body>
 <div id="app">
 <div id="top"><span class="tb">HGI ORGANISM</span><span class="tsp"></span><span class="ts">Agents: <b>15</b></span><span class="tsp"></span><span class="ts">Active: <b style="color:var(--gn)">10</b></span><span class="tsp"></span><span class="ts">Gated: <b style="color:var(--am)">3</b></span><span style="margin-left:auto;display:flex;align-items:center;gap:5px"><span style="width:5px;height:5px;border-radius:50%;background:var(--gn);box-shadow:0 0 5px var(--gn)"></span><span class="ts">LIVE</span></span></div>
 <div id="left"><div class="lh">AGENT ROSTER</div><div id="agl"></div></div>
 <div id="center"><canvas id="cv"></canvas></div>
-<div id="tiles"><div class="tile" data-mode="planning"><div><div class="tl">PLANNING</div><div class="tv">3 agents</div></div></div><div class="tile" data-mode="memory"><div><div class="tl">MEMORY</div><div class="tv">2 agents</div></div></div><div class="tile" data-mode="synthesis"><div><div class="tl">SYNTHESIS</div><div class="tv">2 agents</div></div></div><div class="tile" data-mode="gate"><div><div class="tl">QUALITY GATE</div><div class="tv">3 gated</div></div></div></div>
 <div id="right"><div id="rr"></div></div>
 <div id="bot"><div class="bz"><div class="bt">PIPELINE</div><div id="pipl"></div></div><div class="bz"><div class="bt">SYSTEM</div><div style="font-family:var(--br);font-size:16px;font-weight:900;color:var(--wh);margin:2px 0">15 agents</div><div style="display:flex;gap:12px;margin-top:3px"><div><div style="font-family:var(--br);font-size:12px;font-weight:700;color:var(--gn)">10</div><div style="font-size:6px;color:var(--dm);font-family:var(--mo)">Active</div></div><div><div style="font-family:var(--br);font-size:12px;font-weight:700;color:var(--am)">3</div><div style="font-size:6px;color:var(--dm);font-family:var(--mo)">Gated</div></div><div><div style="font-family:var(--br);font-size:12px;font-weight:700;color:var(--cy)">5</div><div style="font-size:6px;color:var(--dm);font-family:var(--mo)">Pursuits</div></div></div></div></div>
 </div>
 <script>
 var AG=[
-{n:'Intelligence',s:'Scanning',mode:'planning',gated:false,c:'#00d0f0',sec:'intelligence',pl:'INTEL'},
+{n:'Intelligence',s:'Scanning',mode:'planning',gated:false,c:'#00c8e8',sec:'intelligence',pl:'INTEL'},
 {n:'Financial',s:'Benchmarking',mode:'planning',gated:false,c:'#3cd9a0',sec:'planning',pl:'PRICE'},
 {n:'Winnability',s:'Scoring',mode:'planning',gated:false,c:'#d4a020',sec:'winnability',pl:'PWIN'},
 {n:'CRM',s:'Mapping',mode:'memory',gated:false,c:'#a78bfa',sec:'crm',pl:'CRM'},
@@ -55,282 +50,312 @@ var AG=[
 {n:'Staffing',s:'Blocked',mode:'gate',gated:true,c:'#f59e0b',sec:'winnability',pl:'STAFF'}
 ];
 var PIPE=[{n:'NOLA Water',opi:94,stage:'pursuing',due:'Unsolicited'},{n:'DR-4900',opi:92,stage:'identified',due:'TBD'},{n:'Wash Parish',opi:88,stage:'pursuing',due:'May 8'},{n:'St. George',opi:85,stage:'watching',due:'Apr 24'},{n:'OPSB CM',opi:78,stage:'new',due:'Apr 30'}];
-var DOCKS=[
-{id:'planning',l:'PLN',c:'0,190,230',ang:-90},
-{id:'intelligence',l:'INT',c:'6,170,210',ang:-38},
-{id:'winnability',l:'WIN',c:'200,170,55',ang:14},
-{id:'gate',l:'QG',c:'200,150,30',ang:65},
-{id:'crm',l:'CRM',c:'155,130,240',ang:116},
-{id:'memory',l:'MEM',c:'120,130,240',ang:167},
-{id:'synthesis',l:'SYN',c:'90,155,240',ang:218}
+
+// Modules map to spine positions
+// SPINE: INGRESS(0) → CORE(1) → GATE(2) → OUTPUT(3)
+// Top row feeds into spine: Planning→INGRESS, Intelligence→INGRESS, Winnability→CORE
+// Bottom row: CRM→CORE, Memory→CORE, Synthesis→OUTPUT
+var MODS=[
+{id:'planning',l:'PLANNING',c:'0,200,232',st:'3 active',row:'top',spineIdx:0,tp:0.7},
+{id:'intelligence',l:'INTELLIGENCE',c:'6,170,210',st:'Scanning',row:'top',spineIdx:0,tp:0.5},
+{id:'winnability',l:'WINNABILITY',c:'200,170,55',st:'Scoring',row:'top',spineIdx:1,tp:0.4},
+{id:'gate',l:'QUALITY GATE',c:'200,150,30',st:'3 holds',row:'spine',spineIdx:2,tp:0.2},
+{id:'crm',l:'CRM',c:'155,130,240',st:'2 contacts',row:'bot',spineIdx:1,tp:0.3},
+{id:'memory',l:'MEMORY',c:'120,130,240',st:'5.6K',row:'bot',spineIdx:1,tp:0.6},
+{id:'synthesis',l:'SYNTHESIS',c:'90,155,240',st:'Drafting',row:'bot',spineIdx:3,tp:0.8}
 ];
+var SPINE=[{l:'INGRESS',c:'0,180,220'},{l:'ANALYSIS',c:'0,190,230'},{l:'QUALITY GATE',c:'200,150,30'},{l:'OUTPUT',c:'90,155,240'}];
 var MSEC={planning:['planning','intelligence','winnability'],memory:['memory','crm'],synthesis:['synthesis','planning'],gate:['gate','winnability']};
 var sA=-1,sM='',sP=-1;
-function act(id){if(sA>=0)return AG[sA].sec===id?1:0;if(sM)return(MSEC[sM]||[]).indexOf(id)>=0?0.9:0;return 0.03;}
+function act(id){if(sA>=0)return AG[sA].sec===id?1:0;if(sM)return(MSEC[sM]||[]).indexOf(id)>=0?0.9:0;return 0.04;}
 function pOn(i){if(sA>=0)return i===sA;if(sM)return AG[i]&&AG[i].mode===sM;return true;}
-var anyG=function(){return sM==='gate'||(sA>=0&&AG[sA].gated);};
+var isGated=function(){return sM==='gate'||(sA>=0&&AG[sA].gated);};
 
 // Rails
 (function(){var el=document.getElementById('agl');AG.forEach(function(a,i){var r=document.createElement('div');r.className='ag'+(a.gated?' gated':'');r.innerHTML='<div style="width:2px;min-height:20px;border-radius:1px;background:'+a.c+'"></div><div style="flex:1;min-width:0"><div class="an">'+a.n+'</div><div class="as"><b style="color:'+(a.gated?'var(--am)':a.c)+'">'+a.s+'</b></div></div>'+(a.gated?'<span class="aw">\u26A0</span>':'');r.onclick=function(){sA=sA===i?-1:i;sM='';aS();uR();};el.appendChild(r);});})();
-function aS(){document.querySelectorAll('.ag').forEach(function(e,j){e.classList.remove('sel','msel');if(sA>=0&&j===sA)e.classList.add('sel');else if(sM&&AG[j].mode===sM)e.classList.add('msel');});document.querySelectorAll('.tile').forEach(function(e){e.classList.toggle('sel',e.dataset.mode===sM);});}
-document.querySelectorAll('.tile').forEach(function(el){el.onclick=function(){var m=el.dataset.mode;sM=sM===m?'':m;sA=-1;aS();uR();};});
+function aS(){document.querySelectorAll('.ag').forEach(function(e,j){e.classList.remove('sel','msel');if(sA>=0&&j===sA)e.classList.add('sel');else if(sM&&AG[j].mode===sM)e.classList.add('msel');});}
 (function(){var el=document.getElementById('pipl');PIPE.forEach(function(p,i){var oc=p.opi>=90?'var(--gn)':p.opi>=80?'var(--cy)':'var(--am)';var r=document.createElement('div');r.className='pip';r.innerHTML='<span style="font-family:var(--br);font-weight:700;color:'+oc+';min-width:20px;font-size:7px">'+p.opi+'</span><span class="pn" style="font-weight:600;color:var(--tx);font-size:7px">'+p.n+'</span><span class="pw m">'+p.stage+'</span>';r.onclick=function(){sP=sP===i?-1:i;document.querySelectorAll('.pip').forEach(function(e,j){e.classList.toggle('sel',j===sP);});uR();};el.appendChild(r);});})();
 function uR(){var el=document.getElementById('rr'),h='';var p=sP>=0?PIPE[sP]:PIPE[0];var oc=p.opi>=90?'var(--gn)':p.opi>=80?'var(--cy)':'var(--am)';
-h+='<div class="ctx"><div class="ctx-row"><div class="ctx-dot" style="background:'+(sP>=0?'var(--am)':'var(--mc)')+'"></div><span style="color:'+(sP>=0?'var(--am)':'var(--mc)')+'">PURSUIT: '+(sP>=0?p.n:'—')+'</span></div><div class="ctx-row"><div class="ctx-dot" style="background:'+(sM?'var(--cy)':'var(--mc)')+'"></div><span style="color:'+(sM?'var(--cy)':'var(--mc)')+'">MODE: '+(sM||'—')+'</span></div><div class="ctx-row"><div class="ctx-dot" style="background:'+(sA>=0?'var(--cy)':'var(--mc)')+'"></div><span style="color:'+(sA>=0?'var(--cy)':'var(--mc)')+'">AGENT: '+(sA>=0?AG[sA].n:'—')+'</span></div></div>';
-h+='<div class="rb"><div class="rl">'+(sP>=0?'PURSUIT':'TOP OPP')+'</div><div class="ro" style="color:'+oc+'">'+p.opi+'</div><div class="rn">'+p.n+'</div><span class="rtag">'+p.due+'</span><span class="rtag hi">'+p.stage+'</span></div>';
-if(sA>=0){var a=AG[sA];h+='<div class="rb"><div class="rl">AGENT</div><div style="font-size:10px;font-weight:700;color:'+a.c+'">'+a.n+'</div><div class="ra">'+(a.gated?'\u26A0 GATED':a.s)+'</div>';if(a.gated)h+='<div class="ralt"><div style="font-family:var(--mo);font-size:6px;color:var(--am);font-weight:600">\u26A0 BLOCKED</div></div>';h+='</div>';}
-else if(sM){h+='<div class="rb"><div class="rl">'+sM.toUpperCase()+'</div>';AG.filter(function(a){return a.mode===sM;}).forEach(function(a){h+='<div style="margin-bottom:3px;font-size:8px;font-weight:600;color:'+(a.gated?'var(--am)':a.c)+'">'+a.n+(a.gated?' \u26A0':'')+'</div>';});h+='</div>';}
+h+='<div class="ctx"><div class="ctx-row"><div class="ctx-dot" style="background:'+(sP>=0?'var(--am)':'var(--mc)')+'"></div><span style="color:'+(sP>=0?'var(--am)':'var(--mc)')+'">PURSUIT: '+(sP>=0?p.n:'\u2014')+'</span></div><div class="ctx-row"><div class="ctx-dot" style="background:'+(sM?'var(--cy)':'var(--mc)')+'"></div><span style="color:'+(sM?'var(--cy)':'var(--mc)')+'">MODE: '+(sM||'\u2014')+'</span></div><div class="ctx-row"><div class="ctx-dot" style="background:'+(sA>=0?'var(--cy)':'var(--mc)')+'"></div><span style="color:'+(sA>=0?'var(--cy)':'var(--mc)')+'">AGENT: '+(sA>=0?AG[sA].n:'\u2014')+'</span></div></div>';
+h+='<div class="rb"><div class="rl">'+(sP>=0?'PURSUIT':'TOP')+'</div><div class="ro" style="color:'+oc+'">'+p.opi+'</div><div class="rn">'+p.n+'</div><span class="rtag">'+p.due+'</span><span class="rtag hi">'+p.stage+'</span></div>';
+if(sA>=0){var a=AG[sA];h+='<div class="rb"><div class="rl">AGENT</div><div style="font-size:10px;font-weight:700;color:'+a.c+'">'+a.n+'</div><div class="ra">'+(a.gated?'\u26A0 GATED':a.s)+'</div>';if(a.gated)h+='<div class="ralt"><div style="font-family:var(--mo);font-size:6px;color:var(--am)">\u26A0 BLOCKED</div></div>';h+='</div>';}
 else{h+='<div class="rb"><div class="rl">OPI FACTORS</div>';[['KB Match',95],['Competitive',92],['Relationship',98],['Staff',85],['Strategic',90]].forEach(function(f){h+='<div class="rbl"><span>'+f[0]+'</span><span>'+f[1]+'%</span></div><div class="rbar"><div class="f" style="width:'+f[1]+'%"></div></div>';});h+='</div>';}
 el.innerHTML=h;}uR();
 
-// ═══ CANVAS ═══
+// Canvas
 var cv=document.getElementById('cv'),X=cv.getContext('2d');
 function rs(){cv.width=cv.parentElement.clientWidth;cv.height=cv.parentElement.clientHeight;}
 rs();window.addEventListener('resize',rs);
 
-// Neural nodes for cognition mass
-var NN=[];for(var i=0;i<28;i++){var a=Math.random()*Math.PI*2,r=Math.random()*0.85;NN.push({ax:Math.cos(a)*r,ay:Math.sin(a)*r*0.75-0.15,sz:1.5+Math.random()*3,sp:0.3+Math.random()*0.7,ph:Math.random()*6.28});}
+// Spine packets
+var PKS=[];
+setInterval(function(){if(PKS.length<6&&!isGated()){PKS.push({p:0,v:0.003+Math.random()*0.003,c:'0,200,232'});}},800);
+// Queued packets (stack before gate when blocked)
+var QP=[];
+setInterval(function(){if(isGated()&&QP.length<5){QP.push({age:0});}},600);
 
-var t=0,D=Math.PI/180;
+var t=0;
+function rr(x,y,w,h,r){X.beginPath();X.moveTo(x+r,y);X.lineTo(x+w-r,y);X.quadraticCurveTo(x+w,y,x+w,y+r);X.lineTo(x+w,y+h-r);X.quadraticCurveTo(x+w,y+h,x+w-r,y+h);X.lineTo(x+r,y+h);X.quadraticCurveTo(x,y+h,x,y+h-r);X.lineTo(x,y+r);X.quadraticCurveTo(x,y,x+r,y);X.closePath();}
+
 function draw(){
 requestAnimationFrame(draw);t+=0.016;
 var W=cv.width,H=cv.height;X.clearRect(0,0,W,H);
 var sel=sA>=0||sM!=='';
-var CX=W*0.50,CY=H*0.46;
-var dm=Math.min(W,H);
 var isP=sP>=0;
-var gated=anyG();
-var pulse=0.5+0.5*Math.sin(t*1.2);
-var cc=isP?'200,170,70':gated?'200,150,30':'0,180,220';
-var coreIntensity=sel?(gated?0.6:1.0):0.35;
+var gated=isGated();
+var pulse=0.5+0.5*Math.sin(t*1.5);
+var pad=16,modW,modH=56,spineH=48,gap=8;
+var usableW=W-pad*2;
 
-// Geometry
-var plinthRX=dm*0.28,plinthRY=dm*0.065;
-var plinthY=CY+dm*0.20;
-var plinthH=dm*0.025;
-var chamberH=dm*0.38;
-var chamberTopY=plinthY-chamberH;
-var coreRad=dm*0.10;
-var coreCY=plinthY-chamberH*0.48;
-
-// ═══ AMBIENT HALO ═══
-var ah=X.createRadialGradient(CX,coreCY,0,CX,coreCY,dm*0.45);
-ah.addColorStop(0,'rgba('+cc+','+(0.04*coreIntensity)+')');
-ah.addColorStop(0.5,'rgba('+cc+','+(0.015*coreIntensity)+')');
-ah.addColorStop(1,'rgba(0,0,0,0)');
-X.fillStyle=ah;X.fillRect(0,0,W,H);
-
-// ═══ CONTAINMENT FIELD — back arc ═══
-X.globalAlpha=0.12*coreIntensity;
-X.strokeStyle='rgba('+cc+',1)';X.lineWidth=1;
-// Back ellipse (top)
-X.beginPath();X.ellipse(CX,chamberTopY,plinthRX*0.75,plinthRY*0.65,0,Math.PI,Math.PI*2);X.stroke();
-// Vertical containment lines (back)
-for(var vi=0;vi<6;vi++){var va=-30+vi*36;var vx=Math.cos(va*D);if(vx>0.15)continue;var x1=CX+plinthRX*0.75*Math.cos(va*D),x2=CX+plinthRX*Math.cos(va*D);X.beginPath();X.moveTo(x1,chamberTopY+plinthRY*0.65*Math.sin(va*D));X.lineTo(x2,plinthY+plinthRY*Math.sin(va*D));X.stroke();}
-X.globalAlpha=1;
-
-// ═══ COGNITION MASS ═══
-// Primary glow
-var cg=X.createRadialGradient(CX,coreCY,0,CX,coreCY,coreRad*1.8);
-cg.addColorStop(0,'rgba('+cc+','+(0.25*coreIntensity)+')');
-cg.addColorStop(0.3,'rgba('+cc+','+(0.12*coreIntensity)+')');
-cg.addColorStop(0.6,'rgba('+cc+','+(0.04*coreIntensity)+')');
-cg.addColorStop(1,'rgba(0,0,0,0)');
-X.fillStyle=cg;X.beginPath();X.arc(CX,coreCY,coreRad*1.8,0,Math.PI*2);X.fill();
-
-// Secondary inner glow (brighter core)
-var cg2=X.createRadialGradient(CX,coreCY-coreRad*0.1,0,CX,coreCY,coreRad*0.9);
-cg2.addColorStop(0,'rgba('+cc+','+(0.40*coreIntensity+0.10*pulse)+')');
-cg2.addColorStop(0.5,'rgba('+cc+','+(0.15*coreIntensity)+')');
-cg2.addColorStop(1,'rgba(0,0,0,0)');
-X.fillStyle=cg2;X.beginPath();X.arc(CX,coreCY,coreRad*0.9,0,Math.PI*2);X.fill();
-
-// Neural nodes + connections
-NN.forEach(function(n,i){
-  var nx=CX+n.ax*coreRad,ny=coreCY+n.ay*coreRad;
-  var nPulse=0.5+0.5*Math.sin(t*n.sp+n.ph);
-  var nAl=coreIntensity*(0.3+0.5*nPulse);
-  // Connections to nearby nodes
-  NN.forEach(function(m,j){if(j<=i)return;var mx=CX+m.ax*coreRad,my=coreCY+m.ay*coreRad;var d=Math.sqrt((nx-mx)*(nx-mx)+(ny-my)*(ny-my));if(d<coreRad*0.6){X.beginPath();X.moveTo(nx,ny);X.lineTo(mx,my);X.strokeStyle='rgba('+cc+','+(nAl*0.3*(1-d/(coreRad*0.6)))+')';X.lineWidth=0.5;X.stroke();}});
-  // Node dot
-  X.fillStyle='rgba('+cc+','+nAl+')';
-  X.beginPath();X.arc(nx,ny,n.sz*(0.8+0.2*nPulse),0,Math.PI*2);X.fill();
-  // Bright center
-  if(n.sz>2.5){X.fillStyle='rgba(255,255,255,'+(nAl*0.5)+')';X.beginPath();X.arc(nx,ny,1,0,Math.PI*2);X.fill();}
-});
-
-// Core text overlay
-X.textAlign='center';X.textBaseline='middle';
+// ═══ PURSUIT RAIL ═══
+var railH=32,railY=pad;
+var pp=isP?PIPE[sP]:PIPE[0];
+var oc=pp.opi>=90?'60,217,160':pp.opi>=80?'0,200,232':'212,160,32';
+rr(pad,railY,usableW,railH,4);
+X.fillStyle=isP?'rgba('+oc+',0.04)':'rgba(20,30,50,0.5)';X.fill();
+X.strokeStyle=isP?'rgba('+oc+',0.25)':'rgba(0,180,220,0.06)';X.lineWidth=isP?1:0.5;X.stroke();
+// Pursuit text
+X.textBaseline='middle';var railCY=railY+railH/2;
 if(isP){
-  var pp=PIPE[sP];
-  X.font='900 '+Math.round(coreRad*0.50)+'px "Orbitron",sans-serif';
-  X.fillStyle='rgba('+cc+','+(0.85*coreIntensity)+')';
-  X.fillText(pp.opi,CX,coreCY-coreRad*0.08);
-  X.font='600 '+Math.round(coreRad*0.13)+'px "Share Tech Mono",monospace';
-  X.fillStyle='rgba('+cc+','+(0.50*coreIntensity)+')';
-  X.fillText(pp.n.toUpperCase(),CX,coreCY+coreRad*0.26);
-}else if(!sel){
-  X.font='900 '+Math.round(coreRad*0.28)+'px "Orbitron",sans-serif';
-  X.fillStyle='rgba('+cc+','+(0.30+0.15*pulse)+')';
-  X.fillText('HGI',CX,coreCY-coreRad*0.04);
-  X.font='500 '+Math.round(coreRad*0.10)+'px "Share Tech Mono",monospace';
-  X.fillStyle='rgba('+cc+','+(0.15+0.08*pulse)+')';
-  X.fillText('ORGANISM',CX,coreCY+coreRad*0.18);
-}
-if(gated){
-  X.font='900 '+Math.round(coreRad*0.18)+'px "Orbitron",sans-serif';
-  X.fillStyle='rgba(200,150,30,'+(0.55+0.25*pulse)+')';
-  X.fillText('GATED',CX,coreCY);
+  X.font='900 14px "Orbitron",sans-serif';X.textAlign='left';
+  X.fillStyle='rgba('+oc+',0.90)';X.fillText(pp.opi,pad+12,railCY);
+  X.font='700 11px "Rajdhani",sans-serif';
+  X.fillStyle='rgba('+oc+',0.70)';X.fillText(pp.n.toUpperCase(),pad+52,railCY-2);
+  X.font='500 8px "Share Tech Mono",monospace';
+  X.fillStyle='rgba('+oc+',0.40)';X.fillText(pp.stage.toUpperCase()+' \u00B7 '+pp.due,pad+52,railCY+10);
+  // Gate state indicator on right
+  if(gated){X.font='700 8px "Orbitron",sans-serif';X.textAlign='right';X.fillStyle='rgba(212,160,32,'+(0.55+0.30*pulse)+')';X.fillText('\u26A0 GATED',pad+usableW-10,railCY);}
+  else{X.font='500 7px "Share Tech Mono",monospace';X.textAlign='right';X.fillStyle='rgba('+oc+',0.30)';X.fillText('GATE CLEAR',pad+usableW-10,railCY);}
+}else{
+  X.font='500 8px "Share Tech Mono",monospace';X.textAlign='center';
+  X.fillStyle='rgba(0,180,220,0.18)';X.fillText('SELECT PURSUIT FROM PIPELINE',W/2,railCY);
 }
 
-// ═══ CONTAINMENT FIELD — front arc ═══
-// Vertical containment lines (front)
-X.globalAlpha=0.10*coreIntensity;X.strokeStyle='rgba('+cc+',1)';X.lineWidth=0.8;
-for(var vi=0;vi<8;vi++){var va=-10+vi*26;var vx=Math.cos(va*D);if(vx<0.1)continue;var topX=CX+plinthRX*0.75*Math.cos(va*D),botX=CX+plinthRX*Math.cos(va*D);var topY2=chamberTopY+plinthRY*0.65*Math.sin(va*D),botY2=plinthY+plinthRY*Math.sin(va*D);X.beginPath();X.moveTo(topX,topY2);X.lineTo(botX,botY2);X.stroke();}
-// Front top arc
-X.globalAlpha=0.15*coreIntensity;X.lineWidth=1.2;
-X.beginPath();X.ellipse(CX,chamberTopY,plinthRX*0.75,plinthRY*0.65,0,0,Math.PI);X.stroke();
-// Containment ring at mid height
-X.globalAlpha=0.08*coreIntensity;X.lineWidth=1;
-var ringY=plinthY-chamberH*0.35;
-X.beginPath();X.ellipse(CX,ringY,plinthRX*0.88,plinthRY*0.85,0,0,Math.PI*2);X.stroke();
-X.globalAlpha=1;
+// ═══ LAYOUT CALCULATIONS ═══
+var spineY=H*0.46;
+var spineBlockW=(usableW-gap*5)/4;
+var topModY=railY+railH+gap+8;
+var botModY=spineY+spineH+gap+8;
+modW=(usableW-gap*4)/3;
+// Top modules: Planning, Intelligence, Winnability
+var topMods=[MODS[0],MODS[1],MODS[2]];
+// Bottom modules: CRM, Memory, Synthesis
+var botMods=[MODS[4],MODS[5],MODS[6]];
 
-// Scanning ring — rotating
-var scanY=plinthY-chamberH*0.5;
-var scanAng=t*0.4;
-X.beginPath();X.ellipse(CX,scanY,plinthRX*0.82,plinthRY*0.78,0,scanAng,scanAng+1.2);
-X.strokeStyle='rgba('+cc+','+(0.15*coreIntensity)+')';X.lineWidth=1.5;X.stroke();
+// ═══ SPINE — thick workflow lane ═══
+// Spine background track
+rr(pad,spineY,usableW,spineH,3);
+X.fillStyle='rgba(8,16,30,0.7)';X.fill();
+X.strokeStyle='rgba(0,180,220,0.05)';X.lineWidth=0.5;X.stroke();
 
-// ═══ PLINTH / BASE ═══
-// Back ellipse of plinth body
-X.beginPath();X.ellipse(CX,plinthY+plinthH,plinthRX,plinthRY,0,0,Math.PI*2);
-X.fillStyle='rgba(8,16,30,0.95)';X.fill();
-X.strokeStyle='rgba('+cc+','+(0.08)+')';X.lineWidth=0.8;X.stroke();
-// Plinth body (sides)
-X.fillStyle='rgba(8,16,30,0.90)';
-X.beginPath();X.moveTo(CX-plinthRX,plinthY);X.lineTo(CX-plinthRX,plinthY+plinthH);X.ellipse(CX,plinthY+plinthH,plinthRX,plinthRY,0,Math.PI,0,true);X.lineTo(CX+plinthRX,plinthY);X.ellipse(CX,plinthY,plinthRX,plinthRY,0,0,Math.PI,true);X.fill();
-// Plinth edge highlight
-X.beginPath();X.ellipse(CX,plinthY,plinthRX,plinthRY,0,Math.PI+0.3,Math.PI*2-0.3);
-X.strokeStyle='rgba('+cc+','+(0.12)+')';X.lineWidth=1.5;X.stroke();
-// Top surface
-X.beginPath();X.ellipse(CX,plinthY,plinthRX,plinthRY,0,0,Math.PI*2);
-X.fillStyle='rgba(6,12,24,0.85)';X.fill();
-X.strokeStyle='rgba('+cc+','+(0.15+0.05*pulse)+')';X.lineWidth=1;X.stroke();
+// 4 spine blocks
+SPINE.forEach(function(sb,si){
+  var bx=pad+gap+(spineBlockW+gap)*si;
+  var isGateBlock=si===2;
+  var blockActive=sel&&(si===0&&(act('planning')>0.1||act('intelligence')>0.1))||(si===1&&(act('winnability')>0.1||act('memory')>0.1||act('crm')>0.1))||(si===2&&act('gate')>0.1)||(si===3&&act('synthesis')>0.1);
+  var sc=isGateBlock&&gated?'212,160,32':sb.c;
+  var ba=blockActive?0.85:0.04;
 
-// ═══ SUBSYSTEM DOCKS ═══
-DOCKS.forEach(function(d){
-  var a=act(d.id);
-  var gd=d.id==='gate'&&gated;
-  var sc=gd?'200,150,30':d.c;
-  var ang=d.ang*D;
-  var dx=CX+plinthRX*0.92*Math.cos(ang);
-  var dy=plinthY+plinthRY*0.92*Math.sin(ang);
-  var hb=0.5+0.5*Math.sin(t*(gd?4:1.3)+d.ang*0.03);
+  rr(bx,spineY+3,spineBlockW,spineH-6,3);
+  X.fillStyle=isGateBlock&&gated?'rgba(212,160,32,'+(0.06+0.06*pulse)+')':blockActive?'rgba('+sc+',0.06)':'rgba('+sc+',0.01)';
+  X.fill();
+  X.strokeStyle=isGateBlock&&gated?'rgba(212,160,32,'+(0.45+0.30*pulse)+')':'rgba('+sc+','+(blockActive?0.35:0.06)+')';
+  X.lineWidth=isGateBlock&&gated?1.5:blockActive?1:0.5;
+  if(isGateBlock&&gated)X.setLineDash([4,3]);
+  X.stroke();X.setLineDash([]);
 
-  // Dock glow
-  if(a>0.04||gd){
-    var dg=X.createRadialGradient(dx,dy,0,dx,dy,dm*0.035);
-    var glowAl=gd?(0.15+0.10*hb):a>0.5?(0.12*a):0.02;
-    dg.addColorStop(0,'rgba('+sc+','+glowAl+')');dg.addColorStop(1,'rgba('+sc+',0)');
-    X.fillStyle=dg;X.beginPath();X.arc(dx,dy,dm*0.035,0,Math.PI*2);X.fill();
+  // Block label
+  X.font=(blockActive?'700 9':'500 7')+'px "Share Tech Mono",monospace';
+  X.textAlign='center';X.textBaseline='middle';
+  X.fillStyle='rgba('+sc+','+(isGateBlock&&gated?(0.65+0.30*pulse):blockActive?0.70:0.15)+')';
+  X.fillText(sb.l,bx+spineBlockW/2,spineY+spineH/2);
+
+  // BLOCKED label on gate spine block
+  if(isGateBlock&&gated){
+    X.font='900 7px "Orbitron",sans-serif';
+    X.fillStyle='rgba(212,160,32,'+(0.50+0.35*pulse)+')';
+    X.fillText('BLOCKED',bx+spineBlockW/2,spineY+spineH/2+12);
   }
 
-  // Dock indicator
-  var dotR=gd?4:a>0.5?3.5:2;
-  X.fillStyle='rgba('+sc+','+(gd?(0.6+0.35*hb):a>0.5?(0.4+0.50*a):0.08)+')';
-  X.beginPath();X.arc(dx,dy,dotR,0,Math.PI*2);X.fill();
-  if(a>0.5||gd){X.fillStyle='rgba(255,255,255,'+(gd?0.3:0.5*a)+')';X.beginPath();X.arc(dx,dy,1,0,Math.PI*2);X.fill();}
+  // Connector arrows between spine blocks
+  if(si<3){
+    var ax=bx+spineBlockW+2,ay=spineY+spineH/2;
+    var isGateArrow=si===1&&gated;
+    X.beginPath();X.moveTo(ax,ay);X.lineTo(ax+gap-4,ay);
+    X.strokeStyle=isGateArrow?'rgba(212,160,32,'+(0.30+0.15*pulse)+')':'rgba('+sb.c+','+(blockActive?0.25:0.06)+')';
+    X.lineWidth=isGateArrow?2:1.5;
+    if(isGateArrow)X.setLineDash([3,3]);
+    X.stroke();X.setLineDash([]);
+    // Arrowhead
+    X.beginPath();X.moveTo(ax+gap-7,ay-3);X.lineTo(ax+gap-3,ay);X.lineTo(ax+gap-7,ay+3);
+    X.strokeStyle=isGateArrow?'rgba(212,160,32,0.35)':'rgba('+sb.c+','+(blockActive?0.25:0.06)+')';
+    X.lineWidth=1;X.stroke();
+  }
+});
 
-  // Arc segment on plinth edge
-  var arcSpan=18*D;
-  X.beginPath();X.ellipse(CX,plinthY,plinthRX+2,plinthRY+1,0,ang-arcSpan/2,ang+arcSpan/2);
-  X.strokeStyle='rgba('+sc+','+(gd?(0.50+0.35*hb):a>0.5?(0.25+0.50*a):0.05)+')';
-  X.lineWidth=gd?3:a>0.5?2.5:1;
+// ═══ FUNCTION MODULES ═══
+function drawMod(m,mx,my,mw,mh){
+  var a=act(m.id);
+  var gd=m.id==='gate'&&gated;
+  var queued=m.id==='synthesis'&&gated;
+  var sc=gd?'212,160,32':m.c;
+  var hb=0.5+0.5*Math.sin(t*(gd?4:1.3));
+
+  // Module card
+  rr(mx,my,mw,mh,3);
+  X.fillStyle=gd?'rgba(212,160,32,'+(0.04+0.04*hb)+')':a>0.1?'rgba('+sc+',0.04)':'rgba(8,16,28,0.6)';
+  X.fill();
+  X.strokeStyle=gd?'rgba(212,160,32,'+(0.40+0.30*hb)+')':a>0.1?'rgba('+sc+','+(0.25+0.45*a)+')':'rgba('+sc+',0.06)';
+  X.lineWidth=gd?1.5:a>0.1?1:0.5;
   if(gd)X.setLineDash([3,3]);
   X.stroke();X.setLineDash([]);
 
+  // Left accent bar
+  X.fillStyle='rgba('+sc+','+(gd?(0.45+0.30*hb):a>0.1?(0.25+0.50*a):0.06)+')';
+  rr(mx+2,my+4,2.5,mh-8,1);X.fill();
+
+  // Activity bar (bottom)
+  if(a>0.04){
+    var barW=(mw-14)*(gd?0.3:Math.max(a,m.tp*0.25));
+    X.fillStyle='rgba('+sc+','+(gd?(0.20+0.15*hb):a>0.1?(0.12+0.30*a):0.03)+')';
+    rr(mx+8,my+mh-8,barW,3,1);X.fill();
+  }
+
   // Label
-  var lx=CX+plinthRX*1.14*Math.cos(ang);
-  var ly=plinthY+plinthRY*1.5*Math.sin(ang)+8;
-  X.font=(a>0.5||gd?'700 8':'500 7')+'px "Share Tech Mono",monospace';
-  X.textAlign='center';X.textBaseline='middle';
-  X.fillStyle='rgba('+sc+','+(gd?(0.65+0.30*hb):a>0.5?0.75:0.15)+')';
-  X.fillText(d.l,lx,ly);
-
-  // Blocked indicator at gate dock
+  X.textAlign='left';X.textBaseline='middle';
   if(gd){
+    X.font='700 8px "Share Tech Mono",monospace';
+    X.fillStyle='rgba(212,160,32,'+(0.60+0.30*hb)+')';
+    X.fillText(m.l,mx+10,my+mh*0.35);
     X.font='900 7px "Orbitron",sans-serif';
-    X.fillStyle='rgba(200,150,30,'+(0.50+0.35*hb)+')';
-    X.fillText('\u26D4',dx,dy-12);
+    X.fillStyle='rgba(212,160,32,'+(0.45+0.35*hb)+')';
+    X.fillText('BLOCKED',mx+10,my+mh*0.65);
+  }else if(queued){
+    X.font='500 8px "Share Tech Mono",monospace';
+    X.fillStyle='rgba('+sc+',0.15)';X.fillText(m.l,mx+10,my+mh*0.35);
+    X.font='700 7px "Share Tech Mono",monospace';
+    X.fillStyle='rgba(212,160,32,'+(0.25+0.15*Math.sin(t*3))+')';
+    X.fillText('QUEUED',mx+10,my+mh*0.65);
+  }else{
+    X.font=(a>0.1?'700 9':'500 8')+'px "Share Tech Mono",monospace';
+    X.fillStyle='rgba('+sc+','+(a>0.1?0.80:0.18)+')';
+    X.fillText(m.l,mx+10,my+mh*0.35);
+    X.font='500 7px "Share Tech Mono",monospace';
+    X.fillStyle='rgba('+sc+','+(a>0.1?0.40:0.08)+')';
+    X.fillText(m.st,mx+10,my+mh*0.65);
   }
-});
 
-// ═══ ROUTES — elegant flows ═══
-if(sel){
-  // Inbound: from left edge to relevant dock, then up to core
-  AG.forEach(function(a,i){
-    if(i>=10||!pOn(i))return;
-    var dk=DOCKS.find(function(d){return d.id===a.sec;});if(!dk)return;
-    var ang=dk.ang*D;
-    var dockX=CX+plinthRX*0.92*Math.cos(ang),dockY=plinthY+plinthRY*0.92*Math.sin(ang);
-    var ay=H*(0.08+i*0.082);
+  // Status dot (top right)
+  X.fillStyle='rgba('+sc+','+(gd?(0.5+0.35*hb):a>0.1?(0.35+0.50*a):0.06)+')';
+  X.beginPath();X.arc(mx+mw-8,my+8,2.5,0,Math.PI*2);X.fill();
 
-    // Route line from left to dock
-    X.beginPath();X.moveTo(0,ay);
-    X.quadraticCurveTo(CX*0.3,ay*0.5+dockY*0.5,dockX,dockY);
-    X.strokeStyle=a.gated?'rgba(200,150,30,0.25)':'rgba('+dk.c+',0.30)';
-    X.lineWidth=a.gated?1.5:2;
-    if(a.gated)X.setLineDash([4,4]);
-    X.stroke();X.setLineDash([]);
-
-    // Route from dock up to core (vertical energy thread)
-    if(!a.gated){
-      X.beginPath();X.moveTo(dockX,dockY);
-      X.quadraticCurveTo(dockX*0.7+CX*0.3,coreCY*0.6+dockY*0.4,CX,coreCY+coreRad*0.5);
-      X.strokeStyle='rgba('+dk.c+',0.12)';X.lineWidth=1;X.stroke();
-    }
-
-    // Label
-    X.font='700 8px "Share Tech Mono",monospace';X.textAlign='left';X.textBaseline='middle';
-    X.fillStyle=a.gated?'rgba(200,150,30,0.55)':'rgba('+dk.c+',0.50)';
-    X.fillText(a.pl,4,ay);
-
-    // Gate route interruption
-    if(a.gated){
-      var bx=dockX*0.4+CX*0.15,by=dockY*0.6+ay*0.4;
-      X.fillStyle='rgba(200,150,30,'+(0.12+0.08*pulse)+')';
-      X.beginPath();X.arc(bx,by,10,0,Math.PI*2);X.fill();
-      X.strokeStyle='rgba(200,150,30,'+(0.50+0.20*pulse)+')';X.lineWidth=3;
-      X.beginPath();X.moveTo(bx-8,by-8);X.lineTo(bx+8,by+8);X.stroke();
-      X.beginPath();X.moveTo(bx+8,by-8);X.lineTo(bx-8,by+8);X.stroke();
-    }
-  });
-
-  // Outbound: from core down through synthesis dock to right
-  if(sM==='synthesis'||(sA>=0&&AG[sA].sec==='synthesis')){
-    var synDk=DOCKS[6];var synAng=synDk.ang*D;
-    var sx=CX+plinthRX*0.92*Math.cos(synAng),sy=plinthY+plinthRY*0.92*Math.sin(synAng);
-    X.beginPath();X.moveTo(CX,coreCY+coreRad*0.5);X.quadraticCurveTo(sx*0.6+CX*0.4,(coreCY+sy)/2,sx,sy);
-    X.strokeStyle='rgba(90,155,240,0.15)';X.lineWidth=1;X.stroke();
-    X.beginPath();X.moveTo(sx,sy);X.quadraticCurveTo(W*0.7,sy*0.5+H*0.15,W,H*0.25);
-    X.strokeStyle='rgba(90,155,240,0.25)';X.lineWidth=2;X.stroke();
-    X.font='700 8px "Share Tech Mono",monospace';X.textAlign='right';X.textBaseline='middle';
-    X.fillStyle='rgba(90,155,240,0.45)';X.fillText('\u2192 PROPOSAL',W-4,H*0.25);
-  }
+  return{cx:mx+mw/2,cy:my+mh/2,top:my,bot:my+mh};
 }
 
-// ═══ FLOW PARTICLES ═══
-// Ambient particles drifting upward into core
-for(var pi=0;pi<5;pi++){
-  var pp=((t*0.2+pi*0.2)%1);
-  var pAng=(pi*72+t*15)*D;
-  var pR=plinthRX*0.5*(1-pp);
-  var px=CX+Math.cos(pAng)*pR;
-  var py=plinthY-pp*chamberH;
-  var pAl=coreIntensity*Math.sin(pp*Math.PI)*0.25;
-  X.fillStyle='rgba('+cc+','+pAl+')';
-  X.beginPath();X.arc(px,py,2,0,Math.PI*2);X.fill();
+// Draw top modules
+var topPts=[];
+topMods.forEach(function(m,i){
+  var mx=pad+i*(modW+gap);
+  topPts.push(drawMod(m,mx,topModY,modW,modH));
+});
+
+// Draw bottom modules
+var botPts=[];
+botMods.forEach(function(m,i){
+  var mx=pad+i*(modW+gap);
+  botPts.push(drawMod(m,mx,botModY,modW,modH));
+});
+
+// ═══ CONNECTORS: modules to spine ═══
+// Top modules connect DOWN to spine
+topMods.forEach(function(m,i){
+  var a=act(m.id);var sc=m.c;
+  var fromX=topPts[i].cx,fromY=topPts[i].bot;
+  var toIdx=m.spineIdx;
+  var toX=pad+gap+(spineBlockW+gap)*toIdx+spineBlockW/2;
+  var toY=spineY;
+  X.beginPath();X.moveTo(fromX,fromY);
+  if(Math.abs(fromX-toX)>20){X.lineTo(fromX,fromY+(toY-fromY)*0.5);X.lineTo(toX,fromY+(toY-fromY)*0.5);X.lineTo(toX,toY);}
+  else{X.lineTo(toX,toY);}
+  X.strokeStyle='rgba('+sc+','+(a>0.1?0.25:0.04)+')';X.lineWidth=a>0.1?1.5:0.5;X.stroke();
+  // Small arrow
+  if(a>0.1){X.beginPath();X.moveTo(toX-3,toY-5);X.lineTo(toX,toY-1);X.lineTo(toX+3,toY-5);X.strokeStyle='rgba('+sc+',0.20)';X.lineWidth=1;X.stroke();}
+});
+
+// Bottom modules connect UP to spine
+botMods.forEach(function(m,i){
+  var a=act(m.id);var sc=m.id==='synthesis'&&gated?'212,160,32':m.c;
+  var fromX=botPts[i].cx,fromY=botPts[i].top;
+  var toIdx=m.spineIdx;
+  var toX=pad+gap+(spineBlockW+gap)*toIdx+spineBlockW/2;
+  var toY=spineY+spineH;
+  X.beginPath();X.moveTo(fromX,fromY);
+  if(Math.abs(fromX-toX)>20){X.lineTo(fromX,fromY-(fromY-toY)*0.5);X.lineTo(toX,fromY-(fromY-toY)*0.5);X.lineTo(toX,toY);}
+  else{X.lineTo(toX,toY);}
+  X.strokeStyle='rgba('+sc+','+(a>0.1?0.25:0.04)+')';X.lineWidth=a>0.1?1.5:0.5;X.stroke();
+  if(a>0.1){X.beginPath();X.moveTo(toX-3,toY+5);X.lineTo(toX,toY+1);X.lineTo(toX+3,toY+5);X.strokeStyle='rgba('+sc+',0.20)';X.lineWidth=1;X.stroke();}
+});
+
+// ═══ SPINE PACKETS ═══
+var gateX=pad+gap+(spineBlockW+gap)*2; // gate block left edge
+if(!gated){
+  for(var pi=PKS.length-1;pi>=0;pi--){
+    PKS[pi].p+=PKS[pi].v;if(PKS[pi].p>=1){PKS.splice(pi,1);continue;}
+    var px=pad+PKS[pi].p*usableW;
+    var py=spineY+spineH/2;
+    var pg=X.createRadialGradient(px,py,0,px,py,6);
+    pg.addColorStop(0,'rgba(0,200,232,0.50)');pg.addColorStop(1,'rgba(0,0,0,0)');
+    X.fillStyle=pg;X.beginPath();X.arc(px,py,6,0,Math.PI*2);X.fill();
+    X.fillStyle='rgba(255,255,255,0.5)';X.beginPath();X.arc(px,py,1.5,0,Math.PI*2);X.fill();
+  }
+}else{
+  // Packets flow but stop at gate
+  for(var pi=PKS.length-1;pi>=0;pi--){
+    PKS[pi].p+=PKS[pi].v;
+    var maxP=(gateX-pad)/usableW-0.02;
+    if(PKS[pi].p>=maxP){PKS.splice(pi,1);continue;}
+    var px=pad+PKS[pi].p*usableW,py=spineY+spineH/2;
+    var pg=X.createRadialGradient(px,py,0,px,py,6);
+    pg.addColorStop(0,'rgba(212,160,32,0.45)');pg.addColorStop(1,'rgba(0,0,0,0)');
+    X.fillStyle=pg;X.beginPath();X.arc(px,py,6,0,Math.PI*2);X.fill();
+    X.fillStyle='rgba(255,255,255,0.4)';X.beginPath();X.arc(px,py,1.5,0,Math.PI*2);X.fill();
+  }
+  // Queued packets stacking before gate
+  for(var qi=QP.length-1;qi>=0;qi--){
+    QP[qi].age+=0.016;if(QP[qi].age>8){QP.splice(qi,1);continue;}
+    var qx=gateX-8-qi*12;
+    var qy=spineY+spineH/2;
+    var qpulse=0.4+0.3*Math.sin(t*3+qi);
+    X.fillStyle='rgba(212,160,32,'+(0.25*qpulse)+')';
+    X.beginPath();X.arc(qx,qy,5,0,Math.PI*2);X.fill();
+    X.fillStyle='rgba(212,160,32,'+(0.50*qpulse)+')';
+    X.beginPath();X.arc(qx,qy,2,0,Math.PI*2);X.fill();
+  }
+  // Gate barrier line
+  var bx=gateX-2,by=spineY;
+  X.beginPath();X.moveTo(bx,by-2);X.lineTo(bx,by+spineH+2);
+  X.strokeStyle='rgba(212,160,32,'+(0.50+0.30*pulse)+')';X.lineWidth=3;X.stroke();
+}
+
+// ═══ INBOUND AGENT ROUTES ═══
+if(sel){
+  AG.forEach(function(a,i){
+    if(i>=10||!pOn(i))return;
+    var m=MODS.find(function(m){return m.id===a.sec;});if(!m)return;
+    var mi=MODS.indexOf(m);
+    var modRow=m.row;
+    var mx,my;
+    if(modRow==='top'){var ti=topMods.indexOf(m);mx=topPts[ti].cx;my=topPts[ti].top;}
+    else if(modRow==='bot'){var bi=botMods.indexOf(m);mx=botPts[bi].cx;my=botPts[bi].bot;}
+    else{mx=pad+gap+(spineBlockW+gap)*m.spineIdx+spineBlockW/2;my=spineY;}
+    var ay=H*(0.06+i*0.085);
+    // Route from left
+    X.beginPath();X.moveTo(0,ay);X.quadraticCurveTo(pad*2,ay,mx-20,my);X.lineTo(mx,my);
+    X.strokeStyle=a.gated?'rgba(212,160,32,0.20)':'rgba('+m.c+',0.20)';X.lineWidth=a.gated?1:1.5;
+    if(a.gated)X.setLineDash([3,3]);X.stroke();X.setLineDash([]);
+    X.font='700 7px "Share Tech Mono",monospace';X.textAlign='left';X.textBaseline='middle';
+    X.fillStyle=a.gated?'rgba(212,160,32,0.45)':'rgba('+m.c+',0.40)';X.fillText(a.pl,3,ay);
+  });
 }
 }
 draw();
