@@ -15,49 +15,34 @@
   --cyan:#00d4ff;--gold:#f0c040;--green:#2dd4a0;--red:#ff4060;--amber:#f0a030;
   --text:#c8d4e0;--dim:#5a6a80;--white:#eaf0f8;
   --font-display:Orbitron,monospace;--font-mono:'JetBrains Mono',monospace;--font-body:Inter,system-ui,sans-serif;
-  --glow-cyan:0 0 20px rgba(0,212,255,0.15);--glow-gold:0 0 20px rgba(240,192,64,0.15);
 }
 html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--font-body);font-size:14px}
 #app{height:100%;display:flex;flex-direction:column;overflow:hidden}
-
-/* TOP BAR */
 .topbar{height:44px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 16px;flex-shrink:0;gap:10px}
 .topbar .brand{font-family:var(--font-display);font-size:12px;font-weight:700;color:var(--cyan);letter-spacing:3px}
-.topbar .ver{font-family:var(--font-mono);font-size:9px;color:var(--dim);margin-left:2px}
+.topbar .ver{font-family:var(--font-mono);font-size:9px;color:var(--dim)}
 .topbar .spacer{flex:1}
 .topbar .status{display:flex;align-items:center;gap:6px}
 .topbar .dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:pulse 2s ease infinite}
 .topbar .status-text{font-family:var(--font-mono);font-size:9px;color:var(--dim)}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
-
-/* TAB BAR */
 .tabs{display:flex;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto;-webkit-overflow-scrolling:touch}
 .tabs::-webkit-scrollbar{display:none}
 .tab{padding:10px 16px;font-family:var(--font-mono);font-size:10px;letter-spacing:1px;color:var(--dim);cursor:pointer;white-space:nowrap;border-bottom:2px solid transparent;transition:all 0.2s;user-select:none}
 .tab.active{color:var(--cyan);border-bottom-color:var(--cyan)}
 .tab:active{background:rgba(0,212,255,0.05)}
-
-/* MAIN CONTENT */
 .content{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;padding:12px;padding-bottom:80px}
 .content::-webkit-scrollbar{width:3px}
 .content::-webkit-scrollbar-thumb{background:rgba(0,180,220,0.15);border-radius:2px}
-
-/* CARDS */
 .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px}
 .card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
 .card-title{font-family:var(--font-display);font-size:10px;letter-spacing:2px;color:var(--dim);font-weight:600}
 .card-badge{font-family:var(--font-mono);font-size:9px;padding:2px 8px;border-radius:4px;background:rgba(0,212,255,0.08);color:var(--cyan);border:1px solid rgba(0,212,255,0.15)}
-
-/* STATS ROW */
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
 .stat{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 8px;text-align:center}
 .stat-value{font-family:var(--font-display);font-size:20px;font-weight:700;color:var(--white)}
-.stat-value.cyan{color:var(--cyan)}
-.stat-value.gold{color:var(--gold)}
-.stat-value.green{color:var(--green)}
+.stat-value.cyan{color:var(--cyan)}.stat-value.gold{color:var(--gold)}.stat-value.green{color:var(--green)}
 .stat-label{font-family:var(--font-mono);font-size:7px;letter-spacing:1px;color:var(--dim);margin-top:4px}
-
-/* PIPELINE ITEMS */
 .pipe-item{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.03);cursor:pointer}
 .pipe-item:last-child{border-bottom:none}
 .pipe-item:active{background:rgba(0,212,255,0.03);margin:0 -14px;padding:10px 14px}
@@ -71,66 +56,45 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .stage-identified{background:rgba(240,192,64,0.1);color:var(--gold);border:1px solid rgba(240,192,64,0.2)}
 .stage-watching{background:rgba(90,106,128,0.2);color:var(--dim);border:1px solid rgba(90,106,128,0.3)}
 .stage-submitted{background:rgba(45,212,160,0.1);color:var(--green);border:1px solid rgba(45,212,160,0.2)}
-
-/* AGENT FEED */
+.stage-pending_rfp{background:rgba(240,192,64,0.06);color:var(--gold);border:1px solid rgba(240,192,64,0.12)}
 .feed-item{padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.02)}
 .feed-item:last-child{border-bottom:none}
 .feed-header{display:flex;align-items:center;gap:6px;margin-bottom:4px}
 .feed-agent{font-family:var(--font-mono);font-size:9px;font-weight:500;color:var(--cyan)}
-.feed-time{font-family:var(--font-mono);font-size:8px;color:var(--dim);margin-left:auto}
-.feed-text{font-size:12px;color:var(--text);line-height:1.5;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-.feed-opp{font-family:var(--font-mono);font-size:8px;color:var(--gold);margin-top:3px}
-
-/* INTEL TABLE */
-.intel-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.02)}
+.feed-opp-name{font-family:var(--font-mono);font-size:8px;color:var(--gold);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px}
+.feed-time{font-family:var(--font-mono);font-size:8px;color:var(--dim);margin-left:auto;flex-shrink:0}
+.feed-text{font-size:12px;color:var(--text);line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.intel-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.02)}
 .intel-label{font-size:12px;color:var(--dim)}
 .intel-value{font-family:var(--font-mono);font-size:13px;font-weight:600;color:var(--white)}
-
-/* AGENTS VIEW */
 .agent-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .agent-card{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px;position:relative;overflow:hidden}
 .agent-card::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%;border-radius:2px 0 0 2px}
-.agent-card.core::before{background:var(--cyan)}
-.agent-card.intel::before{background:var(--gold)}
-.agent-card.gated::before{background:var(--amber)}
-.agent-card.per-opp::before{background:var(--green)}
+.agent-card.core::before{background:var(--cyan)}.agent-card.intel::before{background:var(--gold)}
+.agent-card.gated::before{background:var(--amber)}.agent-card.per-opp::before{background:var(--green)}
 .agent-name{font-family:var(--font-mono);font-size:9px;font-weight:500;color:var(--white)}
 .agent-type{font-family:var(--font-mono);font-size:7px;color:var(--dim);margin-top:2px;letter-spacing:1px}
 .agent-last{font-size:8px;color:var(--dim);margin-top:4px}
-
-/* ACTION BUTTONS */
 .actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
 .btn{padding:12px;border-radius:8px;border:1px solid var(--border);background:var(--surface);font-family:var(--font-mono);font-size:10px;color:var(--cyan);text-align:center;cursor:pointer;letter-spacing:1px;transition:all 0.2s;user-select:none}
 .btn:active{background:rgba(0,212,255,0.08);border-color:rgba(0,212,255,0.3);transform:scale(0.98)}
 .btn.primary{background:rgba(0,212,255,0.08);border-color:rgba(0,212,255,0.2)}
-
-/* LOADING */
 .loading{text-align:center;padding:40px;color:var(--dim);font-family:var(--font-mono);font-size:11px}
 .loading::after{content:'';display:block;width:24px;height:24px;border:2px solid var(--border);border-top-color:var(--cyan);border-radius:50%;animation:spin 0.8s linear infinite;margin:12px auto 0}
 @keyframes spin{to{transform:rotate(360deg)}}
-
-/* DETAIL VIEW */
 .detail-back{font-family:var(--font-mono);font-size:10px;color:var(--cyan);cursor:pointer;margin-bottom:12px;display:flex;align-items:center;gap:4px}
 .detail-title{font-size:18px;font-weight:700;color:var(--white);margin-bottom:4px}
 .detail-agency{font-family:var(--font-mono);font-size:11px;color:var(--dim);margin-bottom:12px}
 .detail-section{margin-bottom:16px}
 .detail-section-title{font-family:var(--font-display);font-size:9px;letter-spacing:2px;color:var(--dim);margin-bottom:8px}
-.detail-content{font-size:12px;line-height:1.6;color:var(--text);white-space:pre-wrap}
-
-/* BRAIN GLOW */
-.brain-bg{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;opacity:0.4}
+.detail-content{font-size:12px;line-height:1.6;color:var(--text);white-space:pre-wrap;max-height:300px;overflow-y:auto}
+.brain-bg{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;opacity:0.35}
 .brain-bg .orb{position:absolute;border-radius:50%;filter:blur(80px);animation:drift 8s ease-in-out infinite alternate}
-.brain-bg .orb1{width:200px;height:200px;background:rgba(0,180,255,0.06);top:20%;left:30%;animation-delay:0s}
+.brain-bg .orb1{width:200px;height:200px;background:rgba(0,180,255,0.06);top:20%;left:30%}
 .brain-bg .orb2{width:150px;height:150px;background:rgba(0,212,255,0.04);top:60%;right:20%;animation-delay:2s}
 .brain-bg .orb3{width:180px;height:180px;background:rgba(240,192,64,0.03);bottom:10%;left:10%;animation-delay:4s}
 @keyframes drift{0%{transform:translate(0,0) scale(1)}100%{transform:translate(20px,-15px) scale(1.1)}}
-
-/* RESPONSIVE */
-@media(min-width:768px){
-  .stats{grid-template-columns:repeat(6,1fr)}
-  .agent-grid{grid-template-columns:repeat(3,1fr)}
-  .content{padding:16px 24px}
-}
+@media(min-width:768px){.stats{grid-template-columns:repeat(6,1fr)}.agent-grid{grid-template-columns:repeat(3,1fr)}.content{padding:16px 24px}}
 </style>
 </head>
 <body>
@@ -152,418 +116,337 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
     <div class="tab" data-tab="agents">AGENTS</div>
     <div class="tab" data-tab="intel">INTEL</div>
   </div>
-  <div class="content" id="content">
-    <div class="loading">INITIALIZING ORGANISM</div>
-  </div>
+  <div class="content" id="content"><div class="loading">INITIALIZING ORGANISM</div></div>
 </div>
-
 <script>
-var BASE = '';
-var S = { health:null, pipeline:[], memories:[], status:null, detail:null, tab:'cop' };
+var BASE='', S={health:null,pipeline:[],memories:[],status:null,detail:null,tab:'cop',oppTitles:{}};
 
-// === DATA LOADING ===
-async function api(path) {
-  try {
-    var r = await fetch(BASE + path);
-    if (!r.ok) return null;
-    return await r.json();
-  } catch(e) { return null; }
-}
+// V1 agent names to filter out
+var V1_SKIP=['v2_engine','v3_engine','v4_engine','oral_prep','brief_agent','opportunity_brief_agent',
+  'post_award','mobile_notifications','exec_briefing_mode','unsolicited_agent',
+  'financial_v2','content_engine_v2'];
 
-async function loadAll() {
-  var [h, p, m, s] = await Promise.all([
-    api('/health'),
-    api('/api/pipeline'),
-    api('/api/memories'),
-    api('/api/system-status')
-  ]);
-  S.health = h;
-  S.pipeline = (p || []).filter(function(o){ return o.status === 'active' && (o.opi_score||0) >= 60; }).sort(function(a,b){ return (b.opi_score||0)-(a.opi_score||0); });
-  S.memories = (m || []).filter(function(x){
-    // Filter out system session logs and disabled V1 agents
-    var skip = ['v2_engine','v3_engine','v4_engine','oral_prep','brief_agent','opportunity_brief_agent','post_award','mobile_notifications','exec_briefing_mode','unsolicited_agent'];
-    return skip.indexOf(x.agent) === -1;
-  }).slice(0, 40);
-  S.status = s;
+async function api(path){try{var r=await fetch(BASE+path);if(!r.ok)return null;return await r.json();}catch(e){return null;}}
+
+async function loadAll(){
+  var [h,p,m,s]=await Promise.all([api('/health'),api('/api/pipeline'),api('/api/memories'),api('/api/system-status')]);
+  S.health=h;
+  S.pipeline=(p||[]).filter(function(o){return o.status==='active'&&(o.opi_score||0)>=60;}).sort(function(a,b){return(b.opi_score||0)-(a.opi_score||0);});
+  // Build opp title lookup
+  S.oppTitles={};
+  S.pipeline.forEach(function(o){S.oppTitles[o.id]=((o.title||'').length>40?(o.title||'').slice(0,37)+'...':o.title)||'';});
+  // Filter memories: skip V1 agents and V1-pattern outputs
+  S.memories=(m||[]).filter(function(x){
+    if(V1_SKIP.indexOf(x.agent)===-1){
+      // Also filter V1 pattern: "Agent X of 37" or "Agent X of 47"
+      var obs=x.observation||'';
+      if(/Agent \d+ of (37|47)/.test(obs)) return false;
+      return true;
+    }
+    return false;
+  }).slice(0,50);
+  S.status=s;
   updateTopbar();
   renderTab();
 }
 
-function updateTopbar() {
-  var h = S.health;
-  var dot = document.getElementById('health-dot');
-  var txt = document.getElementById('health-text');
-  var ver = document.getElementById('ver');
-  if (h && h.status === 'alive') {
-    dot.style.background = 'var(--green)';
-    dot.style.boxShadow = '0 0 8px var(--green)';
-    var up = h.uptime_seconds;
-    var upStr = up > 3600 ? Math.floor(up/3600) + 'h' : Math.floor(up/60) + 'm';
-    txt.textContent = 'ALIVE ' + upStr;
-    ver.textContent = (h.version || '').replace('V','v');
-  } else {
-    dot.style.background = 'var(--red)';
-    dot.style.boxShadow = '0 0 8px var(--red)';
-    txt.textContent = 'OFFLINE';
-  }
+function updateTopbar(){
+  var h=S.health,dot=document.getElementById('health-dot'),txt=document.getElementById('health-text'),ver=document.getElementById('ver');
+  if(h&&h.status==='alive'){
+    dot.style.background='var(--green)';dot.style.boxShadow='0 0 8px var(--green)';
+    var up=h.uptime_seconds;txt.textContent='ALIVE '+(up>3600?Math.floor(up/3600)+'h':Math.floor(up/60)+'m');
+    ver.textContent=(h.version||'').replace('V','v');
+  }else{dot.style.background='var(--red)';dot.style.boxShadow='0 0 8px var(--red)';txt.textContent='OFFLINE';}
 }
 
-// === TABS ===
-document.getElementById('tabs').addEventListener('click', function(e) {
-  var tab = e.target.closest('.tab');
-  if (!tab) return;
-  S.tab = tab.dataset.tab;
-  S.detail = null;
-  document.querySelectorAll('.tab').forEach(function(t){ t.classList.remove('active'); });
-  tab.classList.add('active');
-  renderTab();
+document.getElementById('tabs').addEventListener('click',function(e){
+  var tab=e.target.closest('.tab');if(!tab)return;
+  S.tab=tab.dataset.tab;S.detail=null;
+  document.querySelectorAll('.tab').forEach(function(t){t.classList.remove('active');});
+  tab.classList.add('active');renderTab();
 });
 
-function renderTab() {
-  var c = document.getElementById('content');
-  switch(S.tab) {
-    case 'cop': c.innerHTML = renderCOP(); break;
-    case 'pipeline': c.innerHTML = renderPipeline(); break;
-    case 'feed': c.innerHTML = renderFeed(); break;
-    case 'agents': c.innerHTML = renderAgents(); break;
-    case 'intel': c.innerHTML = renderIntel(); break;
+function renderTab(){
+  var c=document.getElementById('content');
+  switch(S.tab){
+    case 'cop':c.innerHTML=renderCOP();break;
+    case 'pipeline':c.innerHTML=S.detail?renderDetail():renderPipeline();break;
+    case 'feed':c.innerHTML=renderFeed();break;
+    case 'agents':c.innerHTML=renderAgents();break;
+    case 'intel':c.innerHTML=renderIntel();break;
   }
   bindEvents();
 }
 
-// === COP (Command Operating Picture) ===
-function renderCOP() {
-  var st = S.status || {};
-  var pipe = st.pipeline || {};
-  var intel = st.intelligence || {};
-  var out = st.outcomes || {};
-  var h = S.health || {};
-  
-  var pursuing = S.pipeline.filter(function(o){ return o.stage==='pursuing'; });
-  var urgent = S.pipeline.filter(function(o){
-    if (!o.due_date) return false;
-    var days = Math.ceil((new Date(o.due_date)-Date.now())/86400000);
-    return days > 0 && days <= 14;
-  }).sort(function(a,b){ return new Date(a.due_date)-new Date(b.due_date); });
-  
-  var html = '<div class="stats">';
-  html += stat(pipe.total_active || S.pipeline.length, 'PIPELINE', 'cyan');
-  html += stat(h.agents_active || 29, 'AGENTS', 'gold');
-  html += stat(intel.organism_memories || '—', 'MEMORIES', 'cyan');
-  html += stat(pipe.avg_opi || '—', 'AVG OPI', 'green');
-  html += '</div>';
-  
-  // Urgent deadlines
-  if (urgent.length > 0) {
-    html += '<div class="card">';
-    html += '<div class="card-header"><span class="card-title">UPCOMING DEADLINES</span><span class="card-badge">' + urgent.length + ' within 14d</span></div>';
-    urgent.forEach(function(o) {
-      var days = Math.ceil((new Date(o.due_date)-Date.now())/86400000);
-      var color = days <= 5 ? 'var(--red)' : days <= 10 ? 'var(--amber)' : 'var(--cyan)';
-      html += '<div class="pipe-item" data-id="' + o.id + '">';
-      html += '<div class="pipe-opi" style="color:' + color + ';font-size:16px">' + days + 'd</div>';
-      html += '<div class="pipe-info"><div class="pipe-title">' + esc((o.title||'').slice(0,50)) + '</div>';
-      html += '<div class="pipe-meta"><span>' + esc(o.agency||'') + '</span><span>OPI ' + (o.opi_score||'?') + '</span></div></div>';
-      html += '</div>';
-    });
-    html += '</div>';
+// === CLEAN OBSERVATION TEXT ===
+function cleanObs(text){
+  if(!text)return '';
+  // Split into lines and skip header block
+  var lines=text.split('\n');
+  var out=[];
+  var pastHeaders=false;
+  for(var i=0;i<lines.length;i++){
+    var ln=lines[i].trim();
+    // Skip empty lines at start
+    if(!pastHeaders&&!ln)continue;
+    // Skip agent label line (AGENT_NAME - Opp Title: or AGENT_NAME:)
+    if(!pastHeaders&&/^[A-Z0-9\s_\-]{3,40}(\s*-\s*[^:]+)?:\s*$/.test(ln))continue;
+    // Skip markdown headers
+    if(ln.charAt(0)==='#'){continue;}
+    // Skip meta lines
+    if(/^(Agent \d|AGENT \d|Eyes Only|Classification|Principals? Only|For:|Prepared for|Principal Eyes)/i.test(ln))continue;
+    // Skip HGI GLOBAL lines
+    if(/HGI GLOBAL/i.test(ln)&&ln.length<120)continue;
+    // Skip separator lines
+    if(/^[\-=\*]{3,}$/.test(ln))continue;
+    // This line has real content
+    pastHeaders=true;
+    out.push(ln);
   }
-  
-  // Latest agent activity
-  var recent = S.memories.slice(0, 6);
-  if (recent.length > 0) {
-    html += '<div class="card">';
-    html += '<div class="card-header"><span class="card-title">LATEST INTEL</span><span class="card-badge">' + timeAgo(recent[0].created_at) + '</span></div>';
-    recent.forEach(function(m) {
-      html += feedItem(m);
+  var result=out.join(' ').replace(/\s+/g,' ').trim();
+  // Strip markdown bold
+  result=result.replace(/\*\*/g,'');
+  // Strip leading blockquote markers
+  result=result.replace(/^>\s*/,'');
+  // Strip markdown table separators
+  result=result.replace(/\|[\s\-]+\|[\s\-|]+\|/g,'');
+  // Strip AGENT numbering (uppercase variant)
+  result=result.replace(/AGENT \d+\s*[>|]\s*/g,'');
+  // Strip "Classification:" prefix that survived
+  result=result.replace(/^Classification:\s*/i,'');
+  // Strip names
+  result=result.replace(/Christopher Oney/gi,'President').replace(/Larry Oney/gi,'Chairman')
+    .replace(/Lou Resweber/gi,'CEO').replace(/Candy Dottolo/gi,'CAO')
+    .replace(/Dillon Truax/gi,'VP').replace(/Geoffrey Brien/gi,'[REMOVED]')
+    .replace(/Vanessa James/gi,'SVP Claims').replace(/Chris Feduccia/gi,'SME');
+  return result;
+}
+
+function safeDays(dueDate){
+  if(!dueDate)return null;
+  var d=new Date(dueDate);
+  if(isNaN(d.getTime()))return null;
+  return Math.ceil((d-Date.now())/86400000);
+}
+
+function oppTitle(id){
+  return S.oppTitles[id]||((id||'').slice(0,30));
+}
+
+// === COP ===
+function renderCOP(){
+  var st=S.status||{},pipe=st.pipeline||{},intel=st.intelligence||{},h=S.health||{};
+  var urgent=S.pipeline.filter(function(o){var d=safeDays(o.due_date);return d!==null&&d>0&&d<=14;}).sort(function(a,b){return new Date(a.due_date)-new Date(b.due_date);});
+  var html='<div class="stats">';
+  html+=stat(pipe.total_active||S.pipeline.length,'PIPELINE','cyan');
+  html+=stat(h.agents_active||29,'AGENTS','gold');
+  html+=stat(intel.organism_memories||'—','MEMORIES','cyan');
+  html+=stat(pipe.avg_opi||'—','AVG OPI','green');
+  html+='</div>';
+  if(urgent.length>0){
+    html+='<div class="card"><div class="card-header"><span class="card-title">UPCOMING DEADLINES</span><span class="card-badge">'+urgent.length+' within 14d</span></div>';
+    urgent.forEach(function(o){
+      var days=safeDays(o.due_date);
+      var color=days<=5?'var(--red)':days<=10?'var(--amber)':'var(--cyan)';
+      html+='<div class="pipe-item" data-id="'+o.id+'"><div class="pipe-opi" style="color:'+color+';font-size:16px">'+days+'d</div>';
+      html+='<div class="pipe-info"><div class="pipe-title">'+esc((o.title||'').slice(0,50))+'</div>';
+      html+='<div class="pipe-meta"><span>'+esc(o.agency||'')+'</span><span>OPI '+o.opi_score+'</span></div></div></div>';
     });
-    html += '</div>';
+    html+='</div>';
   }
-  
-  // Quick actions
-  html += '<div class="card">';
-  html += '<div class="card-header"><span class="card-title">ACTIONS</span></div>';
-  html += '<div class="actions">';
-  html += '<div class="btn primary" onclick="triggerCycle()">TRIGGER CYCLE</div>';
-  html += '<div class="btn" onclick="loadExecBrief()">EXEC BRIEF</div>';
-  html += '<div class="btn" onclick="loadAll()">REFRESH</div>';
-  html += '<div class="btn" onclick="showLogs()">LOGS</div>';
-  html += '</div></div>';
-  
+  var recent=S.memories.slice(0,8);
+  if(recent.length>0){
+    html+='<div class="card"><div class="card-header"><span class="card-title">LATEST INTEL</span><span class="card-badge">'+timeAgo(recent[0].created_at)+'</span></div>';
+    recent.forEach(function(m){html+=feedItem(m);});
+    html+='</div>';
+  }
+  html+='<div class="card"><div class="card-header"><span class="card-title">ACTIONS</span></div>';
+  html+='<div class="actions">';
+  html+='<div class="btn primary" onclick="triggerCycle()">TRIGGER CYCLE</div>';
+  html+='<div class="btn" onclick="loadExecBrief()">EXEC BRIEF</div>';
+  html+='<div class="btn" onclick="loadAll()">REFRESH</div>';
+  html+='<div class="btn" onclick="showLogs()">CYCLE HISTORY</div>';
+  html+='</div></div>';
   return html;
 }
 
 // === PIPELINE ===
-function renderPipeline() {
-  if (S.detail) return renderDetail();
-  var html = '<div class="card">';
-  html += '<div class="card-header"><span class="card-title">ACTIVE PIPELINE</span><span class="card-badge">' + S.pipeline.length + ' opps</span></div>';
-  S.pipeline.forEach(function(o) {
-    var opiClass = (o.opi_score||0) >= 90 ? 'high' : (o.opi_score||0) >= 80 ? 'mid' : 'low';
-    var stageClass = 'stage-' + (o.stage||'identified');
-    var days = o.due_date ? Math.ceil((new Date(o.due_date)-Date.now())/86400000) : null;
-    html += '<div class="pipe-item" data-id="' + o.id + '">';
-    html += '<div class="pipe-opi ' + opiClass + '">' + (o.opi_score||'?') + '</div>';
-    html += '<div class="pipe-info"><div class="pipe-title">' + esc((o.title||'').slice(0,55)) + '</div>';
-    html += '<div class="pipe-meta"><span>' + esc(o.agency||'') + '</span>';
-    if (days !== null) html += '<span>' + days + 'd</span>';
-    html += '</div></div>';
-    html += '<div class="pipe-stage ' + stageClass + '">' + (o.stage||'identified').toUpperCase() + '</div>';
-    html += '</div>';
+function renderPipeline(){
+  var html='<div class="card"><div class="card-header"><span class="card-title">ACTIVE PIPELINE</span><span class="card-badge">'+S.pipeline.length+' opps</span></div>';
+  S.pipeline.forEach(function(o){
+    var opiClass=(o.opi_score||0)>=90?'high':(o.opi_score||0)>=80?'mid':'low';
+    var stageClass='stage-'+(o.stage||'identified');
+    var days=safeDays(o.due_date);
+    html+='<div class="pipe-item" data-id="'+o.id+'"><div class="pipe-opi '+opiClass+'">'+(o.opi_score||'?')+'</div>';
+    html+='<div class="pipe-info"><div class="pipe-title">'+esc((o.title||'').slice(0,55))+'</div>';
+    html+='<div class="pipe-meta"><span>'+esc(o.agency||'')+'</span>';
+    if(days!==null&&days>0)html+='<span>'+days+'d</span>';
+    html+='</div></div>';
+    html+='<div class="pipe-stage '+stageClass+'">'+(o.stage||'identified').toUpperCase()+'</div></div>';
   });
-  
-  // Outcomes
-  var outcomes = (S.pipeline || []).concat([]); // placeholder
-  
-  html += '</div>';
+  html+='</div>';
   return html;
 }
 
 // === FEED ===
-function renderFeed() {
-  var html = '<div class="card">';
-  html += '<div class="card-header"><span class="card-title">AGENT FEED</span><span class="card-badge">' + S.memories.length + ' recent</span></div>';
-  S.memories.slice(0, 20).forEach(function(m) {
-    html += feedItem(m);
-  });
-  html += '</div>';
+function renderFeed(){
+  var html='<div class="card"><div class="card-header"><span class="card-title">AGENT FEED</span><span class="card-badge">'+S.memories.length+' recent</span></div>';
+  S.memories.slice(0,25).forEach(function(m){html+=feedItem(m);});
+  html+='</div>';
   return html;
 }
 
 // === AGENTS ===
-function renderAgents() {
-  var st = S.status || {};
-  var agents = st.agents || {};
-  
-  var html = '<div class="card"><div class="card-header"><span class="card-title">PER-OPPORTUNITY</span><span class="card-badge">' + ((agents.per_opp||[]).length) + '</span></div>';
-  html += '<div class="agent-grid">';
-  (agents.per_opp || []).forEach(function(a) {
-    html += agentCard(a, 'per-opp', lastActivity(a));
-  });
-  html += '</div></div>';
-  
-  html += '<div class="card"><div class="card-header"><span class="card-title">GATED</span><span class="card-badge">' + ((agents.gated||[]).length) + '</span></div>';
-  html += '<div class="agent-grid">';
-  (agents.gated || []).forEach(function(a) {
-    html += agentCard(a, 'gated', lastActivity(a));
-  });
-  html += '</div></div>';
-  
-  html += '<div class="card"><div class="card-header"><span class="card-title">SYSTEM CORE</span><span class="card-badge">' + ((agents.system_core||[]).length) + '</span></div>';
-  html += '<div class="agent-grid">';
-  (agents.system_core || []).forEach(function(a) {
-    html += agentCard(a, 'core', lastActivity(a));
-  });
-  html += '</div></div>';
-  
-  html += '<div class="card"><div class="card-header"><span class="card-title">INTELLIGENCE</span><span class="card-badge">' + ((agents.system_intel||[]).length) + '</span></div>';
-  html += '<div class="agent-grid">';
-  (agents.system_intel || []).forEach(function(a) {
-    html += agentCard(a, 'intel', lastActivity(a));
-  });
-  html += '</div></div>';
-  
+function renderAgents(){
+  var st=S.status||{},agents=st.agents||{};
+  var html='';
+  html+=agentSection('PER-OPPORTUNITY',agents.per_opp||[],'per-opp');
+  html+=agentSection('GATED',agents.gated||[],'gated');
+  html+=agentSection('SYSTEM CORE',agents.system_core||[],'core');
+  html+=agentSection('INTELLIGENCE',agents.system_intel||[],'intel');
+  return html;
+}
+function agentSection(title,list,type){
+  var html='<div class="card"><div class="card-header"><span class="card-title">'+title+'</span><span class="card-badge">'+list.length+'</span></div><div class="agent-grid">';
+  list.forEach(function(a){html+=agentCard(a,type);});
+  html+='</div></div>';
   return html;
 }
 
 // === INTEL ===
-function renderIntel() {
-  var st = S.status || {};
-  var intel = st.intelligence || {};
-  var out = st.outcomes || {};
-  
-  var html = '<div class="card"><div class="card-header"><span class="card-title">INTELLIGENCE DATABASE</span></div>';
-  html += intelRow('Organism Memories', intel.organism_memories);
-  html += intelRow('Competitive Intel', intel.competitive_intelligence);
-  html += intelRow('Contacts', intel.relationship_contacts);
-  html += intelRow('Disaster Alerts', intel.disaster_alerts);
-  html += intelRow('Budget Cycles', intel.budget_cycles);
-  html += intelRow('Recompete Tracker', intel.recompete_tracker);
-  html += intelRow('Regulatory Changes', intel.regulatory_changes);
-  html += intelRow('Teaming Partners', intel.teaming_partners);
-  html += intelRow('Agency Profiles', intel.agency_profiles);
-  html += intelRow('Analytics', intel.pipeline_analytics);
-  html += '</div>';
-  
-  html += '<div class="card"><div class="card-header"><span class="card-title">OUTCOMES</span></div>';
-  html += intelRow('Total', out.total);
-  html += intelRow('Wins', out.wins);
-  html += intelRow('Losses', out.losses);
-  html += intelRow('No-Bids', out.no_bids);
-  html += '</div>';
-  
+function renderIntel(){
+  var st=S.status||{},intel=st.intelligence||{},out=st.outcomes||{};
+  var html='<div class="card"><div class="card-header"><span class="card-title">INTELLIGENCE DATABASE</span></div>';
+  html+=intelRow('Organism Memories',intel.organism_memories);
+  html+=intelRow('Competitive Intel',intel.competitive_intelligence);
+  html+=intelRow('Contacts',intel.relationship_contacts);
+  html+=intelRow('Disaster Alerts',intel.disaster_alerts);
+  html+=intelRow('Budget Cycles',intel.budget_cycles);
+  html+=intelRow('Recompete Tracker',intel.recompete_tracker);
+  html+=intelRow('Regulatory Changes',intel.regulatory_changes);
+  html+=intelRow('Teaming Partners',intel.teaming_partners);
+  html+=intelRow('Agency Profiles',intel.agency_profiles);
+  html+=intelRow('Analytics',intel.pipeline_analytics);
+  html+='</div>';
+  html+='<div class="card"><div class="card-header"><span class="card-title">OUTCOMES</span></div>';
+  html+=intelRow('Total',out.total);html+=intelRow('Wins',out.wins);html+=intelRow('Losses',out.losses);html+=intelRow('No-Bids',out.no_bids);
+  html+='</div>';
   return html;
 }
 
-// === DETAIL VIEW ===
-function renderDetail() {
-  var o = S.detail;
-  if (!o) return renderPipeline();
-  var days = o.due_date ? Math.ceil((new Date(o.due_date)-Date.now())/86400000) : null;
-  
-  var html = '<div class="detail-back" onclick="S.detail=null;renderTab()">← PIPELINE</div>';
-  html += '<div class="pipe-opi ' + ((o.opi_score||0)>=90?'high':(o.opi_score||0)>=80?'mid':'low') + '" style="font-size:32px;margin-bottom:8px">' + (o.opi_score||'?') + '</div>';
-  html += '<div class="detail-title">' + esc(o.title||'') + '</div>';
-  html += '<div class="detail-agency">' + esc(o.agency||'') + (days !== null ? ' • ' + days + ' days' : '') + ' • ' + (o.stage||'identified').toUpperCase() + '</div>';
-  
-  if (o.scope_analysis) {
-    html += '<div class="detail-section"><div class="detail-section-title">SCOPE ANALYSIS</div>';
-    html += '<div class="detail-content">' + esc((o.scope_analysis||'').slice(0,2000)) + '</div></div>';
-  }
-  if (o.research_brief) {
-    html += '<div class="detail-section"><div class="detail-section-title">RESEARCH BRIEF</div>';
-    html += '<div class="detail-content">' + esc((o.research_brief||'').slice(0,2000)) + '</div></div>';
-  }
-  if (o.financial_analysis) {
-    html += '<div class="detail-section"><div class="detail-section-title">FINANCIAL ANALYSIS</div>';
-    html += '<div class="detail-content">' + esc((o.financial_analysis||'').slice(0,2000)) + '</div></div>';
-  }
-  if (o.capture_action) {
-    html += '<div class="detail-section"><div class="detail-section-title">CAPTURE ACTION</div>';
-    html += '<div class="detail-content">' + esc((o.capture_action||'').slice(0,2000)) + '</div></div>';
-  }
-  
-  html += '<div class="actions" style="margin-top:16px">';
-  html += '<div class="btn primary" onclick="produceProposal(\'' + o.id + '\')">PRODUCE PROPOSAL</div>';
-  html += '<div class="btn" onclick="complianceCheck(\'' + o.id + '\')">COMPLIANCE CHECK</div>';
-  html += '</div>';
-  
+// === DETAIL ===
+function renderDetail(){
+  var o=S.detail;if(!o)return renderPipeline();
+  var days=safeDays(o.due_date);
+  var html='<div class="detail-back" onclick="S.detail=null;renderTab()">← PIPELINE</div>';
+  html+='<div class="pipe-opi '+((o.opi_score||0)>=90?'high':(o.opi_score||0)>=80?'mid':'low')+'" style="font-size:32px;margin-bottom:8px">'+(o.opi_score||'?')+'</div>';
+  html+='<div class="detail-title">'+esc(o.title||'')+'</div>';
+  html+='<div class="detail-agency">'+esc(o.agency||'')+(days!==null&&days>0?' • '+days+' days':'')+ ' • '+(o.stage||'identified').toUpperCase()+'</div>';
+  var sections=[['SCOPE ANALYSIS','scope_analysis'],['RESEARCH BRIEF','research_brief'],['FINANCIAL ANALYSIS','financial_analysis'],['CAPTURE ACTION','capture_action']];
+  sections.forEach(function(s){
+    var val=o[s[1]];
+    if(val&&val.length>50){
+      html+='<div class="detail-section"><div class="detail-section-title">'+s[0]+'</div>';
+      html+='<div class="detail-content">'+esc(cleanObs(val.slice(0,3000)))+'</div></div>';
+    }
+  });
+  html+='<div class="actions" style="margin-top:16px">';
+  html+='<div class="btn primary" onclick="produceProposal(\''+o.id+'\')">PRODUCE PROPOSAL</div>';
+  html+='<div class="btn" onclick="complianceCheck(\''+o.id+'\')">COMPLIANCE CHECK</div></div>';
   return html;
 }
 
 // === HELPERS ===
-function stat(val, label, colorClass) {
-  return '<div class="stat"><div class="stat-value ' + (colorClass||'') + '">' + (val||'—') + '</div><div class="stat-label">' + label + '</div></div>';
-}
+function stat(val,label,cc){return '<div class="stat"><div class="stat-value '+(cc||'')+'">'+(val!=null?val:'—')+'</div><div class="stat-label">'+label+'</div></div>';}
 
-function feedItem(m) {
-  var agentName = (m.agent||'unknown').replace(/_/g,' ');
-  var obs = cleanObs((m.observation||'')).slice(0,200);
-  var html = '<div class="feed-item">';
-  html += '<div class="feed-header"><span class="feed-agent">' + esc(agentName) + '</span>';
-  html += '<span class="feed-time">' + timeAgo(m.created_at) + '</span></div>';
-  html += '<div class="feed-text">' + esc(obs) + '</div>';
-  if (m.opportunity_id) html += '<div class="feed-opp">' + esc((m.opportunity_id||'').slice(0,40)) + '</div>';
-  html += '</div>';
+function feedItem(m){
+  var agentName=(m.agent||'unknown').replace(/_/g,' ');
+  var obs=cleanObs((m.observation||'')).slice(0,140);
+  var oppName=m.opportunity_id?oppTitle(m.opportunity_id):'';
+  var html='<div class="feed-item"><div class="feed-header"><span class="feed-agent">'+esc(agentName)+'</span>';
+  if(oppName)html+='<span class="feed-opp-name">'+esc(oppName)+'</span>';
+  html+='<span class="feed-time">'+timeAgo(m.created_at)+'</span></div>';
+  html+='<div class="feed-text">'+esc(obs)+'</div></div>';
   return html;
 }
 
-function agentCard(name, type, lastTime) {
-  var display = name.replace(/_/g, ' ').replace(/agent$/, '').trim();
-  var typeLabel = type === 'per-opp' ? 'PER-OPP' : type === 'gated' ? 'GATED' : type === 'core' ? 'CORE' : 'INTEL';
-  return '<div class="agent-card ' + type + '"><div class="agent-name">' + esc(display) + '</div><div class="agent-type">' + typeLabel + '</div>' + (lastTime ? '<div class="agent-last">' + lastTime + '</div>' : '') + '</div>';
+function agentCard(name,type){
+  var display=name.replace(/_/g,' ').replace(/agent$/,'').replace(/_agent$/,'').trim();
+  var typeLabel=type==='per-opp'?'PER-OPP':type==='gated'?'GATED':type==='core'?'CORE':'INTEL';
+  var lastTime=lastActivity(name);
+  return '<div class="agent-card '+type+'"><div class="agent-name">'+esc(display)+'</div><div class="agent-type">'+typeLabel+'</div>'+(lastTime?'<div class="agent-last">'+lastTime+'</div>':'')+'</div>';
 }
 
-function lastActivity(agentName) {
-  var found = S.memories.find(function(m){ return m.agent === agentName; });
-  return found ? timeAgo(found.created_at) : '';
+function lastActivity(agentName){
+  // Try exact match first, then common variations
+  var found=S.memories.find(function(m){
+    return m.agent===agentName||m.agent===agentName.replace(/_agent$/,'');
+  });
+  return found?timeAgo(found.created_at):'';
 }
 
-function intelRow(label, value) {
-  return '<div class="intel-row"><span class="intel-label">' + label + '</span><span class="intel-value">' + (value != null ? value : '—') + '</span></div>';
-}
-
-function timeAgo(ts) {
-  if (!ts) return '';
-  var ms = Date.now() - new Date(ts).getTime();
-  if (ms < 60000) return 'now';
-  if (ms < 3600000) return Math.floor(ms/60000) + 'm';
-  if (ms < 86400000) return Math.floor(ms/3600000) + 'h';
-  return Math.floor(ms/86400000) + 'd';
-}
-
-function cleanObs(text) {
-  if (!text) return '';
-  // Strip markdown headers and formatting
-  text = text.replace(/^#{1,4}\s*/gm, '').replace(/\*\*/g, '').replace(/\*([^*]+)\*/g, '$1');
-  // Strip names (privacy)
-  text = text.replace(/Christopher Oney/gi, 'President').replace(/Larry Oney/gi, 'Chairman').replace(/Lou Resweber/gi, 'CEO').replace(/Candy Dottolo/gi, 'CAO').replace(/Dillon Truax/gi, 'VP').replace(/Geoffrey Brien/gi, '[REMOVED]').replace(/Vanessa James/gi, 'SVP Claims').replace(/Chris Feduccia/gi, 'SME');
-  return text;
-}
-
-function esc(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+function intelRow(label,value){return '<div class="intel-row"><span class="intel-label">'+label+'</span><span class="intel-value">'+(value!=null?value:'—')+'</span></div>';}
+function timeAgo(ts){if(!ts)return '';var ms=Date.now()-new Date(ts).getTime();if(ms<60000)return 'now';if(ms<3600000)return Math.floor(ms/60000)+'m';if(ms<86400000)return Math.floor(ms/3600000)+'h';return Math.floor(ms/86400000)+'d';}
+function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML;}
 
 // === ACTIONS ===
-function bindEvents() {
-  document.querySelectorAll('.pipe-item[data-id]').forEach(function(el) {
-    el.addEventListener('click', function() {
-      var id = el.dataset.id;
-      loadDetail(id);
-    });
+function bindEvents(){
+  document.querySelectorAll('.pipe-item[data-id]').forEach(function(el){
+    el.addEventListener('click',function(){loadDetail(el.dataset.id);});
   });
 }
 
-async function loadDetail(id) {
-  var c = document.getElementById('content');
-  c.innerHTML = '<div class="loading">LOADING INTEL</div>';
-  var data = await api('/api/opportunity-detail?id=' + encodeURIComponent(id));
-  if (data) {
-    S.detail = data;
-    S.tab = 'pipeline';
-    document.querySelectorAll('.tab').forEach(function(t){ t.classList.toggle('active', t.dataset.tab==='pipeline'); });
-    renderTab();
+async function loadDetail(id){
+  // First show what we have from pipeline
+  var fromPipeline=S.pipeline.find(function(o){return o.id===id;});
+  if(fromPipeline){S.detail=fromPipeline;renderTab();}
+  // Then try to get enriched data
+  var data=await api('/api/opportunity-detail?id='+encodeURIComponent(id));
+  if(data){S.detail=data;renderTab();}
+  else if(!fromPipeline){
+    document.getElementById('content').innerHTML='<div class="detail-back" onclick="S.detail=null;renderTab()">← PIPELINE</div><div class="card"><div class="card-title">Could not load details</div></div>';
   }
 }
 
-async function triggerCycle() {
-  var btn = event.target;
-  btn.textContent = 'RUNNING...';
-  btn.style.color = 'var(--amber)';
-  await api('/api/trigger');
-  btn.textContent = 'TRIGGERED';
-  btn.style.color = 'var(--green)';
-  setTimeout(function(){ loadAll(); }, 3000);
+async function triggerCycle(){
+  var btn=event.target;btn.textContent='RUNNING...';btn.style.color='var(--amber)';
+  await api('/api/trigger');btn.textContent='TRIGGERED';btn.style.color='var(--green)';
+  setTimeout(function(){loadAll();},3000);
 }
 
-async function loadExecBrief() {
-  var c = document.getElementById('content');
-  c.innerHTML = '<div class="loading">GENERATING BRIEF</div>';
-  var data = await api('/api/exec-brief');
-  if (data) {
-    var html = '<div class="card"><div class="card-header"><span class="card-title">EXECUTIVE BRIEF</span><span class="card-badge">' + new Date().toLocaleDateString() + '</span></div>';
-    html += '<div class="detail-content">' + esc(JSON.stringify(data, null, 2)) + '</div></div>';
-    c.innerHTML = html;
-  }
+async function loadExecBrief(){
+  var c=document.getElementById('content');c.innerHTML='<div class="loading">GENERATING BRIEF</div>';
+  var data=await api('/api/exec-brief');
+  if(data){
+    var html='<div class="detail-back" onclick="S.tab=\'cop\';renderTab()">← COMMAND</div>';
+    html+='<div class="card"><div class="card-header"><span class="card-title">EXECUTIVE BRIEF</span><span class="card-badge">'+new Date().toLocaleDateString()+'</span></div>';
+    // Format nicely instead of raw JSON
+    if(data.pipeline_summary)html+='<div class="detail-section"><div class="detail-section-title">PIPELINE</div><div class="detail-content">'+data.pipeline_summary.total_active+' active | '+data.pipeline_summary.pursuing+' pursuing | '+data.pipeline_summary.submitted+' submitted</div></div>';
+    if(data.alerts&&data.alerts.length>0){html+='<div class="detail-section"><div class="detail-section-title">ALERTS</div>';data.alerts.forEach(function(a){html+='<div class="feed-text" style="margin-bottom:6px">'+esc(a.type+': '+a.title+(a.days_remaining?' ('+a.days_remaining+'d)':''))+'</div>';});html+='</div>';}
+    if(data.recent_intel&&data.recent_intel.length>0){html+='<div class="detail-section"><div class="detail-section-title">RECENT INTEL</div>';data.recent_intel.forEach(function(i){html+='<div class="feed-text" style="margin-bottom:6px">'+esc((i.agent||'')+': '+(i.summary||'').slice(0,200))+'</div>';});html+='</div>';}
+    html+='</div>';c.innerHTML=html;
+  }else{c.innerHTML='<div class="card"><div class="card-title">Could not generate brief</div></div>';}
 }
 
-async function showLogs() {
-  var c = document.getElementById('content');
-  c.innerHTML = '<div class="loading">LOADING LOGS</div>';
-  var data = await api('/api/cycle-history');
-  if (data && data.cycles) {
-    var html = '<div class="card"><div class="card-header"><span class="card-title">CYCLE HISTORY</span><span class="card-badge">' + data.total_cycles + ' runs</span></div>';
-    data.cycles.forEach(function(cy) {
-      html += '<div class="feed-item"><div class="feed-header"><span class="feed-agent">' + (cy.trigger||'?') + '</span><span class="feed-time">' + timeAgo(cy.timestamp) + '</span></div>';
-      html += '<div class="feed-text">' + (cy.agents_fired||0) + ' agents • ' + (cy.opps_analyzed||0) + ' opps • ' + cy.mode + (cy.zero_cost?' • $0':'') + '</div></div>';
+async function showLogs(){
+  var c=document.getElementById('content');c.innerHTML='<div class="loading">LOADING</div>';
+  var data=await api('/api/cycle-history');
+  if(data&&data.cycles){
+    var html='<div class="detail-back" onclick="S.tab=\'cop\';renderTab()">← COMMAND</div>';
+    html+='<div class="card"><div class="card-header"><span class="card-title">CYCLE HISTORY</span><span class="card-badge">'+data.total_cycles+' runs</span></div>';
+    data.cycles.forEach(function(cy){
+      html+='<div class="feed-item"><div class="feed-header"><span class="feed-agent">'+esc(cy.trigger||'?')+'</span><span class="feed-time">'+timeAgo(cy.timestamp)+'</span></div>';
+      html+='<div class="feed-text">'+(cy.agents_fired||0)+' agents • '+(cy.opps_analyzed||0)+' opps • '+cy.mode+(cy.zero_cost?' • $0':'')+'</div></div>';
     });
-    html += '</div>';
-    c.innerHTML = html;
+    html+='</div>';c.innerHTML=html;
   }
 }
 
-async function produceProposal(id) {
-  event.target.textContent = 'STARTING...';
-  event.target.style.color = 'var(--amber)';
-  await fetch(BASE + '/api/produce-proposal?id=' + encodeURIComponent(id), {method:'POST'});
-  event.target.textContent = 'RUNNING (check back in ~5min)';
-  event.target.style.color = 'var(--green)';
-}
+async function produceProposal(id){event.target.textContent='STARTING...';event.target.style.color='var(--amber)';await fetch(BASE+'/api/produce-proposal?id='+encodeURIComponent(id),{method:'POST'});event.target.textContent='RUNNING (~5min)';event.target.style.color='var(--green)';}
+async function complianceCheck(id){var c=document.getElementById('content');c.innerHTML='<div class="loading">CHECKING COMPLIANCE</div>';var data=await api('/api/compliance-check?id='+encodeURIComponent(id));if(data){var html='<div class="detail-back" onclick="S.detail=null;renderTab()">← BACK</div><div class="card"><div class="card-header"><span class="card-title">COMPLIANCE CHECK</span></div><div class="detail-content">'+esc(JSON.stringify(data,null,2))+'</div></div>';c.innerHTML=html;}}
 
-async function complianceCheck(id) {
-  var c = document.getElementById('content');
-  c.innerHTML = '<div class="loading">RUNNING COMPLIANCE CHECK</div>';
-  var data = await api('/api/compliance-check?id=' + encodeURIComponent(id));
-  if (data) {
-    var html = '<div class="detail-back" onclick="S.detail=null;renderTab()">← BACK</div>';
-    html += '<div class="card"><div class="card-header"><span class="card-title">COMPLIANCE CHECK</span></div>';
-    html += '<div class="detail-content">' + esc(JSON.stringify(data, null, 2)) + '</div></div>';
-    c.innerHTML = html;
-  }
-}
-
-// === INIT ===
 loadAll();
-setInterval(loadAll, 120000); // refresh every 2 min
+setInterval(loadAll,120000);
 </script>
 </body>
 </html>
