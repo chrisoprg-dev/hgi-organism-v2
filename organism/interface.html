@@ -216,7 +216,7 @@ function cleanObs(text){
   result=result.replace(/^Classification:\s*/i,'');
   // Strip names
   result=result.replace(/Christopher\s+J\.?\s*Oney/gi,'President').replace(/Christopher Oney/gi,'President').replace(/Larry Oney/gi,'Chairman')
-    .replace(/Louis?\s+Resweber/gi,'CEO').replace(/Candy Dottolo/gi,'CAO')
+    .replace(/Lou(?:is)?\s+Resweber/gi,'CEO').replace(/Candy Dottolo/gi,'CAO')
     .replace(/Dillon Truax/gi,'VP').replace(/Geoffrey Brien/gi,'[REMOVED]')
     .replace(/Vanessa James/gi,'SVP Claims').replace(/Chris Feduccia/gi,'SME');
   return result;
