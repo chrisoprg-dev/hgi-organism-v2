@@ -119,7 +119,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
   <div class="content" id="content"><div class="loading">INITIALIZING ORGANISM</div></div>
 </div>
 <script>
-var BASE='', S={health:null,pipeline:[],memories:[],status:null,detail:null,tab:'cop',oppTitles:{}};
+var BASE='', S={health:null,pipeline:[],memories:[],status:null,detail:null,tab:'cop',oppTitles:{},outcomes:[]};
 
 // V1 agent names to filter out
 var V1_SKIP=['v2_engine','v3_engine','v4_engine','oral_prep','brief_agent','opportunity_brief_agent',
@@ -129,9 +129,10 @@ var V1_SKIP=['v2_engine','v3_engine','v4_engine','oral_prep','brief_agent','oppo
 async function api(path){try{var r=await fetch(BASE+path);if(!r.ok)return null;return await r.json();}catch(e){return null;}}
 
 async function loadAll(){
-  var [h,p,m,s]=await Promise.all([api('/health'),api('/api/pipeline'),api('/api/memories'),api('/api/system-status')]);
+  var [h,p,m,s,la]=await Promise.all([api('/health'),api('/api/pipeline'),api('/api/memories'),api('/api/system-status'),api('/api/loss-analysis')]);
   S.health=h;
   S.pipeline=(p||[]).filter(function(o){return o.status==='active'&&(o.opi_score||0)>=60;}).sort(function(a,b){return(b.opi_score||0)-(a.opi_score||0);});
+  S.outcomes=(la&&la.recent_outcomes)?la.recent_outcomes:[];
   // Build opp title lookup
   S.oppTitles={};
   S.pipeline.forEach(function(o){S.oppTitles[o.id]=((o.title||'').length>40?(o.title||'').slice(0,37)+'...':o.title)||'';});
@@ -272,6 +273,7 @@ function renderCOP(){
 
 // === PIPELINE ===
 function renderPipeline(){
+  if(S.detail)return renderDetail();
   var html='<div class="card"><div class="card-header"><span class="card-title">ACTIVE PIPELINE</span><span class="card-badge">'+S.pipeline.length+' opps</span></div>';
   S.pipeline.forEach(function(o){
     var opiClass=(o.opi_score||0)>=90?'high':(o.opi_score||0)>=80?'mid':'low';
@@ -285,6 +287,19 @@ function renderPipeline(){
     html+='<div class="pipe-stage '+stageClass+'">'+(o.stage||'identified').toUpperCase()+'</div></div>';
   });
   html+='</div>';
+  // Outcomes
+  if(S.outcomes&&S.outcomes.length>0){
+    html+='<div class="card"><div class="card-header"><span class="card-title">OUTCOMES</span><span class="card-badge">'+S.outcomes.length+'</span></div>';
+    S.outcomes.forEach(function(o){
+      var icon=o.outcome==='won'?'✓':o.outcome==='lost'?'✗':'—';
+      var color=o.outcome==='won'?'var(--green)':o.outcome==='lost'?'var(--red)':'var(--dim)';
+      html+='<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.02)">';
+      html+='<div style="font-family:var(--font-display);font-size:16px;color:'+color+';min-width:24px;text-align:center">'+icon+'</div>';
+      html+='<div style="flex:1"><div style="font-size:12px;font-weight:600;color:var(--white)">'+esc((o.title||'').slice(0,50))+'</div>';
+      html+='<div style="font-family:var(--font-mono);font-size:9px;color:var(--dim)">'+esc(o.agency||'')+' • OPI '+(o.opi||o.opi_score||'?')+' • '+(o.outcome||'').toUpperCase()+'</div></div></div>';
+    });
+    html+='</div>';
+  }
   return html;
 }
 
