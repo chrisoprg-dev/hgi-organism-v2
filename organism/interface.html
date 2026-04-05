@@ -215,7 +215,7 @@ function cleanObs(text){
   // Strip "Classification:" prefix that survived
   result=result.replace(/^Classification:\s*/i,'');
   // Strip names
-  result=result.replace(/Christopher Oney/gi,'President').replace(/Larry Oney/gi,'Chairman')
+  result=result.replace(/Christopher\s+J\.?\s*Oney/gi,'President').replace(/Christopher Oney/gi,'President').replace(/Larry Oney/gi,'Chairman')
     .replace(/Lou Resweber/gi,'CEO').replace(/Candy Dottolo/gi,'CAO')
     .replace(/Dillon Truax/gi,'VP').replace(/Geoffrey Brien/gi,'[REMOVED]')
     .replace(/Vanessa James/gi,'SVP Claims').replace(/Chris Feduccia/gi,'SME');
@@ -338,22 +338,100 @@ function renderIntel(){
 function renderDetail(){
   var o=S.detail;if(!o)return renderPipeline();
   var days=safeDays(o.due_date);
+  var opiClass=(o.opi_score||0)>=90?'high':(o.opi_score||0)>=80?'mid':'low';
+  
   var html='<div class="detail-back" onclick="S.detail=null;renderTab()">← PIPELINE</div>';
-  html+='<div class="pipe-opi '+((o.opi_score||0)>=90?'high':(o.opi_score||0)>=80?'mid':'low')+'" style="font-size:32px;margin-bottom:8px">'+(o.opi_score||'?')+'</div>';
-  html+='<div class="detail-title">'+esc(o.title||'')+'</div>';
-  html+='<div class="detail-agency">'+esc(o.agency||'')+(days!==null&&days>0?' • '+days+' days':'')+ ' • '+(o.stage||'identified').toUpperCase()+'</div>';
-  var sections=[['SCOPE ANALYSIS','scope_analysis'],['RESEARCH BRIEF','research_brief'],['FINANCIAL ANALYSIS','financial_analysis'],['CAPTURE ACTION','capture_action']];
+  
+  // Hero card
+  html+='<div class="card" style="border-left:3px solid var(--'+(opiClass==='high'?'green':opiClass==='mid'?'cyan':'amber')+')">';
+  html+='<div style="display:flex;align-items:flex-start;gap:14px">';
+  html+='<div class="pipe-opi '+opiClass+'" style="font-size:36px;line-height:1">'+( o.opi_score||'?')+'</div>';
+  html+='<div style="flex:1"><div class="detail-title">'+esc(o.title||'')+'</div>';
+  html+='<div class="detail-agency">'+esc(o.agency||'')+'</div>';
+  html+='<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">';
+  html+='<span class="pipe-stage stage-'+(o.stage||'identified')+'">'+(o.stage||'identified').toUpperCase()+'</span>';
+  if(days!==null&&days>0){
+    var urgColor=days<=5?'red':days<=10?'amber':'cyan';
+    html+='<span class="pipe-stage" style="background:rgba(var(--'+urgColor+'-rgb,0),0.1);color:var(--'+urgColor+');border:1px solid rgba(var(--'+urgColor+'-rgb,0),0.2)">'+days+' DAYS</span>';
+  }
+  if(o.vertical)html+='<span class="pipe-stage" style="background:rgba(255,255,255,0.04);color:var(--dim);border:1px solid rgba(255,255,255,0.08)">'+esc(o.vertical).toUpperCase()+'</span>';
+  html+='</div>';
+  if(o.estimated_value)html+='<div style="font-family:var(--font-mono);font-size:10px;color:var(--gold);margin-top:6px">'+esc(o.estimated_value)+'</div>';
+  html+='</div></div></div>';
+  
+  // Quick stats
+  html+='<div class="stats" style="grid-template-columns:repeat(3,1fr)">';
+  html+=stat((o.scope_analysis||'').length>100?'✓':'—','SCOPE',((o.scope_analysis||'').length>100?'green':''));
+  html+=stat((o.research_brief||'').length>100?'✓':'—','RESEARCH',((o.research_brief||'').length>100?'green':''));
+  html+=stat((o.capture_action||'').length>100?'✓':'—','CAPTURE',((o.capture_action||'').length>100?'green':''));
+  html+='</div>';
+  
+  // Sections with collapsible content
+  var sections=[
+    ['CAPTURE STRATEGY','capture_action','What the organism recommends'],
+    ['SCOPE ANALYSIS','scope_analysis','What the RFP requires'],
+    ['COMPETITIVE INTEL','research_brief','Who we compete against'],
+    ['FINANCIAL ANALYSIS','financial_analysis','Pricing and contract value']
+  ];
   sections.forEach(function(s){
     var val=o[s[1]];
     if(val&&val.length>50){
-      html+='<div class="detail-section"><div class="detail-section-title">'+s[0]+'</div>';
-      html+='<div class="detail-content">'+esc(cleanObs(val.slice(0,3000)))+'</div></div>';
+      var cleaned=cleanObs(val);
+      // Extract first meaningful sentence for preview
+      var preview=cleaned.slice(0,150).replace(/\n/g,' ');
+      var dots=cleaned.length>150?'...':'';
+      html+='<div class="card detail-card" data-field="'+s[1]+'">';
+      html+='<div class="card-header" style="cursor:pointer" onclick="toggleSection(this)">';
+      html+='<span class="card-title">'+s[0]+'</span>';
+      html+='<span style="font-size:10px;color:var(--dim)">'+s[2]+'</span>';
+      html+='</div>';
+      html+='<div class="feed-text" style="-webkit-line-clamp:2;margin-bottom:8px;color:var(--text)">'+esc(preview+dots)+'</div>';
+      html+='<div class="detail-expand" style="display:none"><div class="detail-content">'+esc(cleaned.slice(0,4000))+'</div></div>';
+      html+='</div>';
     }
   });
-  html+='<div class="actions" style="margin-top:16px">';
+  
+  // Agent memories for this opp
+  var oppMems=S.memories.filter(function(m){return m.opportunity_id===o.id;});
+  if(oppMems.length>0){
+    html+='<div class="card"><div class="card-header"><span class="card-title">AGENT ACTIVITY</span><span class="card-badge">'+oppMems.length+'</span></div>';
+    oppMems.slice(0,6).forEach(function(m){html+=feedItem(m);});
+    html+='</div>';
+  }
+  
+  // Actions
+  html+='<div class="card"><div class="card-header"><span class="card-title">ACTIONS</span></div>';
+  html+='<div class="actions">';
   html+='<div class="btn primary" onclick="produceProposal(\''+o.id+'\')">PRODUCE PROPOSAL</div>';
-  html+='<div class="btn" onclick="complianceCheck(\''+o.id+'\')">COMPLIANCE CHECK</div></div>';
+  html+='<div class="btn" onclick="complianceCheck(\''+o.id+'\')">COMPLIANCE CHECK</div>';
+  if(o.source_url)html+='<div class="btn" onclick="window.open(\''+esc(o.source_url)+'\',\'_blank\')">SOURCE</div>';
+  html+='<div class="btn" onclick="loadOppMemories(\''+o.id+'\')">ALL MEMORIES</div>';
+  html+='</div></div>';
+  
   return html;
+}
+
+function toggleSection(header){
+  var expand=header.parentElement.querySelector('.detail-expand');
+  if(expand.style.display==='none'){expand.style.display='block';header.querySelector('.card-title').style.color='var(--cyan)';}
+  else{expand.style.display='none';header.querySelector('.card-title').style.color='';}
+}
+
+async function loadOppMemories(id){
+  var c=document.getElementById('content');
+  c.innerHTML='<div class="loading">LOADING MEMORIES</div>';
+  var data=await api('/api/opportunity-memories?id='+encodeURIComponent(id));
+  if(data&&data.length>0){
+    var html='<div class="detail-back" onclick="renderTab()">← BACK</div>';
+    html+='<div class="card"><div class="card-header"><span class="card-title">ALL MEMORIES</span><span class="card-badge">'+data.length+'</span></div>';
+    data.slice(0,30).forEach(function(m){
+      html+='<div class="feed-item"><div class="feed-header"><span class="feed-agent">'+esc((m.agent||'').replace(/_/g,' '))+'</span>';
+      html+='<span class="feed-time">'+timeAgo(m.created_at)+'</span></div>';
+      html+='<div class="feed-text" style="-webkit-line-clamp:4">'+esc(cleanObs((m.observation||'').slice(0,500)))+'</div></div>';
+    });
+    html+='</div>';
+    c.innerHTML=html;
+  }else{c.innerHTML='<div class="detail-back" onclick="renderTab()">← BACK</div><div class="card">No memories found</div>';}
 }
 
 // === HELPERS ===
@@ -417,15 +495,81 @@ async function triggerCycle(){
 async function loadExecBrief(){
   var c=document.getElementById('content');c.innerHTML='<div class="loading">GENERATING BRIEF</div>';
   var data=await api('/api/exec-brief');
-  if(data){
-    var html='<div class="detail-back" onclick="S.tab=\'cop\';renderTab()">← COMMAND</div>';
-    html+='<div class="card"><div class="card-header"><span class="card-title">EXECUTIVE BRIEF</span><span class="card-badge">'+new Date().toLocaleDateString()+'</span></div>';
-    // Format nicely instead of raw JSON
-    if(data.pipeline_summary)html+='<div class="detail-section"><div class="detail-section-title">PIPELINE</div><div class="detail-content">'+data.pipeline_summary.total_active+' active | '+data.pipeline_summary.pursuing+' pursuing | '+data.pipeline_summary.submitted+' submitted</div></div>';
-    if(data.alerts&&data.alerts.length>0){html+='<div class="detail-section"><div class="detail-section-title">ALERTS</div>';data.alerts.forEach(function(a){html+='<div class="feed-text" style="margin-bottom:6px">'+esc(a.type+': '+a.title+(a.days_remaining?' ('+a.days_remaining+'d)':''))+'</div>';});html+='</div>';}
-    if(data.recent_intel&&data.recent_intel.length>0){html+='<div class="detail-section"><div class="detail-section-title">RECENT INTEL</div>';data.recent_intel.forEach(function(i){html+='<div class="feed-text" style="margin-bottom:6px">'+esc((i.agent||'')+': '+(i.summary||'').slice(0,200))+'</div>';});html+='</div>';}
-    html+='</div>';c.innerHTML=html;
-  }else{c.innerHTML='<div class="card"><div class="card-title">Could not generate brief</div></div>';}
+  if(!data){c.innerHTML='<div class="card">Could not generate brief</div>';return;}
+  
+  var html='<div class="detail-back" onclick="S.tab=\'cop\';renderTab()">← COMMAND</div>';
+  var ps=data.pipeline_summary||{};
+  var ah=data.agent_health||{};
+  
+  // Pipeline summary stats
+  html+='<div class="card"><div class="card-header"><span class="card-title">EXECUTIVE BRIEF</span><span class="card-badge">'+new Date().toLocaleDateString()+'</span></div>';
+  html+='<div class="stats" style="grid-template-columns:repeat(3,1fr);margin-bottom:0">';
+  html+=stat(ps.total_active||0,'ACTIVE','cyan');
+  html+=stat(ps.pursuing||0,'PURSUING','green');
+  html+=stat(ps.identified||0,'IDENTIFIED','gold');
+  html+='</div></div>';
+  
+  // Alerts
+  var alerts=data.alerts||[];
+  if(alerts.length>0){
+    html+='<div class="card" style="border-left:3px solid var(--amber)"><div class="card-header"><span class="card-title">ALERTS</span><span class="card-badge" style="background:rgba(240,160,48,0.1);color:var(--amber);border-color:rgba(240,160,48,0.2)">'+alerts.length+'</span></div>';
+    alerts.forEach(function(a){
+      var icon=a.type==='deadline'?'⏰':a.type==='disaster'?'🌊':'⚠️';
+      var color=a.days_remaining&&a.days_remaining<=5?'var(--red)':a.days_remaining&&a.days_remaining<=14?'var(--amber)':'var(--cyan)';
+      html+='<div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.02);display:flex;align-items:center;gap:8px">';
+      html+='<span style="font-size:14px">'+icon+'</span>';
+      html+='<div style="flex:1"><div style="font-size:12px;color:var(--white)">'+esc((a.title||'').slice(0,60))+'</div>';
+      if(a.days_remaining)html+='<div style="font-family:var(--font-mono);font-size:10px;color:'+color+'">'+a.days_remaining+' days remaining • OPI '+(a.opi||'?')+'</div>';
+      html+='</div></div>';
+    });
+    html+='</div>';
+  }
+  
+  // Upcoming deadlines
+  var deadlines=data.upcoming_deadlines||[];
+  if(deadlines.length>0){
+    html+='<div class="card"><div class="card-header"><span class="card-title">UPCOMING DEADLINES</span></div>';
+    deadlines.forEach(function(d){
+      var color=(d.days_remaining||99)<=7?'var(--red)':(d.days_remaining||99)<=14?'var(--amber)':'var(--cyan)';
+      html+='<div class="pipe-item"><div class="pipe-opi" style="color:'+color+';font-size:16px">'+(d.days_remaining||'?')+'d</div>';
+      html+='<div class="pipe-info"><div class="pipe-title">'+esc((d.title||'').slice(0,50))+'</div>';
+      html+='<div class="pipe-meta"><span>OPI '+(d.opi||'?')+'</span><span>'+(d.stage||'').toUpperCase()+'</span></div></div></div>';
+    });
+    html+='</div>';
+  }
+  
+  // Awaiting award
+  var awaiting=data.awaiting_award||[];
+  if(awaiting.length>0){
+    html+='<div class="card"><div class="card-header"><span class="card-title">AWAITING AWARD</span></div>';
+    awaiting.forEach(function(a){
+      html+='<div style="padding:6px 0;font-size:12px;color:var(--text)">'+esc(a.title||'')+' <span style="color:var(--cyan);font-family:var(--font-mono);font-size:10px">OPI '+(a.opi||'?')+'</span></div>';
+    });
+    html+='</div>';
+  }
+  
+  // Recent intel (cleaned)
+  var intel=data.recent_intel||[];
+  if(intel.length>0){
+    html+='<div class="card"><div class="card-header"><span class="card-title">RECENT INTEL</span></div>';
+    intel.slice(0,6).forEach(function(i){
+      var cleaned=cleanObs((i.summary||'').slice(0,300));
+      if(cleaned.length<20)return;
+      html+='<div class="feed-item"><div class="feed-header"><span class="feed-agent">'+esc((i.agent||'').replace(/_/g,' '))+'</span>';
+      html+='<span class="feed-time">'+timeAgo(i.when)+'</span></div>';
+      html+='<div class="feed-text">'+esc(cleaned.slice(0,140))+'</div></div>';
+    });
+    html+='</div>';
+  }
+  
+  // System health
+  html+='<div class="card"><div class="card-header"><span class="card-title">SYSTEM</span></div>';
+  html+=intelRow('Version',ah.version||'?');
+  html+=intelRow('Active Agents',ah.active_agents||'?');
+  html+=intelRow('Last Cycle',ah.last_cycle?timeAgo(ah.last_cycle)+' ago':'—');
+  html+='</div>';
+  
+  c.innerHTML=html;
 }
 
 async function showLogs(){
