@@ -179,7 +179,11 @@ async function loadAll() {
   ]);
   S.health = h;
   S.pipeline = (p || []).filter(function(o){ return o.status === 'active' && (o.opi_score||0) >= 60; }).sort(function(a,b){ return (b.opi_score||0)-(a.opi_score||0); });
-  S.memories = (m || []).slice(0, 40);
+  S.memories = (m || []).filter(function(x){
+    // Filter out system session logs and disabled V1 agents
+    var skip = ['v2_engine','v3_engine','v4_engine','oral_prep','brief_agent','opportunity_brief_agent','post_award','mobile_notifications','exec_briefing_mode','unsolicited_agent'];
+    return skip.indexOf(x.agent) === -1;
+  }).slice(0, 40);
   S.status = s;
   updateTopbar();
   renderTab();
@@ -238,7 +242,8 @@ function renderCOP() {
   var pursuing = S.pipeline.filter(function(o){ return o.stage==='pursuing'; });
   var urgent = S.pipeline.filter(function(o){
     if (!o.due_date) return false;
-    return Math.ceil((new Date(o.due_date)-Date.now())/86400000) <= 14;
+    var days = Math.ceil((new Date(o.due_date)-Date.now())/86400000);
+    return days > 0 && days <= 14;
   }).sort(function(a,b){ return new Date(a.due_date)-new Date(b.due_date); });
   
   var html = '<div class="stats">';
@@ -433,7 +438,7 @@ function stat(val, label, colorClass) {
 
 function feedItem(m) {
   var agentName = (m.agent||'unknown').replace(/_/g,' ');
-  var obs = (m.observation||'').slice(0,200);
+  var obs = cleanObs((m.observation||'')).slice(0,200);
   var html = '<div class="feed-item">';
   html += '<div class="feed-header"><span class="feed-agent">' + esc(agentName) + '</span>';
   html += '<span class="feed-time">' + timeAgo(m.created_at) + '</span></div>';
@@ -465,6 +470,15 @@ function timeAgo(ts) {
   if (ms < 3600000) return Math.floor(ms/60000) + 'm';
   if (ms < 86400000) return Math.floor(ms/3600000) + 'h';
   return Math.floor(ms/86400000) + 'd';
+}
+
+function cleanObs(text) {
+  if (!text) return '';
+  // Strip markdown headers and formatting
+  text = text.replace(/^#{1,4}\s*/gm, '').replace(/\*\*/g, '').replace(/\*([^*]+)\*/g, '$1');
+  // Strip names (privacy)
+  text = text.replace(/Christopher Oney/gi, 'President').replace(/Larry Oney/gi, 'Chairman').replace(/Lou Resweber/gi, 'CEO').replace(/Candy Dottolo/gi, 'CAO').replace(/Dillon Truax/gi, 'VP').replace(/Geoffrey Brien/gi, '[REMOVED]').replace(/Vanessa James/gi, 'SVP Claims').replace(/Chris Feduccia/gi, 'SME');
+  return text;
 }
 
 function esc(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
