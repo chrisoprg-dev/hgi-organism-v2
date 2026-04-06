@@ -119,7 +119,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
   <div class="content" id="content"><div class="loading">INITIALIZING ORGANISM</div></div>
 </div>
 <script>
-var BASE='', S={health:null,pipeline:[],memories:[],status:null,detail:null,tab:'cop',oppTitles:{},outcomes:[],cycles:[],lossData:null};
+var BASE='', S={health:null,pipeline:[],memories:[],status:null,detail:null,tab:'cop',oppTitles:{},outcomes:[],cycles:[],lossData:null,feedFilter:'',huntStats:null};
 
 // V1 agent names to filter out
 var V1_SKIP=['v2_engine','v3_engine','v4_engine','oral_prep','brief_agent','opportunity_brief_agent',
@@ -129,12 +129,13 @@ var V1_SKIP=['v2_engine','v3_engine','v4_engine','oral_prep','brief_agent','oppo
 async function api(path){try{var r=await fetch(BASE+path);if(!r.ok)return null;return await r.json();}catch(e){return null;}}
 
 async function loadAll(){
-  var [h,p,m,s,la,ch]=await Promise.all([api('/health'),api('/api/pipeline'),api('/api/memories'),api('/api/system-status'),api('/api/loss-analysis'),api('/api/cycle-history')]);
+  var [h,p,m,s,la,ch,hs]=await Promise.all([api('/health'),api('/api/pipeline'),api('/api/memories'),api('/api/system-status'),api('/api/loss-analysis'),api('/api/cycle-history'),api('/api/hunt-stats')]);
   S.health=h;
   S.pipeline=(p||[]).filter(function(o){return o.status==='active'&&(o.opi_score||0)>=60;}).sort(function(a,b){return(b.opi_score||0)-(a.opi_score||0);});
   S.outcomes=(la&&la.recent_outcomes)?la.recent_outcomes:[];
   S.lossData=la||{};
   S.cycles=(ch&&ch.cycles)?ch.cycles:[];
+  S.huntStats=hs||[];
   // Build opp title lookup
   S.oppTitles={};
   S.pipeline.forEach(function(o){S.oppTitles[o.id]=((o.title||'').length>40?(o.title||'').slice(0,37)+'...':o.title)||'';});
@@ -246,6 +247,11 @@ function renderCOP(){
   html+=stat(intel.organism_memories||'—','MEMORIES','cyan');
   html+=stat(pipe.avg_opi||'—','AVG OPI','green');
   html+='</div>';
+  // Last cycle indicator
+  if(S.cycles.length>0){
+    var lc=S.cycles[0];var lcTime=lc.timestamp?timeAgo(lc.timestamp):'?';
+    html+='<div style="text-align:center;font-family:var(--font-mono);font-size:10px;color:var(--dim);padding:4px 0;margin-top:-4px">Last cycle: '+lcTime+' • '+(lc.agents_fired||0)+' agents • '+(lc.opps_analyzed||0)+' opps analyzed</div>';
+  }
   if(urgent.length>0){
     html+='<div class="card"><div class="card-header"><span class="card-title">UPCOMING DEADLINES</span><span class="card-badge">'+urgent.length+' within 14d</span></div>';
     urgent.forEach(function(o){
@@ -322,8 +328,12 @@ function renderPipeline(){
 
 // === FEED ===
 function renderFeed(){
-  var html='<div class="card"><div class="card-header"><span class="card-title">AGENT FEED</span><span class="card-badge">'+S.memories.length+' recent</span></div>';
-  S.memories.slice(0,25).forEach(function(m){html+=feedItem(m);});
+  var html='<div class="card" style="padding-bottom:0"><input type="text" id="feed-search" placeholder="Search observations..." value="'+esc(S.feedFilter)+'" style="width:100%;padding:8px 12px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:6px;color:var(--white);font-size:12px;font-family:var(--font-mono);outline:none;box-sizing:border-box;margin-bottom:8px"></div>';
+  var filtered=S.memories;
+  if(S.feedFilter){var q=S.feedFilter.toLowerCase();filtered=filtered.filter(function(m){return((m.observation||'')+(m.agent||'')).toLowerCase().indexOf(q)>=0;});}
+  html+='<div class="card"><div class="card-header"><span class="card-title">AGENT FEED</span><span class="card-badge">'+filtered.length+(S.feedFilter?' filtered':' recent')+'</span></div>';
+  filtered.slice(0,30).forEach(function(m){html+=feedItem(m);});
+  if(filtered.length===0)html+='<div style="padding:16px 0;color:var(--dim);font-size:12px;text-align:center">No matching observations</div>';
   html+='</div>';
   return html;
 }
@@ -390,6 +400,24 @@ function renderIntel(){
       html+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.03);font-size:11px">';
       html+='<span style="color:var(--white);text-transform:capitalize">'+esc(v)+'</span>';
       html+='<span style="color:var(--dim);font-family:var(--font-mono)">'+(d.wins||0)+'W / '+(d.losses||0)+'L / '+(d.no_bids||0)+'NB</span></div>';
+    });
+    html+='</div>';
+  }
+  // Source stats from hunt runs
+  if(S.huntStats&&S.huntStats.length>0){
+    var srcMap={};var totalNew=0;
+    S.huntStats.forEach(function(r){
+      var s=r.source||'?';
+      var label=s==='cron'?'Central Bidding':s.indexOf('sam')>=0?'SAM.gov':s.indexOf('grants')>=0?'Grants.gov':s.indexOf('alabama')>=0?'Alabama':s.indexOf('georgia')>=0?'Georgia':s.indexOf('event:')>=0?'Cascade':s.indexOf('apify')>=0?'Apify CB':s;
+      if(!srcMap[label])srcMap[label]={runs:0,newOpps:0};
+      srcMap[label].runs++;srcMap[label].newOpps+=(r.opportunities_new||0);
+      totalNew+=(r.opportunities_new||0);
+    });
+    html+='<div class="card"><div class="card-header"><span class="card-title">SOURCES</span><span class="card-badge">'+totalNew+' new opps</span></div>';
+    Object.keys(srcMap).sort(function(a,b){return srcMap[b].runs-srcMap[a].runs;}).forEach(function(k){
+      html+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.03);font-size:11px">';
+      html+='<span style="color:var(--white)">'+esc(k)+'</span>';
+      html+='<span style="color:var(--dim);font-family:var(--font-mono)">'+srcMap[k].runs+' runs'+(srcMap[k].newOpps?' • '+srcMap[k].newOpps+' new':'')+'</span></div>';
     });
     html+='</div>';
   }
@@ -543,6 +571,8 @@ function bindEvents(){
   document.querySelectorAll('.pipe-item[data-id]').forEach(function(el){
     el.addEventListener('click',function(){loadDetail(el.dataset.id);});
   });
+  var fsEl=document.getElementById('feed-search');
+  if(fsEl){fsEl.addEventListener('input',function(){S.feedFilter=this.value;var c=document.getElementById('content');c.innerHTML=renderFeed();bindEvents();this.focus();var el2=document.getElementById('feed-search');if(el2){el2.selectionStart=el2.selectionEnd=el2.value.length;}});}
 }
 
 async function loadDetail(id){
