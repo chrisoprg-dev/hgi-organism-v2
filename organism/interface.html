@@ -119,7 +119,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
   <div class="content" id="content"><div class="loading">INITIALIZING ORGANISM</div></div>
 </div>
 <script>
-var BASE='', S={health:null,pipeline:[],memories:[],status:null,detail:null,tab:'cop',oppTitles:{},outcomes:[]};
+var BASE='', S={health:null,pipeline:[],memories:[],status:null,detail:null,tab:'cop',oppTitles:{},outcomes:[],cycles:[],lossData:null};
 
 // V1 agent names to filter out
 var V1_SKIP=['v2_engine','v3_engine','v4_engine','oral_prep','brief_agent','opportunity_brief_agent',
@@ -129,10 +129,12 @@ var V1_SKIP=['v2_engine','v3_engine','v4_engine','oral_prep','brief_agent','oppo
 async function api(path){try{var r=await fetch(BASE+path);if(!r.ok)return null;return await r.json();}catch(e){return null;}}
 
 async function loadAll(){
-  var [h,p,m,s,la]=await Promise.all([api('/health'),api('/api/pipeline'),api('/api/memories'),api('/api/system-status'),api('/api/loss-analysis')]);
+  var [h,p,m,s,la,ch]=await Promise.all([api('/health'),api('/api/pipeline'),api('/api/memories'),api('/api/system-status'),api('/api/loss-analysis'),api('/api/cycle-history')]);
   S.health=h;
   S.pipeline=(p||[]).filter(function(o){return o.status==='active'&&(o.opi_score||0)>=60;}).sort(function(a,b){return(b.opi_score||0)-(a.opi_score||0);});
   S.outcomes=(la&&la.recent_outcomes)?la.recent_outcomes:[];
+  S.lossData=la||{};
+  S.cycles=(ch&&ch.cycles)?ch.cycles:[];
   // Build opp title lookup
   S.oppTitles={};
   S.pipeline.forEach(function(o){S.oppTitles[o.id]=((o.title||'').length>40?(o.title||'').slice(0,37)+'...':o.title)||'';});
@@ -268,6 +270,18 @@ function renderCOP(){
   html+='<div class="btn" onclick="loadAll()">REFRESH</div>';
   html+='<div class="btn" onclick="showLogs()">CYCLE HISTORY</div>';
   html+='</div></div>';
+  // System health card
+  var intel=st.intelligence||{};
+  html+='<div class="card"><div class="card-header"><span class="card-title">SYSTEM HEALTH</span><span class="card-badge">'+(h.version||'')+'</span></div>';
+  var totalIntel=(intel.competitive_intelligence||0)+(intel.relationship_contacts||0)+(intel.disaster_alerts||0)+(intel.budget_cycles||0)+(intel.recompete_tracker||0)+(intel.regulatory_changes||0)+(intel.teaming_partners||0)+(intel.agency_profiles||0)+(intel.pipeline_analytics||0);
+  html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11px">';
+  html+='<div style="color:var(--dim)">Memories</div><div style="color:var(--white);text-align:right;font-family:var(--font-mono)">'+(intel.organism_memories||'—')+'</div>';
+  html+='<div style="color:var(--dim)">Structured Intel</div><div style="color:var(--white);text-align:right;font-family:var(--font-mono)">'+totalIntel+'</div>';
+  html+='<div style="color:var(--dim)">Uptime</div><div style="color:var(--white);text-align:right;font-family:var(--font-mono)">'+(h.uptime_seconds>3600?Math.floor(h.uptime_seconds/3600)+'h '+Math.floor((h.uptime_seconds%3600)/60)+'m':Math.floor((h.uptime_seconds||0)/60)+'m')+'</div>';
+  html+='<div style="color:var(--dim)">Agents</div><div style="color:var(--white);text-align:right;font-family:var(--font-mono)">'+(h.agents_active||29)+'</div>';
+  html+='<div style="color:var(--dim)">Win Rate</div><div style="color:var(--white);text-align:right;font-family:var(--font-mono)">'+(S.lossData.win_rate_pct||0)+'%</div>';
+  html+='<div style="color:var(--dim)">Outcomes</div><div style="color:var(--white);text-align:right;font-family:var(--font-mono)">'+(S.lossData.total_outcomes||0)+' (W:'+((S.lossData.wins||0))+' L:'+((S.lossData.losses||0))+' NB:'+((S.lossData.no_bids||0))+')</div>';
+  html+='</div></div>';
   return html;
 }
 
@@ -289,14 +303,17 @@ function renderPipeline(){
   html+='</div>';
   // Outcomes
   if(S.outcomes&&S.outcomes.length>0){
-    html+='<div class="card"><div class="card-header"><span class="card-title">OUTCOMES</span><span class="card-badge">'+S.outcomes.length+'</span></div>';
+    html+='<div class="card"><div class="card-header"><span class="card-title">OUTCOMES</span><span class="card-badge">'+(S.lossData.wins||0)+'W / '+(S.lossData.losses||0)+'L / '+(S.lossData.no_bids||0)+'NB</span></div>';
     S.outcomes.forEach(function(o){
       var icon=o.outcome==='won'?'✓':o.outcome==='lost'?'✗':'—';
       var color=o.outcome==='won'?'var(--green)':o.outcome==='lost'?'var(--red)':'var(--dim)';
-      html+='<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.02)">';
-      html+='<div style="font-family:var(--font-display);font-size:16px;color:'+color+';min-width:24px;text-align:center">'+icon+'</div>';
+      var notes='';try{var n=JSON.parse(o.notes||'{}');notes=n.reason||'';}catch(e){notes=o.notes||'';}
+      html+='<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.02)">';
+      html+='<div style="font-family:var(--font-display);font-size:16px;color:'+color+';min-width:24px;text-align:center;padding-top:2px">'+icon+'</div>';
       html+='<div style="flex:1"><div style="font-size:12px;font-weight:600;color:var(--white)">'+esc((o.title||'').slice(0,50))+'</div>';
-      html+='<div style="font-family:var(--font-mono);font-size:9px;color:var(--dim)">'+esc(o.agency||'')+' • OPI '+(o.opi||o.opi_score||'?')+' • '+(o.outcome||'').toUpperCase()+'</div></div></div>';
+      html+='<div style="font-family:var(--font-mono);font-size:9px;color:var(--dim)">'+esc(o.agency||'')+' • OPI '+(o.opi||o.opi_score||'?')+' • '+(o.outcome||'').toUpperCase()+'</div>';
+      if(notes)html+='<div style="font-size:10px;color:var(--dim);margin-top:3px;font-style:italic">'+esc(notes)+'</div>';
+      html+='</div></div>';
     });
     html+='</div>';
   }
@@ -319,6 +336,20 @@ function renderAgents(){
   html+=agentSection('GATED',agents.gated||[],'gated');
   html+=agentSection('SYSTEM CORE',agents.system_core||[],'core');
   html+=agentSection('INTELLIGENCE',agents.system_intel||[],'intel');
+  // Cycle history
+  if(S.cycles.length>0){
+    html+='<div class="card"><div class="card-header"><span class="card-title">RECENT CYCLES</span><span class="card-badge">'+S.cycles.length+'</span></div>';
+    S.cycles.slice(0,10).forEach(function(cy){
+      var ts=cy.timestamp?new Date(cy.timestamp):null;
+      var dateStr=ts?ts.toLocaleDateString('en-US',{month:'short',day:'numeric'})+' '+ts.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}):'?';
+      html+='<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.03)">';
+      html+='<div style="min-width:56px;font-family:var(--font-mono);font-size:10px;color:var(--cyan)">'+dateStr+'</div>';
+      html+='<div style="flex:1;font-size:11px;color:var(--white)">'+(cy.agents_fired||0)+' agents</div>';
+      html+='<div style="font-family:var(--font-mono);font-size:10px;color:var(--dim)">'+(cy.opps_analyzed||0)+' opps • '+(cy.mode||'?')+(cy.zero_cost?' • $0':'')+'</div>';
+      html+='</div>';
+    });
+    html+='</div>';
+  }
   return html;
 }
 function agentSection(title,list,type){
@@ -345,7 +376,23 @@ function renderIntel(){
   html+='</div>';
   html+='<div class="card"><div class="card-header"><span class="card-title">OUTCOMES</span></div>';
   html+=intelRow('Total',out.total);html+=intelRow('Wins',out.wins);html+=intelRow('Losses',out.losses);html+=intelRow('No-Bids',out.no_bids);
+  html+=intelRow('Win Rate',(S.lossData.win_rate_pct||0)+'%');
+  html+=intelRow('Avg Loss OPI',S.lossData.avg_loss_opi||'—');
+  html+=intelRow('OPI Threshold',((S.lossData.opi_calibration||{}).threshold_suggestion||60));
   html+='</div>';
+  // Vertical breakdown
+  var vb=S.lossData.vertical_breakdown||{};
+  var vKeys=Object.keys(vb);
+  if(vKeys.length>0){
+    html+='<div class="card"><div class="card-header"><span class="card-title">BY VERTICAL</span></div>';
+    vKeys.forEach(function(v){
+      var d=vb[v];
+      html+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.03);font-size:11px">';
+      html+='<span style="color:var(--white);text-transform:capitalize">'+esc(v)+'</span>';
+      html+='<span style="color:var(--dim);font-family:var(--font-mono)">'+(d.wins||0)+'W / '+(d.losses||0)+'L / '+(d.no_bids||0)+'NB</span></div>';
+    });
+    html+='</div>';
+  }
   return html;
 }
 
