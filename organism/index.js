@@ -5041,7 +5041,28 @@ function scheduleWeekdayCron() {
   var msUntil = target - now;
   var hoursUntil = Math.round(msUntil / 3600000);
   log('CRON: Next run ' + target.toISOString() + ' (' + hoursUntil + 'h)');
-  setTimeout(function() {
+  setTimeout(async function() {
+    // GHOST DETECTION: Check if another instance already ran recently
+    try {
+      var myStart = Math.floor(Date.now() / 1000 - process.uptime());
+      var recent = await supabase.from('organism_memory').select('observation')
+        .eq('agent','v4_engine').gte('created_at', new Date(Date.now() - 7200000).toISOString())
+        .order('created_at',{ascending:false}).limit(1);
+      if (recent.data && recent.data.length > 0) {
+        var obs = recent.data[0].observation || '';
+        var m = obs.match(/uptime:(\d+)/);
+        if (m) {
+          var otherUptime = parseInt(m[1]);
+          var myUptime = Math.floor(process.uptime());
+          // If another instance recently ran with much LOWER uptime, it's newer — we're the ghost
+          if (Math.abs(otherUptime - myUptime) > 600 && otherUptime < myUptime) {
+            log('GHOST DETECTED: Newer instance (uptime ' + otherUptime + 's) exists. This instance (uptime ' + myUptime + 's) is stale. SKIPPING CRON.');
+            scheduleWeekdayCron();
+            return;
+          }
+        }
+      }
+    } catch(e) { log('Ghost check error (proceeding): ' + e.message); }
     log('=== WEEKDAY CRON FIRING ===');
     runSession('smart_trigger_cron').catch(function(e) { log('CRON error: ' + e.message); });
     scheduleWeekdayCron();
