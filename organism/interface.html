@@ -49,7 +49,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .pipe-opi{font-family:var(--font-display);font-size:20px;font-weight:900;min-width:44px;text-align:center}
 .pipe-opi.high{color:var(--green)}.pipe-opi.mid{color:var(--cyan)}.pipe-opi.low{color:var(--amber)}
 .pipe-info{flex:1;min-width:0}
-.pipe-title{font-size:13px;font-weight:600;color:var(--white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pipe-title{font-size:13px;font-weight:600;color:var(--white)}
 .pipe-meta{font-family:var(--font-mono);font-size:9px;color:var(--dim);margin-top:3px;display:flex;gap:8px;flex-wrap:wrap}
 .pipe-stage{font-family:var(--font-mono);font-size:9px;padding:2px 6px;border-radius:3px;white-space:nowrap}
 .stage-pursuing{background:rgba(0,212,255,0.1);color:var(--cyan);border:1px solid rgba(0,212,255,0.2)}
@@ -59,16 +59,24 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .stage-pending_rfp{background:rgba(240,192,64,0.06);color:var(--gold);border:1px solid rgba(240,192,64,0.12)}
 .feed-item{padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.02)}
 .feed-item:last-child{border-bottom:none}
-.feed-header{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.feed-header{display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap}
 .feed-agent{font-family:var(--font-mono);font-size:9px;font-weight:500;color:var(--cyan)}
-.feed-opp-name{font-family:var(--font-mono);font-size:8px;color:var(--gold);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px}
+.feed-opp{font-family:var(--font-mono);font-size:8px;color:var(--gold)}
 .feed-time{font-family:var(--font-mono);font-size:8px;color:var(--dim);margin-left:auto;flex-shrink:0}
-.feed-text{font-size:12px;color:var(--text);line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.intel-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.02)}
+.feed-text{font-size:12px;color:var(--text);line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer}
+.feed-text.expanded{display:block;-webkit-line-clamp:unset;overflow:visible;white-space:pre-wrap}
+.expandable{cursor:pointer}
+.expandable .expand-body{display:none;white-space:pre-wrap;font-size:12px;line-height:1.6;color:var(--text);padding-top:8px}
+.expandable.open .expand-body{display:block}
+.expandable .expand-arrow{font-size:10px;color:var(--cyan);transition:transform 0.2s}
+.expandable.open .expand-arrow{transform:rotate(90deg)}
+.intel-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.02);cursor:pointer}
+.intel-row:active{background:rgba(0,212,255,0.03)}
 .intel-label{font-size:12px;color:var(--dim)}
 .intel-value{font-family:var(--font-mono);font-size:13px;font-weight:600;color:var(--white)}
 .agent-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.agent-card{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px;position:relative;overflow:hidden}
+.agent-card{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px;position:relative;overflow:hidden;cursor:pointer}
+.agent-card:active{border-color:rgba(0,212,255,0.3)}
 .agent-card::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%;border-radius:2px 0 0 2px}
 .agent-card.core::before{background:var(--cyan)}.agent-card.intel::before{background:var(--gold)}
 .agent-card.gated::before{background:var(--amber)}.agent-card.per-opp::before{background:var(--green)}
@@ -82,12 +90,12 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .loading{text-align:center;padding:40px;color:var(--dim);font-family:var(--font-mono);font-size:11px}
 .loading::after{content:'';display:block;width:24px;height:24px;border:2px solid var(--border);border-top-color:var(--cyan);border-radius:50%;animation:spin 0.8s linear infinite;margin:12px auto 0}
 @keyframes spin{to{transform:rotate(360deg)}}
-.detail-back{font-family:var(--font-mono);font-size:10px;color:var(--cyan);cursor:pointer;margin-bottom:12px;display:flex;align-items:center;gap:4px}
-.detail-title{font-size:18px;font-weight:700;color:var(--white);margin-bottom:4px}
-.detail-agency{font-family:var(--font-mono);font-size:11px;color:var(--dim);margin-bottom:12px}
-.detail-section{margin-bottom:16px}
-.detail-section-title{font-family:var(--font-display);font-size:9px;letter-spacing:2px;color:var(--dim);margin-bottom:8px}
-.detail-content{font-size:12px;line-height:1.6;color:var(--text);white-space:pre-wrap;max-height:300px;overflow-y:auto}
+.back{font-family:var(--font-mono);font-size:10px;color:var(--cyan);cursor:pointer;margin-bottom:12px;display:flex;align-items:center;gap:4px}
+.back:active{opacity:0.6}
+.record{padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.03)}
+.record-title{font-size:12px;font-weight:600;color:var(--white);margin-bottom:4px}
+.record-meta{font-family:var(--font-mono);font-size:9px;color:var(--dim)}
+.record-body{font-size:11px;color:var(--text);line-height:1.5;margin-top:4px}
 .brain-bg{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;opacity:0.35}
 .brain-bg .orb{position:absolute;border-radius:50%;filter:blur(80px);animation:drift 8s ease-in-out infinite alternate}
 .brain-bg .orb1{width:200px;height:200px;background:rgba(0,180,255,0.06);top:20%;left:30%}
@@ -119,15 +127,43 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
   <div class="content" id="content"><div class="loading">INITIALIZING ORGANISM</div></div>
 </div>
 <script>
-var BASE='', S={health:null,pipeline:[],memories:[],status:null,detail:null,tab:'cop',oppTitles:{},outcomes:[],cycles:[],lossData:null,feedFilter:'',huntStats:null};
+var BASE='';
+var S={health:null,pipeline:[],memories:[],status:null,tab:'cop',outcomes:[],cycles:[],lossData:null,feedFilter:'',huntStats:null,
+  sub:null}; // sub = subview state {type:'detail',data:...} etc
 
-// V1 agent names to filter out
 var V1_SKIP=['v2_engine','v3_engine','v4_engine','oral_prep','brief_agent','opportunity_brief_agent',
   'post_award','mobile_notifications','exec_briefing_mode','unsolicited_agent',
   'financial_v2','content_engine_v2'];
 
 async function api(path){try{var r=await fetch(BASE+path);if(!r.ok)return null;return await r.json();}catch(e){return null;}}
+function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML;}
+function timeAgo(ts){if(!ts)return '';var ms=Date.now()-new Date(ts).getTime();if(ms<60000)return 'now';if(ms<3600000)return Math.floor(ms/60000)+'m';if(ms<86400000)return Math.floor(ms/3600000)+'h';return Math.floor(ms/86400000)+'d';}
+function safeDays(d){if(!d)return null;var x=new Date(d);if(isNaN(x.getTime()))return null;return Math.ceil((x-Date.now())/86400000);}
+function stat(val,label,cc){return '<div class="stat"><div class="stat-value '+(cc||'')+'">'+(val!=null?val:'—')+'</div><div class="stat-label">'+label+'</div></div>';}
 
+function cleanObs(text){
+  if(!text)return '';
+  var lines=text.split('\n');var out=[];var past=false;
+  for(var i=0;i<lines.length;i++){
+    var ln=lines[i].trim();
+    if(!past&&!ln)continue;
+    if(!past&&/^[A-Z0-9\s_\-]{3,40}(\s*-\s*[^:]+)?:\s*$/.test(ln))continue;
+    if(ln.charAt(0)==='#')continue;
+    if(/^(Agent \d|AGENT \d|Eyes Only|Classification|Principals? Only|For:|Prepared for|Principal Eyes|GOVERNING RULES|TRANSPARENCY NOTICE|CRITICAL SYSTEM)/i.test(ln))continue;
+    if(/HGI GLOBAL/i.test(ln)&&ln.length<120)continue;
+    if(/^[\-=\*]{3,}$/.test(ln))continue;
+    if(/^>\s*(\*\*)?[A-Z]{2,}/.test(ln))continue;
+    past=true;out.push(ln);
+  }
+  var r=out.join('\n').replace(/\*\*/g,'');
+  r=r.replace(/Christopher\s+J?\.?\s*Oney/gi,'President').replace(/Larry Oney/gi,'Chairman')
+    .replace(/Lou(?:is)?\s+Resweber/gi,'CEO').replace(/Candy Dottolo/gi,'CAO')
+    .replace(/Dillon Truax/gi,'VP').replace(/Geoffrey Brien/gi,'[REMOVED]')
+    .replace(/Vanessa James/gi,'SVP Claims').replace(/Chris Feduccia/gi,'SME');
+  return r.trim();
+}
+
+// === DATA LOADING ===
 async function loadAll(){
   var [h,p,m,s,la,ch,hs]=await Promise.all([api('/health'),api('/api/pipeline'),api('/api/memories'),api('/api/system-status'),api('/api/loss-analysis'),api('/api/cycle-history'),api('/api/hunt-stats')]);
   S.health=h;
@@ -136,22 +172,15 @@ async function loadAll(){
   S.lossData=la||{};
   S.cycles=(ch&&ch.cycles)?ch.cycles:[];
   S.huntStats=hs||[];
-  // Build opp title lookup
-  S.oppTitles={};
-  S.pipeline.forEach(function(o){S.oppTitles[o.id]=((o.title||'').length>40?(o.title||'').slice(0,37)+'...':o.title)||'';});
-  // Filter memories: skip V1 agents and V1-pattern outputs
   S.memories=(m||[]).filter(function(x){
     if(V1_SKIP.indexOf(x.agent)===-1){
-      // Also filter V1 pattern: "Agent X of 37" or "Agent X of 47"
-      var obs=x.observation||'';
-      if(/Agent \d+ of (37|47)/.test(obs)) return false;
+      if(/Agent \d+ of (37|47)/.test(x.observation||''))return false;
       return true;
     }
     return false;
-  }).slice(0,50);
+  });
   S.status=s;
-  updateTopbar();
-  renderTab();
+  updateTopbar();render();
 }
 
 function updateTopbar(){
@@ -163,81 +192,75 @@ function updateTopbar(){
   }else{dot.style.background='var(--red)';dot.style.boxShadow='0 0 8px var(--red)';txt.textContent='OFFLINE';}
 }
 
+// === NAVIGATION ===
 document.getElementById('tabs').addEventListener('click',function(e){
   var tab=e.target.closest('.tab');if(!tab)return;
-  S.tab=tab.dataset.tab;S.detail=null;
+  S.tab=tab.dataset.tab;S.sub=null;
   document.querySelectorAll('.tab').forEach(function(t){t.classList.remove('active');});
-  tab.classList.add('active');renderTab();
+  tab.classList.add('active');render();
 });
 
-function renderTab(){
+function render(){
   var c=document.getElementById('content');
+  if(S.sub)return renderSub(c);
   switch(S.tab){
     case 'cop':c.innerHTML=renderCOP();break;
-    case 'pipeline':c.innerHTML=S.detail?renderDetail():renderPipeline();break;
+    case 'pipeline':c.innerHTML=renderPipeline();break;
     case 'feed':c.innerHTML=renderFeed();break;
     case 'agents':c.innerHTML=renderAgents();break;
     case 'intel':c.innerHTML=renderIntel();break;
   }
-  bindEvents();
+  bind();
 }
 
-// === CLEAN OBSERVATION TEXT ===
-function cleanObs(text){
-  if(!text)return '';
-  // Split into lines and skip header block
-  var lines=text.split('\n');
-  var out=[];
-  var pastHeaders=false;
-  for(var i=0;i<lines.length;i++){
-    var ln=lines[i].trim();
-    // Skip empty lines at start
-    if(!pastHeaders&&!ln)continue;
-    // Skip agent label line (AGENT_NAME - Opp Title: or AGENT_NAME:)
-    if(!pastHeaders&&/^[A-Z0-9\s_\-]{3,40}(\s*-\s*[^:]+)?:\s*$/.test(ln))continue;
-    // Skip markdown headers
-    if(ln.charAt(0)==='#'){continue;}
-    // Skip meta lines
-    if(/^(Agent \d|AGENT \d|Eyes Only|Classification|Principals? Only|For:|Prepared for|Principal Eyes)/i.test(ln))continue;
-    // Skip HGI GLOBAL lines
-    if(/HGI GLOBAL/i.test(ln)&&ln.length<120)continue;
-    // Skip separator lines
-    if(/^[\-=\*]{3,}$/.test(ln))continue;
-    // This line has real content
-    pastHeaders=true;
-    out.push(ln);
+function goSub(type,data){S.sub={type:type,data:data};render();}
+function goBack(){S.sub=null;render();}
+
+function renderSub(c){
+  var s=S.sub;
+  switch(s.type){
+    case 'detail':renderDetailView(c,s.data);break;
+    case 'agent-detail':renderAgentDetailView(c,s.data);break;
+    case 'intel-drill':loadIntelDrill(c,s.data);break;
+    case 'all-memories':loadAllMemories(c,s.data);break;
+    case 'exec-brief':loadExecBrief(c);break;
+    case 'cycle-history':loadCycleHistory(c);break;
+    case 'compliance':loadCompliance(c,s.data);break;
+    default:goBack();
   }
-  var result=out.join(' ').replace(/\s+/g,' ').trim();
-  // Strip markdown bold
-  result=result.replace(/\*\*/g,'');
-  // Strip leading blockquote markers
-  result=result.replace(/^>\s*/,'');
-  // Strip markdown table separators
-  result=result.replace(/\|[\s\-]+\|[\s\-|]+\|/g,'');
-  // Strip AGENT numbering (uppercase variant)
-  result=result.replace(/AGENT \d+\s*[>|]\s*/g,'');
-  // Strip "Classification:" prefix that survived
-  result=result.replace(/^Classification:\s*/i,'');
-  // Strip names
-  result=result.replace(/Christopher\s+J\.?\s*Oney/gi,'President').replace(/Christopher Oney/gi,'President').replace(/Larry Oney/gi,'Chairman')
-    .replace(/Lou(?:is)?\s+Resweber/gi,'CEO').replace(/Candy Dottolo/gi,'CAO')
-    .replace(/Dillon Truax/gi,'VP').replace(/Geoffrey Brien/gi,'[REMOVED]')
-    .replace(/Vanessa James/gi,'SVP Claims').replace(/Chris Feduccia/gi,'SME');
-  return result;
 }
 
-function safeDays(dueDate){
-  if(!dueDate)return null;
-  var d=new Date(dueDate);
-  if(isNaN(d.getTime()))return null;
-  return Math.ceil((d-Date.now())/86400000);
+// === FEED ITEM (reusable, fully expandable) ===
+function feedItem(m){
+  var agent=(m.agent||'unknown').replace(/_/g,' ');
+  var obs=cleanObs(m.observation||'');
+  var opp=m.opportunity_id?getOppTitle(m.opportunity_id):'';
+  var h='<div class="feed-item"><div class="feed-header"><span class="feed-agent">'+esc(agent)+'</span>';
+  if(opp)h+='<span class="feed-opp">'+esc(opp)+'</span>';
+  h+='<span class="feed-time">'+timeAgo(m.created_at)+'</span></div>';
+  h+='<div class="feed-text" onclick="this.classList.toggle(\'expanded\')">'+esc(obs)+'</div></div>';
+  return h;
 }
 
-function oppTitle(id){
-  return S.oppTitles[id]||((id||'').slice(0,30));
+function getOppTitle(id){
+  var o=S.pipeline.find(function(x){return x.id===id;});
+  return o?(o.title||'').slice(0,60):(id||'').slice(0,30);
 }
 
-// === COP ===
+function lastActivity(name){
+  var f=S.memories.find(function(m){return m.agent===name||m.agent===name.replace(/_agent$/,'');});
+  return f?timeAgo(f.created_at):'';
+}
+
+// === EXPANDABLE SECTION (reusable) ===
+function expandSection(title,content,startOpen){
+  var cl=startOpen?'expandable open':'expandable';
+  return '<div class="'+cl+'" onclick="this.classList.toggle(\'open\')"><div class="card-header" style="cursor:pointer"><span class="card-title">'+title+'</span><span class="expand-arrow">▶</span></div><div class="expand-body">'+esc(content)+'</div></div>';
+}
+
+// ============================================================
+// COMMAND TAB
+// ============================================================
 function renderCOP(){
   var st=S.status||{},pipe=st.pipeline||{},intel=st.intelligence||{},h=S.health||{};
   var urgent=S.pipeline.filter(function(o){var d=safeDays(o.due_date);return d!==null&&d>0&&d<=14;}).sort(function(a,b){return new Date(a.due_date)-new Date(b.due_date);});
@@ -247,67 +270,63 @@ function renderCOP(){
   html+=stat(intel.organism_memories||'—','MEMORIES','cyan');
   html+=stat(pipe.avg_opi||'—','AVG OPI','green');
   html+='</div>';
-  // Last cycle indicator
   if(S.cycles.length>0){
-    var lc=S.cycles[0];var lcTime=lc.timestamp?timeAgo(lc.timestamp):'?';
-    html+='<div style="text-align:center;font-family:var(--font-mono);font-size:10px;color:var(--dim);padding:4px 0;margin-top:-4px">Last cycle: '+lcTime+' • '+(lc.agents_fired||0)+' agents • '+(lc.opps_analyzed||0)+' opps analyzed</div>';
+    var lc=S.cycles[0];
+    html+='<div style="text-align:center;font-family:var(--font-mono);font-size:10px;color:var(--dim);padding:4px 0;margin-top:-4px">Last cycle: '+timeAgo(lc.timestamp)+' — '+(lc.agents_fired||0)+' agents — '+(lc.opps_analyzed||0)+' opps</div>';
   }
   if(urgent.length>0){
-    html+='<div class="card"><div class="card-header"><span class="card-title">UPCOMING DEADLINES</span><span class="card-badge">'+urgent.length+' within 14d</span></div>';
+    html+='<div class="card"><div class="card-header"><span class="card-title">UPCOMING DEADLINES</span><span class="card-badge">'+urgent.length+'</span></div>';
     urgent.forEach(function(o){
       var days=safeDays(o.due_date);
       var color=days<=5?'var(--red)':days<=10?'var(--amber)':'var(--cyan)';
       html+='<div class="pipe-item" data-id="'+o.id+'"><div class="pipe-opi" style="color:'+color+';font-size:16px">'+days+'d</div>';
-      html+='<div class="pipe-info"><div class="pipe-title">'+esc((o.title||'').slice(0,50))+'</div>';
+      html+='<div class="pipe-info"><div class="pipe-title">'+esc(o.title||'')+'</div>';
       html+='<div class="pipe-meta"><span>'+esc(o.agency||'')+'</span><span>OPI '+o.opi_score+'</span></div></div></div>';
     });
     html+='</div>';
   }
-  var recent=S.memories.slice(0,8);
+  var recent=S.memories.slice(0,20);
   if(recent.length>0){
     html+='<div class="card"><div class="card-header"><span class="card-title">LATEST INTEL</span><span class="card-badge">'+timeAgo(recent[0].created_at)+'</span></div>';
     recent.forEach(function(m){html+=feedItem(m);});
     html+='</div>';
   }
-  html+='<div class="card"><div class="card-header"><span class="card-title">ACTIONS</span></div>';
-  html+='<div class="actions">';
+  html+='<div class="card"><div class="card-header"><span class="card-title">ACTIONS</span></div><div class="actions">';
   html+='<div class="btn primary" onclick="triggerCycle()">TRIGGER CYCLE</div>';
-  html+='<div class="btn" onclick="loadExecBrief()">EXEC BRIEF</div>';
+  html+='<div class="btn" onclick="goSub(\'exec-brief\')">EXEC BRIEF</div>';
   html+='<div class="btn" onclick="loadAll()">REFRESH</div>';
-  html+='<div class="btn" onclick="showLogs()">CYCLE HISTORY</div>';
+  html+='<div class="btn" onclick="goSub(\'cycle-history\')">CYCLE HISTORY</div>';
   html+='</div></div>';
-  // System health card
-  var intel=st.intelligence||{};
+  // System health
+  var ti=(intel.competitive_intelligence||0)+(intel.relationship_contacts||0)+(intel.disaster_alerts||0)+(intel.budget_cycles||0)+(intel.recompete_tracker||0)+(intel.regulatory_changes||0)+(intel.teaming_partners||0)+(intel.agency_profiles||0)+(intel.pipeline_analytics||0);
   html+='<div class="card"><div class="card-header"><span class="card-title">SYSTEM HEALTH</span><span class="card-badge">'+(h.version||'')+'</span></div>';
-  var totalIntel=(intel.competitive_intelligence||0)+(intel.relationship_contacts||0)+(intel.disaster_alerts||0)+(intel.budget_cycles||0)+(intel.recompete_tracker||0)+(intel.regulatory_changes||0)+(intel.teaming_partners||0)+(intel.agency_profiles||0)+(intel.pipeline_analytics||0);
   html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11px">';
   html+='<div style="color:var(--dim)">Memories</div><div style="color:var(--white);text-align:right;font-family:var(--font-mono)">'+(intel.organism_memories||'—')+'</div>';
-  html+='<div style="color:var(--dim)">Structured Intel</div><div style="color:var(--white);text-align:right;font-family:var(--font-mono)">'+totalIntel+'</div>';
+  html+='<div style="color:var(--dim)">Structured Intel</div><div style="color:var(--white);text-align:right;font-family:var(--font-mono)">'+ti+'</div>';
   html+='<div style="color:var(--dim)">Uptime</div><div style="color:var(--white);text-align:right;font-family:var(--font-mono)">'+(h.uptime_seconds>3600?Math.floor(h.uptime_seconds/3600)+'h '+Math.floor((h.uptime_seconds%3600)/60)+'m':Math.floor((h.uptime_seconds||0)/60)+'m')+'</div>';
   html+='<div style="color:var(--dim)">Agents</div><div style="color:var(--white);text-align:right;font-family:var(--font-mono)">'+(h.agents_active||29)+'</div>';
   html+='<div style="color:var(--dim)">Win Rate</div><div style="color:var(--white);text-align:right;font-family:var(--font-mono)">'+(S.lossData.win_rate_pct||0)+'%</div>';
-  html+='<div style="color:var(--dim)">Outcomes</div><div style="color:var(--white);text-align:right;font-family:var(--font-mono)">'+(S.lossData.total_outcomes||0)+' (W:'+((S.lossData.wins||0))+' L:'+((S.lossData.losses||0))+' NB:'+((S.lossData.no_bids||0))+')</div>';
+  html+='<div style="color:var(--dim)">Outcomes</div><div style="color:var(--white);text-align:right;font-family:var(--font-mono)">'+(S.lossData.total_outcomes||0)+' (W:'+(S.lossData.wins||0)+' L:'+(S.lossData.losses||0)+' NB:'+(S.lossData.no_bids||0)+')</div>';
   html+='</div></div>';
   return html;
 }
 
-// === PIPELINE ===
+// ============================================================
+// PIPELINE TAB
+// ============================================================
 function renderPipeline(){
-  if(S.detail)return renderDetail();
   var html='<div class="card"><div class="card-header"><span class="card-title">ACTIVE PIPELINE</span><span class="card-badge">'+S.pipeline.length+' opps</span></div>';
   S.pipeline.forEach(function(o){
-    var opiClass=(o.opi_score||0)>=90?'high':(o.opi_score||0)>=80?'mid':'low';
-    var stageClass='stage-'+(o.stage||'identified');
+    var oc=(o.opi_score||0)>=90?'high':(o.opi_score||0)>=80?'mid':'low';
+    var sc='stage-'+(o.stage||'identified');
     var days=safeDays(o.due_date);
-    html+='<div class="pipe-item" data-id="'+o.id+'"><div class="pipe-opi '+opiClass+'">'+(o.opi_score||'?')+'</div>';
-    html+='<div class="pipe-info"><div class="pipe-title">'+esc((o.title||'').slice(0,55))+'</div>';
+    html+='<div class="pipe-item" data-id="'+o.id+'"><div class="pipe-opi '+oc+'">'+(o.opi_score||'?')+'</div>';
+    html+='<div class="pipe-info"><div class="pipe-title">'+esc(o.title||'')+'</div>';
     html+='<div class="pipe-meta"><span>'+esc(o.agency||'')+'</span>';
     if(days!==null&&days>0)html+='<span>'+days+'d</span>';
-    html+='</div></div>';
-    html+='<div class="pipe-stage '+stageClass+'">'+(o.stage||'identified').toUpperCase()+'</div></div>';
+    html+='</div></div><div class="pipe-stage '+sc+'">'+(o.stage||'identified').toUpperCase()+'</div></div>';
   });
   html+='</div>';
-  // Outcomes
   if(S.outcomes&&S.outcomes.length>0){
     html+='<div class="card"><div class="card-header"><span class="card-title">OUTCOMES</span><span class="card-badge">'+(S.lossData.wins||0)+'W / '+(S.lossData.losses||0)+'L / '+(S.lossData.no_bids||0)+'NB</span></div>';
     S.outcomes.forEach(function(o){
@@ -316,8 +335,8 @@ function renderPipeline(){
       var notes='';try{var n=JSON.parse(o.notes||'{}');notes=n.reason||'';}catch(e){notes=o.notes||'';}
       html+='<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.02)">';
       html+='<div style="font-family:var(--font-display);font-size:16px;color:'+color+';min-width:24px;text-align:center;padding-top:2px">'+icon+'</div>';
-      html+='<div style="flex:1"><div style="font-size:12px;font-weight:600;color:var(--white)">'+esc((o.title||'').slice(0,50))+'</div>';
-      html+='<div style="font-family:var(--font-mono);font-size:9px;color:var(--dim)">'+esc(o.agency||'')+' • OPI '+(o.opi||o.opi_score||'?')+' • '+(o.outcome||'').toUpperCase()+'</div>';
+      html+='<div style="flex:1"><div style="font-size:12px;font-weight:600;color:var(--white)">'+esc(o.title||'')+'</div>';
+      html+='<div style="font-family:var(--font-mono);font-size:9px;color:var(--dim)">OPI '+(o.opi||o.opi_score||'?')+' — '+(o.outcome||'').toUpperCase()+'</div>';
       if(notes)html+='<div style="font-size:10px;color:var(--dim);margin-top:3px;font-style:italic">'+esc(notes)+'</div>';
       html+='</div></div>';
     });
@@ -326,19 +345,115 @@ function renderPipeline(){
   return html;
 }
 
-// === FEED ===
+// ============================================================
+// PIPELINE DETAIL — COMPLETE, FULLY EXPANDABLE
+// ============================================================
+function renderDetailView(c,id){
+  var o=S.pipeline.find(function(x){return x.id===id;});
+  if(!o){c.innerHTML='<div class="back" onclick="goBack()">← PIPELINE</div><div class="card">Not found</div>';return;}
+  // Try to get enriched data
+  api('/api/opportunity-detail?id='+encodeURIComponent(id)).then(function(data){
+    if(data){renderDetailHTML(c,data);}
+  });
+  renderDetailHTML(c,o);
+}
+
+function renderDetailHTML(c,o){
+  var days=safeDays(o.due_date);
+  var oc=(o.opi_score||0)>=90?'high':(o.opi_score||0)>=80?'mid':'low';
+  var html='<div class="back" onclick="goBack()">← PIPELINE</div>';
+  // Hero
+  html+='<div class="card" style="border-left:3px solid var(--'+(oc==='high'?'green':oc==='mid'?'cyan':'amber')+')">';
+  html+='<div style="display:flex;align-items:flex-start;gap:14px">';
+  html+='<div class="pipe-opi '+oc+'" style="font-size:36px;line-height:1">'+(o.opi_score||'?')+'</div>';
+  html+='<div style="flex:1"><div style="font-size:16px;font-weight:700;color:var(--white)">'+esc(o.title||'')+'</div>';
+  html+='<div style="font-family:var(--font-mono);font-size:11px;color:var(--dim);margin-top:4px">'+esc(o.agency||'')+'</div>';
+  html+='<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">';
+  html+='<span class="pipe-stage stage-'+(o.stage||'identified')+'">'+(o.stage||'identified').toUpperCase()+'</span>';
+  if(days!==null&&days>0){
+    var uc=days<=5?'red':days<=10?'amber':'cyan';
+    html+='<span class="pipe-stage" style="color:var(--'+uc+')">'+days+' DAYS</span>';
+  }
+  if(o.vertical)html+='<span class="pipe-stage" style="color:var(--dim)">'+esc(o.vertical).toUpperCase()+'</span>';
+  html+='</div>';
+  if(o.due_date)html+='<div style="font-family:var(--font-mono);font-size:10px;color:var(--amber);margin-top:6px">Due: '+esc(o.due_date)+'</div>';
+  if(o.estimated_value)html+='<div style="font-family:var(--font-mono);font-size:10px;color:var(--gold);margin-top:4px">'+esc(o.estimated_value)+'</div>';
+  html+='</div></div></div>';
+
+  // Completeness stats
+  html+='<div class="stats" style="grid-template-columns:repeat(5,1fr)">';
+  html+=stat((o.scope_analysis||'').length>100?'✓':'—','SCOPE',((o.scope_analysis||'').length>100?'green':''));
+  html+=stat((o.research_brief||'').length>100?'✓':'—','INTEL',((o.research_brief||'').length>100?'green':''));
+  html+=stat((o.financial_analysis||'').length>100?'✓':'—','FIN',((o.financial_analysis||'').length>100?'green':''));
+  html+=stat((o.staffing_plan||'').length>100?'✓':'—','STAFF',((o.staffing_plan||'').length>100?'green':''));
+  html+=stat((o.proposal_content||'').length>100?'✓':'—','PROP',((o.proposal_content||'').length>100?'green':''));
+  html+='</div>';
+
+  // All data sections — fully expandable
+  var sections=[
+    ['CAPTURE STRATEGY','capture_action'],
+    ['SCOPE ANALYSIS','scope_analysis'],
+    ['COMPETITIVE INTEL','research_brief'],
+    ['FINANCIAL ANALYSIS','financial_analysis'],
+    ['STAFFING PLAN','staffing_plan'],
+    ['PROPOSAL CONTENT','proposal_content']
+  ];
+  sections.forEach(function(s){
+    var val=o[s[1]];
+    if(val&&val.length>50){
+      var cleaned=cleanObs(val);
+      html+='<div class="card expandable" onclick="this.classList.toggle(\'open\')">';
+      html+='<div class="card-header"><span class="card-title">'+s[0]+'</span>';
+      html+='<span style="font-family:var(--font-mono);font-size:9px;color:var(--dim)">'+(Math.round(val.length/1000))+'K chars <span class="expand-arrow">▶</span></span></div>';
+      html+='<div class="expand-body">'+esc(cleaned)+'</div></div>';
+    }
+  });
+
+  // RFP text section
+  if(o.rfp_text&&o.rfp_text.length>200){
+    html+='<div class="card expandable" onclick="this.classList.toggle(\'open\')">';
+    html+='<div class="card-header"><span class="card-title">RFP DOCUMENT</span>';
+    html+='<span style="font-family:var(--font-mono);font-size:9px;color:var(--dim)">'+(Math.round(o.rfp_text.length/1000))+'K chars <span class="expand-arrow">▶</span></span></div>';
+    html+='<div class="expand-body">'+esc(o.rfp_text)+'</div></div>';
+  }
+
+  // Agent activity — ALL memories for this opp
+  var oppMems=S.memories.filter(function(m){return m.opportunity_id===o.id;});
+  if(oppMems.length>0){
+    html+='<div class="card"><div class="card-header"><span class="card-title">AGENT ACTIVITY</span><span class="card-badge">'+oppMems.length+'</span></div>';
+    oppMems.forEach(function(m){html+=feedItem(m);});
+    html+='</div>';
+  }
+
+  // Actions
+  html+='<div class="card"><div class="card-header"><span class="card-title">ACTIONS</span></div><div class="actions">';
+  html+='<div class="btn primary" onclick="event.stopPropagation();produceProposal(\''+o.id+'\')">PRODUCE PROPOSAL</div>';
+  html+='<div class="btn" onclick="event.stopPropagation();goSub(\'compliance\',\''+o.id+'\')">COMPLIANCE CHECK</div>';
+  if(o.source_url)html+='<div class="btn" onclick="event.stopPropagation();window.open(\''+esc(o.source_url)+'\',\'_blank\')">SOURCE</div>';
+  html+='<div class="btn" onclick="event.stopPropagation();goSub(\'all-memories\',\''+o.id+'\')">ALL MEMORIES</div>';
+  if(o.proposal_content&&o.proposal_content.length>100)html+='<div class="btn" onclick="event.stopPropagation();window.open(BASE+\'/api/proposal-doc?id='+encodeURIComponent(o.id)+'\')">DOWNLOAD DOC</div>';
+  html+='</div></div>';
+  c.innerHTML=html;
+  bind();
+}
+
+// ============================================================
+// FEED TAB
+// ============================================================
 function renderFeed(){
   var html='<div class="card" style="padding-bottom:0"><input type="text" id="feed-search" placeholder="Search observations..." value="'+esc(S.feedFilter)+'" style="width:100%;padding:8px 12px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:6px;color:var(--white);font-size:12px;font-family:var(--font-mono);outline:none;box-sizing:border-box;margin-bottom:8px"></div>';
   var filtered=S.memories;
   if(S.feedFilter){var q=S.feedFilter.toLowerCase();filtered=filtered.filter(function(m){return((m.observation||'')+(m.agent||'')).toLowerCase().indexOf(q)>=0;});}
-  html+='<div class="card"><div class="card-header"><span class="card-title">AGENT FEED</span><span class="card-badge">'+filtered.length+(S.feedFilter?' filtered':' recent')+'</span></div>';
-  filtered.slice(0,30).forEach(function(m){html+=feedItem(m);});
+  html+='<div class="card"><div class="card-header"><span class="card-title">AGENT FEED</span><span class="card-badge">'+filtered.length+(S.feedFilter?' filtered':' total')+'</span></div>';
+  filtered.forEach(function(m){html+=feedItem(m);});
   if(filtered.length===0)html+='<div style="padding:16px 0;color:var(--dim);font-size:12px;text-align:center">No matching observations</div>';
   html+='</div>';
   return html;
 }
 
-// === AGENTS ===
+// ============================================================
+// AGENTS TAB
+// ============================================================
 function renderAgents(){
   var st=S.status||{},agents=st.agents||{};
   var html='';
@@ -346,16 +461,15 @@ function renderAgents(){
   html+=agentSection('GATED',agents.gated||[],'gated');
   html+=agentSection('SYSTEM CORE',agents.system_core||[],'core');
   html+=agentSection('INTELLIGENCE',agents.system_intel||[],'intel');
-  // Cycle history
   if(S.cycles.length>0){
     html+='<div class="card"><div class="card-header"><span class="card-title">RECENT CYCLES</span><span class="card-badge">'+S.cycles.length+'</span></div>';
-    S.cycles.slice(0,10).forEach(function(cy){
+    S.cycles.forEach(function(cy){
       var ts=cy.timestamp?new Date(cy.timestamp):null;
-      var dateStr=ts?ts.toLocaleDateString('en-US',{month:'short',day:'numeric'})+' '+ts.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}):'?';
+      var ds=ts?ts.toLocaleDateString('en-US',{month:'short',day:'numeric'})+' '+ts.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}):'?';
       html+='<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.03)">';
-      html+='<div style="min-width:56px;font-family:var(--font-mono);font-size:10px;color:var(--cyan)">'+dateStr+'</div>';
+      html+='<div style="min-width:90px;font-family:var(--font-mono);font-size:10px;color:var(--cyan)">'+ds+'</div>';
       html+='<div style="flex:1;font-size:11px;color:var(--white)">'+(cy.agents_fired||0)+' agents</div>';
-      html+='<div style="font-family:var(--font-mono);font-size:10px;color:var(--dim)">'+(cy.opps_analyzed||0)+' opps • '+(cy.mode||'?')+(cy.zero_cost?' • $0':'')+'</div>';
+      html+='<div style="font-family:var(--font-mono);font-size:10px;color:var(--dim)">'+(cy.opps_analyzed||0)+' opps'+(cy.zero_cost?' $0':'')+'</div>';
       html+='</div>';
     });
     html+='</div>';
@@ -364,25 +478,43 @@ function renderAgents(){
 }
 function agentSection(title,list,type){
   var html='<div class="card"><div class="card-header"><span class="card-title">'+title+'</span><span class="card-badge">'+list.length+'</span></div><div class="agent-grid">';
-  list.forEach(function(a){html+=agentCard(a,type);});
+  list.forEach(function(a){
+    var display=a.replace(/_/g,' ').replace(/agent$/i,'').trim();
+    var tl=type==='per-opp'?'PER-OPP':type==='gated'?'GATED':type==='core'?'CORE':'INTEL';
+    var lt=lastActivity(a);
+    html+='<div class="agent-card '+type+'" onclick="goSub(\'agent-detail\',\''+a+'\')"><div class="agent-name">'+esc(display)+'</div><div class="agent-type">'+tl+'</div>'+(lt?'<div class="agent-last">'+lt+'</div>':'')+'</div>';
+  });
   html+='</div></div>';
   return html;
 }
 
-// === INTEL ===
+// AGENT DETAIL — all memories from this agent
+function renderAgentDetailView(c,agentName){
+  var mems=S.memories.filter(function(m){return m.agent===agentName;});
+  var display=agentName.replace(/_/g,' ').replace(/agent$/i,'').trim();
+  var html='<div class="back" onclick="goBack()">← AGENTS</div>';
+  html+='<div class="card"><div class="card-header"><span class="card-title">'+esc(display.toUpperCase())+'</span><span class="card-badge">'+mems.length+' memories</span></div>';
+  if(mems.length===0)html+='<div style="padding:16px 0;color:var(--dim);font-size:12px;text-align:center">No memories found for this agent</div>';
+  mems.forEach(function(m){html+=feedItem(m);});
+  html+='</div>';
+  c.innerHTML=html;
+}
+
+// ============================================================
+// INTEL TAB — DRILL DOWN INTO EVERY TABLE
+// ============================================================
 function renderIntel(){
   var st=S.status||{},intel=st.intelligence||{},out=st.outcomes||{};
-  var html='<div class="card"><div class="card-header"><span class="card-title">INTELLIGENCE DATABASE</span></div>';
-  html+=intelRow('Organism Memories',intel.organism_memories);
-  html+=intelRow('Competitive Intel',intel.competitive_intelligence);
-  html+=intelRow('Contacts',intel.relationship_contacts);
-  html+=intelRow('Disaster Alerts',intel.disaster_alerts);
-  html+=intelRow('Budget Cycles',intel.budget_cycles);
-  html+=intelRow('Recompete Tracker',intel.recompete_tracker);
-  html+=intelRow('Regulatory Changes',intel.regulatory_changes);
-  html+=intelRow('Teaming Partners',intel.teaming_partners);
-  html+=intelRow('Agency Profiles',intel.agency_profiles);
-  html+=intelRow('Analytics',intel.pipeline_analytics);
+  var html='<div class="card"><div class="card-header"><span class="card-title">INTELLIGENCE DATABASE</span><span class="card-badge">tap to explore</span></div>';
+  html+=intelDrillRow('Competitive Intel',intel.competitive_intelligence,'competitors');
+  html+=intelDrillRow('Contacts',intel.relationship_contacts,'contacts');
+  html+=intelDrillRow('Disaster Alerts',intel.disaster_alerts,'disaster-alerts');
+  html+=intelDrillRow('Budget Cycles',intel.budget_cycles,'budget-cycles');
+  html+=intelDrillRow('Recompete Tracker',intel.recompete_tracker,'recompetes');
+  html+=intelDrillRow('Regulatory Changes',intel.regulatory_changes,'regulatory');
+  html+=intelDrillRow('Teaming Partners',intel.teaming_partners,'teaming');
+  html+=intelDrillRow('Agency Profiles',intel.agency_profiles,'agencies');
+  html+=intelDrillRow('Analytics',intel.pipeline_analytics,'analytics');
   html+='</div>';
   html+='<div class="card"><div class="card-header"><span class="card-title">OUTCOMES</span></div>';
   html+=intelRow('Total',out.total);html+=intelRow('Wins',out.wins);html+=intelRow('Losses',out.losses);html+=intelRow('No-Bids',out.no_bids);
@@ -390,305 +522,262 @@ function renderIntel(){
   html+=intelRow('Avg Loss OPI',S.lossData.avg_loss_opi||'—');
   html+=intelRow('OPI Threshold',((S.lossData.opi_calibration||{}).threshold_suggestion||60));
   html+='</div>';
-  // Vertical breakdown
   var vb=S.lossData.vertical_breakdown||{};
-  var vKeys=Object.keys(vb);
-  if(vKeys.length>0){
+  var vk=Object.keys(vb);
+  if(vk.length>0){
     html+='<div class="card"><div class="card-header"><span class="card-title">BY VERTICAL</span></div>';
-    vKeys.forEach(function(v){
-      var d=vb[v];
+    vk.forEach(function(v){var d=vb[v];
       html+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.03);font-size:11px">';
       html+='<span style="color:var(--white);text-transform:capitalize">'+esc(v)+'</span>';
       html+='<span style="color:var(--dim);font-family:var(--font-mono)">'+(d.wins||0)+'W / '+(d.losses||0)+'L / '+(d.no_bids||0)+'NB</span></div>';
     });
     html+='</div>';
   }
-  // Source stats from hunt runs
   if(S.huntStats&&S.huntStats.length>0){
-    var srcMap={};var totalNew=0;
-    S.huntStats.forEach(function(r){
-      var s=r.source||'?';
-      var label=s==='cron'?'Central Bidding':s.indexOf('sam')>=0?'SAM.gov':s.indexOf('grants')>=0?'Grants.gov':s.indexOf('alabama')>=0?'Alabama':s.indexOf('georgia')>=0?'Georgia':s.indexOf('event:')>=0?'Cascade':s.indexOf('apify')>=0?'Apify CB':s;
-      if(!srcMap[label])srcMap[label]={runs:0,newOpps:0};
-      srcMap[label].runs++;srcMap[label].newOpps+=(r.opportunities_new||0);
-      totalNew+=(r.opportunities_new||0);
+    var sm={};var tn=0;
+    S.huntStats.forEach(function(r){var s=r.source||'?';
+      var l=s==='cron'?'Central Bidding':s.indexOf('sam')>=0?'SAM.gov':s.indexOf('grants')>=0?'Grants.gov':s.indexOf('alabama')>=0?'Alabama':s.indexOf('georgia')>=0?'Georgia':s.indexOf('event:')>=0?'Cascade':s.indexOf('apify')>=0?'Apify CB':s;
+      if(!sm[l])sm[l]={r:0,n:0};sm[l].r++;sm[l].n+=(r.opportunities_new||0);tn+=(r.opportunities_new||0);
     });
-    html+='<div class="card"><div class="card-header"><span class="card-title">SOURCES</span><span class="card-badge">'+totalNew+' new opps</span></div>';
-    Object.keys(srcMap).sort(function(a,b){return srcMap[b].runs-srcMap[a].runs;}).forEach(function(k){
+    html+='<div class="card"><div class="card-header"><span class="card-title">SOURCES</span><span class="card-badge">'+tn+' new</span></div>';
+    Object.keys(sm).sort(function(a,b){return sm[b].r-sm[a].r;}).forEach(function(k){
       html+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.03);font-size:11px">';
       html+='<span style="color:var(--white)">'+esc(k)+'</span>';
-      html+='<span style="color:var(--dim);font-family:var(--font-mono)">'+srcMap[k].runs+' runs'+(srcMap[k].newOpps?' • '+srcMap[k].newOpps+' new':'')+'</span></div>';
+      html+='<span style="color:var(--dim);font-family:var(--font-mono)">'+sm[k].r+' runs'+(sm[k].n?' — '+sm[k].n+' new':'')+'</span></div>';
     });
     html+='</div>';
   }
   return html;
 }
 
-// === DETAIL ===
-function renderDetail(){
-  var o=S.detail;if(!o)return renderPipeline();
-  var days=safeDays(o.due_date);
-  var opiClass=(o.opi_score||0)>=90?'high':(o.opi_score||0)>=80?'mid':'low';
-  
-  var html='<div class="detail-back" onclick="S.detail=null;renderTab()">← PIPELINE</div>';
-  
-  // Hero card
-  html+='<div class="card" style="border-left:3px solid var(--'+(opiClass==='high'?'green':opiClass==='mid'?'cyan':'amber')+')">';
-  html+='<div style="display:flex;align-items:flex-start;gap:14px">';
-  html+='<div class="pipe-opi '+opiClass+'" style="font-size:36px;line-height:1">'+( o.opi_score||'?')+'</div>';
-  html+='<div style="flex:1"><div class="detail-title">'+esc(o.title||'')+'</div>';
-  html+='<div class="detail-agency">'+esc(o.agency||'')+'</div>';
-  html+='<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">';
-  html+='<span class="pipe-stage stage-'+(o.stage||'identified')+'">'+(o.stage||'identified').toUpperCase()+'</span>';
-  if(days!==null&&days>0){
-    var urgColor=days<=5?'red':days<=10?'amber':'cyan';
-    html+='<span class="pipe-stage" style="background:rgba(var(--'+urgColor+'-rgb,0),0.1);color:var(--'+urgColor+');border:1px solid rgba(var(--'+urgColor+'-rgb,0),0.2)">'+days+' DAYS</span>';
-  }
-  if(o.vertical)html+='<span class="pipe-stage" style="background:rgba(255,255,255,0.04);color:var(--dim);border:1px solid rgba(255,255,255,0.08)">'+esc(o.vertical).toUpperCase()+'</span>';
-  html+='</div>';
-  if(o.estimated_value)html+='<div style="font-family:var(--font-mono);font-size:10px;color:var(--gold);margin-top:6px">'+esc(o.estimated_value)+'</div>';
-  html+='</div></div></div>';
-  
-  // Quick stats
-  html+='<div class="stats" style="grid-template-columns:repeat(3,1fr)">';
-  html+=stat((o.scope_analysis||'').length>100?'✓':'—','SCOPE',((o.scope_analysis||'').length>100?'green':''));
-  html+=stat((o.research_brief||'').length>100?'✓':'—','RESEARCH',((o.research_brief||'').length>100?'green':''));
-  html+=stat((o.capture_action||'').length>100?'✓':'—','CAPTURE',((o.capture_action||'').length>100?'green':''));
-  html+='</div>';
-  
-  // Sections with collapsible content
-  var sections=[
-    ['CAPTURE STRATEGY','capture_action','What the organism recommends'],
-    ['SCOPE ANALYSIS','scope_analysis','What the RFP requires'],
-    ['COMPETITIVE INTEL','research_brief','Who we compete against'],
-    ['FINANCIAL ANALYSIS','financial_analysis','Pricing and contract value']
-  ];
-  sections.forEach(function(s){
-    var val=o[s[1]];
-    if(val&&val.length>50){
-      var cleaned=cleanObs(val);
-      // Extract first meaningful sentence for preview
-      var preview=cleaned.slice(0,150).replace(/\n/g,' ');
-      var dots=cleaned.length>150?'...':'';
-      html+='<div class="card detail-card" data-field="'+s[1]+'">';
-      html+='<div class="card-header" style="cursor:pointer" onclick="toggleSection(this)">';
-      html+='<span class="card-title">'+s[0]+'</span>';
-      html+='<span style="font-size:10px;color:var(--dim)">'+s[2]+'</span>';
-      html+='</div>';
-      html+='<div class="feed-text" style="-webkit-line-clamp:2;margin-bottom:8px;color:var(--text)">'+esc(preview+dots)+'</div>';
-      html+='<div class="detail-expand" style="display:none"><div class="detail-content">'+esc(cleaned.slice(0,4000))+'</div></div>';
-      html+='</div>';
-    }
-  });
-  
-  // Agent memories for this opp
-  var oppMems=S.memories.filter(function(m){return m.opportunity_id===o.id;});
-  if(oppMems.length>0){
-    html+='<div class="card"><div class="card-header"><span class="card-title">AGENT ACTIVITY</span><span class="card-badge">'+oppMems.length+'</span></div>';
-    oppMems.slice(0,6).forEach(function(m){html+=feedItem(m);});
+function intelRow(label,value){return '<div class="intel-row" style="cursor:default"><span class="intel-label">'+label+'</span><span class="intel-value">'+(value!=null?value:'—')+'</span></div>';}
+function intelDrillRow(label,value,endpoint){
+  return '<div class="intel-row" onclick="goSub(\'intel-drill\',\''+endpoint+'\')"><span class="intel-label">'+label+' →</span><span class="intel-value">'+(value!=null?value:'—')+'</span></div>';
+}
+
+// INTEL DRILL-DOWN — loads actual records from API
+async function loadIntelDrill(c,endpoint){
+  c.innerHTML='<div class="back" onclick="goBack()">← INTEL</div><div class="loading">LOADING</div>';
+  var epMap={
+    'competitors':'/api/competitors','contacts':'/api/contacts','regulatory':'/api/regulatory',
+    'teaming':'/api/teaming','agencies':'/api/agencies','recompetes':'/api/recompetes',
+    'analytics':'/api/analytics','disaster-alerts':'/api/phase3','budget-cycles':'/api/phase3'
+  };
+  var data=await api(epMap[endpoint]||'/api/phase3');
+  if(!data){c.innerHTML='<div class="back" onclick="goBack()">← INTEL</div><div class="card">Could not load data</div>';return;}
+
+  var html='<div class="back" onclick="goBack()">← INTEL</div>';
+  var label=endpoint.replace(/-/g,' ').toUpperCase();
+
+  if(endpoint==='competitors'){
+    var profiles=data.profiles||[];
+    html+='<div class="card"><div class="card-header"><span class="card-title">COMPETITORS</span><span class="card-badge">'+(data.total_competitors||profiles.length)+'</span></div>';
+    profiles.forEach(function(p){
+      html+='<div class="record expandable" onclick="this.classList.toggle(\'open\')">';
+      html+='<div class="record-title">'+esc(p.name||'?')+' <span class="expand-arrow">▶</span></div>';
+      html+='<div class="record-meta">'+esc(p.hq_location||'')+' — Threat: '+esc(p.threat_level||'?')+'</div>';
+      html+='<div class="expand-body">';
+      if(p.strengths)html+='<div style="margin-bottom:6px"><strong style="color:var(--green)">Strengths:</strong> '+esc(Array.isArray(p.strengths)?p.strengths.join(', '):p.strengths)+'</div>';
+      if(p.weaknesses)html+='<div style="margin-bottom:6px"><strong style="color:var(--red)">Weaknesses:</strong> '+esc(Array.isArray(p.weaknesses)?p.weaknesses.join(', '):p.weaknesses)+'</div>';
+      if(p.recent_wins)html+='<div><strong style="color:var(--gold)">Recent Wins:</strong> '+esc(Array.isArray(p.recent_wins)?p.recent_wins.join(', '):p.recent_wins)+'</div>';
+      html+='</div></div>';
+    });
     html+='</div>';
   }
-  
-  // Actions
-  html+='<div class="card"><div class="card-header"><span class="card-title">ACTIONS</span></div>';
-  html+='<div class="actions">';
-  html+='<div class="btn primary" onclick="produceProposal(\''+o.id+'\')">PRODUCE PROPOSAL</div>';
-  html+='<div class="btn" onclick="complianceCheck(\''+o.id+'\')">COMPLIANCE CHECK</div>';
-  if(o.source_url)html+='<div class="btn" onclick="window.open(\''+esc(o.source_url)+'\',\'_blank\')">SOURCE</div>';
-  html+='<div class="btn" onclick="loadOppMemories(\''+o.id+'\')">ALL MEMORIES</div>';
-  html+='</div></div>';
-  
-  return html;
-}
-
-function toggleSection(header){
-  var card=header.parentElement;
-  var expand=card.querySelector('.detail-expand');
-  var preview=card.querySelector('.feed-text');
-  if(expand.style.display==='none'){
-    expand.style.display='block';
-    if(preview)preview.style.display='none';
-    header.querySelector('.card-title').style.color='var(--cyan)';
-  }else{
-    expand.style.display='none';
-    if(preview)preview.style.display='';
-    header.querySelector('.card-title').style.color='';
+  else if(endpoint==='contacts'){
+    var contacts=data.contacts||[];
+    html+='<div class="card"><div class="card-header"><span class="card-title">CONTACTS</span><span class="card-badge">'+(data.total_contacts||contacts.length)+'</span></div>';
+    contacts.forEach(function(p){
+      html+='<div class="record expandable" onclick="this.classList.toggle(\'open\')">';
+      html+='<div class="record-title">'+esc(p.name||'?')+' <span class="expand-arrow">▶</span></div>';
+      html+='<div class="record-meta">'+esc(p.title||'')+' — '+esc(p.organization||'')+'</div>';
+      html+='<div class="expand-body">';
+      if(p.email)html+='<div>Email: '+esc(p.email)+'</div>';
+      if(p.phone)html+='<div>Phone: '+esc(p.phone)+'</div>';
+      if(p.relationship_strength)html+='<div>Relationship: '+esc(p.relationship_strength)+'</div>';
+      if(p.notes)html+='<div style="margin-top:4px">'+esc(p.notes)+'</div>';
+      html+='</div></div>';
+    });
+    html+='</div>';
   }
+  else if(Array.isArray(data)){
+    // Generic table display for regulatory, teaming, agencies, recompetes, analytics
+    html+='<div class="card"><div class="card-header"><span class="card-title">'+label+'</span><span class="card-badge">'+data.length+'</span></div>';
+    data.forEach(function(r){
+      var title=r.regulation_name||r.partner_name||r.agency_name||r.client||r.title||r.contract_name||r.category||'Record';
+      var meta=r.category||r.capability||r.state||r.vertical||r.agency_source||r.location||'';
+      var body=r.summary||r.insight||r.procurement_process||r.certifications||r.past_teaming||r.impact_level||'';
+      html+='<div class="record expandable" onclick="this.classList.toggle(\'open\')">';
+      html+='<div class="record-title">'+esc(title)+' <span class="expand-arrow">▶</span></div>';
+      if(meta)html+='<div class="record-meta">'+esc(typeof meta==='string'?meta:JSON.stringify(meta))+'</div>';
+      html+='<div class="expand-body">'+esc(typeof body==='string'?body:JSON.stringify(body,null,2))+'</div>';
+      html+='</div>';
+    });
+    html+='</div>';
+  }
+  else{
+    // Phase3 format for disaster-alerts and budget-cycles
+    var cats=data.categories||{};
+    var target=endpoint==='disaster-alerts'?'disaster':'budget';
+    var items=[];
+    Object.keys(cats).forEach(function(k){
+      if(endpoint==='disaster-alerts'&&k.indexOf('disaster')>=0)items=items.concat(cats[k].data||[]);
+      if(endpoint==='budget-cycles'&&k.indexOf('budget')>=0)items=items.concat(cats[k].data||[]);
+      if(endpoint!=='disaster-alerts'&&endpoint!=='budget-cycles')items=items.concat(cats[k].data||[]);
+    });
+    if(items.length===0)items=Object.values(cats).reduce(function(a,c){return a.concat(c.data||[]);},[]);
+    html+='<div class="card"><div class="card-header"><span class="card-title">'+label+'</span><span class="card-badge">'+items.length+'</span></div>';
+    items.forEach(function(item){
+      var obs=cleanObs(item.obs||'');
+      html+='<div class="feed-item"><div class="feed-header"><span class="feed-time">'+timeAgo(item.at)+'</span></div>';
+      html+='<div class="feed-text" onclick="this.classList.toggle(\'expanded\')">'+esc(obs)+'</div></div>';
+    });
+    html+='</div>';
+  }
+  c.innerHTML=html;
 }
 
-async function loadOppMemories(id){
-  var c=document.getElementById('content');
-  c.innerHTML='<div class="loading">LOADING MEMORIES</div>';
+// ============================================================
+// SUB-VIEWS: ALL MEMORIES, EXEC BRIEF, CYCLE HISTORY, COMPLIANCE
+// ============================================================
+async function loadAllMemories(c,id){
+  c.innerHTML='<div class="back" onclick="goBack()">← BACK</div><div class="loading">LOADING ALL MEMORIES</div>';
   var data=await api('/api/opportunity-memories?id='+encodeURIComponent(id));
+  var html='<div class="back" onclick="goBack()">← BACK</div>';
   if(data&&data.length>0){
-    var html='<div class="detail-back" onclick="renderTab()">← BACK</div>';
     html+='<div class="card"><div class="card-header"><span class="card-title">ALL MEMORIES</span><span class="card-badge">'+data.length+'</span></div>';
-    data.slice(0,30).forEach(function(m){
-      html+='<div class="feed-item"><div class="feed-header"><span class="feed-agent">'+esc((m.agent||'').replace(/_/g,' '))+'</span>';
-      html+='<span class="feed-time">'+timeAgo(m.created_at)+'</span></div>';
-      html+='<div class="feed-text" style="-webkit-line-clamp:4">'+esc(cleanObs((m.observation||'').slice(0,500)))+'</div></div>';
+    data.forEach(function(m){html+=feedItem(m);});
+    html+='</div>';
+  }else{html+='<div class="card">No memories found</div>';}
+  c.innerHTML=html;
+}
+
+async function loadExecBrief(c){
+  c.innerHTML='<div class="back" onclick="goBack()">← COMMAND</div><div class="loading">GENERATING BRIEF</div>';
+  var data=await api('/api/exec-brief');
+  if(!data){c.innerHTML='<div class="back" onclick="goBack()">← COMMAND</div><div class="card">Could not generate brief</div>';return;}
+  var html='<div class="back" onclick="goBack()">← COMMAND</div>';
+  var ps=data.pipeline_summary||{},ah=data.agent_health||{};
+  html+='<div class="card"><div class="card-header"><span class="card-title">EXECUTIVE BRIEF</span><span class="card-badge">'+new Date().toLocaleDateString()+'</span></div>';
+  html+='<div class="stats" style="grid-template-columns:repeat(3,1fr);margin-bottom:0">';
+  html+=stat(ps.total_active||0,'ACTIVE','cyan');html+=stat(ps.pursuing||0,'PURSUING','green');html+=stat(ps.identified||0,'IDENTIFIED','gold');
+  html+='</div></div>';
+  var alerts=data.alerts||[];
+  if(alerts.length>0){
+    html+='<div class="card" style="border-left:3px solid var(--amber)"><div class="card-header"><span class="card-title">ALERTS</span><span class="card-badge">'+alerts.length+'</span></div>';
+    alerts.forEach(function(a){
+      var color=(a.days_remaining||99)<=5?'var(--red)':(a.days_remaining||99)<=14?'var(--amber)':'var(--cyan)';
+      html+='<div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.02)">';
+      html+='<div style="font-size:12px;color:var(--white)">'+esc(a.title||'')+'</div>';
+      if(a.days_remaining)html+='<div style="font-family:var(--font-mono);font-size:10px;color:'+color+'">'+a.days_remaining+' days — OPI '+(a.opi||'?')+'</div>';
+      html+='</div>';
     });
     html+='</div>';
-    c.innerHTML=html;
-  }else{c.innerHTML='<div class="detail-back" onclick="renderTab()">← BACK</div><div class="card">No memories found</div>';}
+  }
+  var deadlines=data.upcoming_deadlines||[];
+  if(deadlines.length>0){
+    html+='<div class="card"><div class="card-header"><span class="card-title">DEADLINES</span></div>';
+    deadlines.forEach(function(d){
+      html+='<div class="pipe-item" data-id="'+(d.id||'')+'"><div class="pipe-opi" style="font-size:16px">'+(d.days_remaining||'?')+'d</div>';
+      html+='<div class="pipe-info"><div class="pipe-title">'+esc(d.title||'')+'</div>';
+      html+='<div class="pipe-meta"><span>OPI '+(d.opi||'?')+'</span><span>'+(d.stage||'').toUpperCase()+'</span></div></div></div>';
+    });
+    html+='</div>';
+  }
+  var intl=data.recent_intel||[];
+  if(intl.length>0){
+    html+='<div class="card"><div class="card-header"><span class="card-title">RECENT INTEL</span></div>';
+    intl.forEach(function(i){
+      var cl=cleanObs(i.summary||'');if(cl.length<20)return;
+      html+='<div class="feed-item"><div class="feed-header"><span class="feed-agent">'+esc((i.agent||'').replace(/_/g,' '))+'</span>';
+      html+='<span class="feed-time">'+timeAgo(i.when)+'</span></div>';
+      html+='<div class="feed-text" onclick="this.classList.toggle(\'expanded\')">'+esc(cl)+'</div></div>';
+    });
+    html+='</div>';
+  }
+  html+='<div class="card"><div class="card-header"><span class="card-title">SYSTEM</span></div>';
+  html+=intelRow('Version',ah.version||'?');html+=intelRow('Agents',ah.active_agents||'?');html+=intelRow('Last Cycle',ah.last_cycle?timeAgo(ah.last_cycle)+' ago':'—');
+  html+='</div>';
+  c.innerHTML=html;bind();
 }
 
-// === HELPERS ===
-function stat(val,label,cc){return '<div class="stat"><div class="stat-value '+(cc||'')+'">'+(val!=null?val:'—')+'</div><div class="stat-label">'+label+'</div></div>';}
-
-function feedItem(m){
-  var agentName=(m.agent||'unknown').replace(/_/g,' ');
-  var obs=cleanObs((m.observation||'')).slice(0,140);
-  var oppName=m.opportunity_id?oppTitle(m.opportunity_id):'';
-  var html='<div class="feed-item"><div class="feed-header"><span class="feed-agent">'+esc(agentName)+'</span>';
-  if(oppName)html+='<span class="feed-opp-name">'+esc(oppName)+'</span>';
-  html+='<span class="feed-time">'+timeAgo(m.created_at)+'</span></div>';
-  html+='<div class="feed-text">'+esc(obs)+'</div></div>';
-  return html;
+async function loadCycleHistory(c){
+  c.innerHTML='<div class="back" onclick="goBack()">← COMMAND</div><div class="loading">LOADING</div>';
+  var data=await api('/api/cycle-history');
+  var html='<div class="back" onclick="goBack()">← COMMAND</div>';
+  if(data&&data.cycles){
+    html+='<div class="card"><div class="card-header"><span class="card-title">CYCLE HISTORY</span><span class="card-badge">'+data.total_cycles+'</span></div>';
+    data.cycles.forEach(function(cy){
+      html+='<div class="feed-item"><div class="feed-header"><span class="feed-agent">'+esc(cy.trigger||'?')+'</span><span class="feed-time">'+timeAgo(cy.timestamp)+'</span></div>';
+      html+='<div style="font-size:11px;color:var(--text)">'+(cy.agents_fired||0)+' agents — '+(cy.opps_analyzed||0)+' opps — '+cy.mode+(cy.zero_cost?' — $0':'')+'</div></div>';
+    });
+    html+='</div>';
+  }
+  c.innerHTML=html;
 }
 
-function agentCard(name,type){
-  var display=name.replace(/_/g,' ').replace(/agent$/,'').replace(/_agent$/,'').trim();
-  var typeLabel=type==='per-opp'?'PER-OPP':type==='gated'?'GATED':type==='core'?'CORE':'INTEL';
-  var lastTime=lastActivity(name);
-  return '<div class="agent-card '+type+'"><div class="agent-name">'+esc(display)+'</div><div class="agent-type">'+typeLabel+'</div>'+(lastTime?'<div class="agent-last">'+lastTime+'</div>':'')+'</div>';
+async function loadCompliance(c,id){
+  c.innerHTML='<div class="back" onclick="goBack()">← BACK</div><div class="loading">CHECKING COMPLIANCE</div>';
+  var data=await api('/api/compliance-check?id='+encodeURIComponent(id));
+  var html='<div class="back" onclick="goBack()">← BACK</div>';
+  if(data){
+    html+='<div class="card"><div class="card-header"><span class="card-title">COMPLIANCE CHECK</span></div>';
+    var content=data.compliance||data.result||data;
+    if(typeof content==='string'){
+      html+='<div style="font-size:12px;line-height:1.6;color:var(--text);white-space:pre-wrap">'+esc(cleanObs(content))+'</div>';
+    }else{
+      // Format object nicely
+      Object.keys(content).forEach(function(k){
+        var v=content[k];
+        html+='<div class="record expandable" onclick="this.classList.toggle(\'open\')">';
+        html+='<div class="record-title">'+esc(k.replace(/_/g,' ').toUpperCase())+' <span class="expand-arrow">▶</span></div>';
+        html+='<div class="expand-body">'+esc(typeof v==='string'?v:JSON.stringify(v,null,2))+'</div></div>';
+      });
+    }
+    html+='</div>';
+  }else{html+='<div class="card">Could not run compliance check</div>';}
+  c.innerHTML=html;
 }
 
-function lastActivity(agentName){
-  // Try exact match first, then common variations
-  var found=S.memories.find(function(m){
-    return m.agent===agentName||m.agent===agentName.replace(/_agent$/,'');
-  });
-  return found?timeAgo(found.created_at):'';
-}
-
-function intelRow(label,value){return '<div class="intel-row"><span class="intel-label">'+label+'</span><span class="intel-value">'+(value!=null?value:'—')+'</span></div>';}
-function timeAgo(ts){if(!ts)return '';var ms=Date.now()-new Date(ts).getTime();if(ms<60000)return 'now';if(ms<3600000)return Math.floor(ms/60000)+'m';if(ms<86400000)return Math.floor(ms/3600000)+'h';return Math.floor(ms/86400000)+'d';}
-function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML;}
-
-// === ACTIONS ===
-function bindEvents(){
+// ============================================================
+// ACTIONS
+// ============================================================
+function bind(){
   document.querySelectorAll('.pipe-item[data-id]').forEach(function(el){
-    el.addEventListener('click',function(){loadDetail(el.dataset.id);});
+    el.onclick=function(){
+      if(S.tab!=='pipeline'){
+        S.tab='pipeline';
+        document.querySelectorAll('.tab').forEach(function(t){t.classList.remove('active');});
+        var pt=document.querySelector('[data-tab="pipeline"]');if(pt)pt.classList.add('active');
+      }
+      goSub('detail',el.dataset.id);
+    };
   });
-  var fsEl=document.getElementById('feed-search');
-  if(fsEl){fsEl.addEventListener('input',function(){S.feedFilter=this.value;var c=document.getElementById('content');c.innerHTML=renderFeed();bindEvents();this.focus();var el2=document.getElementById('feed-search');if(el2){el2.selectionStart=el2.selectionEnd=el2.value.length;}});}
-}
-
-async function loadDetail(id){
-  // First show what we have from pipeline
-  var fromPipeline=S.pipeline.find(function(o){return o.id===id;});
-  if(fromPipeline){S.detail=fromPipeline;renderTab();}
-  // Then try to get enriched data
-  var data=await api('/api/opportunity-detail?id='+encodeURIComponent(id));
-  if(data){S.detail=data;renderTab();}
-  else if(!fromPipeline){
-    document.getElementById('content').innerHTML='<div class="detail-back" onclick="S.detail=null;renderTab()">← PIPELINE</div><div class="card"><div class="card-title">Could not load details</div></div>';
+  var fs=document.getElementById('feed-search');
+  if(fs){
+    fs.addEventListener('input',function(){
+      var v=this.value,p=this.selectionStart;
+      S.feedFilter=v;
+      document.getElementById('content').innerHTML=renderFeed();bind();
+      var el2=document.getElementById('feed-search');
+      if(el2){el2.focus();el2.setSelectionRange(p,p);}
+    });
   }
 }
 
 async function triggerCycle(){
   var btn=event.target;btn.textContent='RUNNING...';btn.style.color='var(--amber)';
   await api('/api/trigger');btn.textContent='TRIGGERED';btn.style.color='var(--green)';
-  setTimeout(function(){loadAll();},3000);
+  setTimeout(loadAll,3000);
 }
 
-async function loadExecBrief(){
-  var c=document.getElementById('content');c.innerHTML='<div class="loading">GENERATING BRIEF</div>';
-  var data=await api('/api/exec-brief');
-  if(!data){c.innerHTML='<div class="card">Could not generate brief</div>';return;}
-  
-  var html='<div class="detail-back" onclick="S.tab=\'cop\';renderTab()">← COMMAND</div>';
-  var ps=data.pipeline_summary||{};
-  var ah=data.agent_health||{};
-  
-  // Pipeline summary stats
-  html+='<div class="card"><div class="card-header"><span class="card-title">EXECUTIVE BRIEF</span><span class="card-badge">'+new Date().toLocaleDateString()+'</span></div>';
-  html+='<div class="stats" style="grid-template-columns:repeat(3,1fr);margin-bottom:0">';
-  html+=stat(ps.total_active||0,'ACTIVE','cyan');
-  html+=stat(ps.pursuing||0,'PURSUING','green');
-  html+=stat(ps.identified||0,'IDENTIFIED','gold');
-  html+='</div></div>';
-  
-  // Alerts
-  var alerts=data.alerts||[];
-  if(alerts.length>0){
-    html+='<div class="card" style="border-left:3px solid var(--amber)"><div class="card-header"><span class="card-title">ALERTS</span><span class="card-badge" style="background:rgba(240,160,48,0.1);color:var(--amber);border-color:rgba(240,160,48,0.2)">'+alerts.length+'</span></div>';
-    alerts.forEach(function(a){
-      var icon=a.type==='deadline'?'⏰':a.type==='disaster'?'🌊':'⚠️';
-      var color=a.days_remaining&&a.days_remaining<=5?'var(--red)':a.days_remaining&&a.days_remaining<=14?'var(--amber)':'var(--cyan)';
-      html+='<div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.02);display:flex;align-items:center;gap:8px">';
-      html+='<span style="font-size:14px">'+icon+'</span>';
-      html+='<div style="flex:1"><div style="font-size:12px;color:var(--white)">'+esc((a.title||'').slice(0,60))+'</div>';
-      if(a.days_remaining)html+='<div style="font-family:var(--font-mono);font-size:10px;color:'+color+'">'+a.days_remaining+' days remaining • OPI '+(a.opi||'?')+'</div>';
-      html+='</div></div>';
-    });
-    html+='</div>';
-  }
-  
-  // Upcoming deadlines
-  var deadlines=data.upcoming_deadlines||[];
-  if(deadlines.length>0){
-    html+='<div class="card"><div class="card-header"><span class="card-title">UPCOMING DEADLINES</span></div>';
-    deadlines.forEach(function(d){
-      var color=(d.days_remaining||99)<=7?'var(--red)':(d.days_remaining||99)<=14?'var(--amber)':'var(--cyan)';
-      html+='<div class="pipe-item"><div class="pipe-opi" style="color:'+color+';font-size:16px">'+(d.days_remaining||'?')+'d</div>';
-      html+='<div class="pipe-info"><div class="pipe-title">'+esc((d.title||'').slice(0,50))+'</div>';
-      html+='<div class="pipe-meta"><span>OPI '+(d.opi||'?')+'</span><span>'+(d.stage||'').toUpperCase()+'</span></div></div></div>';
-    });
-    html+='</div>';
-  }
-  
-  // Awaiting award
-  var awaiting=data.awaiting_award||[];
-  if(awaiting.length>0){
-    html+='<div class="card"><div class="card-header"><span class="card-title">AWAITING AWARD</span></div>';
-    awaiting.forEach(function(a){
-      html+='<div style="padding:6px 0;font-size:12px;color:var(--text)">'+esc(a.title||'')+' <span style="color:var(--cyan);font-family:var(--font-mono);font-size:10px">OPI '+(a.opi||'?')+'</span></div>';
-    });
-    html+='</div>';
-  }
-  
-  // Recent intel (cleaned)
-  var intel=data.recent_intel||[];
-  if(intel.length>0){
-    html+='<div class="card"><div class="card-header"><span class="card-title">RECENT INTEL</span></div>';
-    intel.slice(0,6).forEach(function(i){
-      var cleaned=cleanObs((i.summary||'').slice(0,300));
-      if(cleaned.length<20)return;
-      html+='<div class="feed-item"><div class="feed-header"><span class="feed-agent">'+esc((i.agent||'').replace(/_/g,' '))+'</span>';
-      html+='<span class="feed-time">'+timeAgo(i.when)+'</span></div>';
-      html+='<div class="feed-text">'+esc(cleaned.slice(0,140))+'</div></div>';
-    });
-    html+='</div>';
-  }
-  
-  // System health
-  html+='<div class="card"><div class="card-header"><span class="card-title">SYSTEM</span></div>';
-  html+=intelRow('Version',ah.version||'?');
-  html+=intelRow('Active Agents',ah.active_agents||'?');
-  html+=intelRow('Last Cycle',ah.last_cycle?timeAgo(ah.last_cycle)+' ago':'—');
-  html+='</div>';
-  
-  c.innerHTML=html;
+async function produceProposal(id){
+  var btn=event.target;btn.textContent='STARTING...';btn.style.color='var(--amber)';
+  await fetch(BASE+'/api/produce-proposal?id='+encodeURIComponent(id),{method:'POST'});
+  btn.textContent='RUNNING (~5min)';btn.style.color='var(--green)';
 }
 
-async function showLogs(){
-  var c=document.getElementById('content');c.innerHTML='<div class="loading">LOADING</div>';
-  var data=await api('/api/cycle-history');
-  if(data&&data.cycles){
-    var html='<div class="detail-back" onclick="S.tab=\'cop\';renderTab()">← COMMAND</div>';
-    html+='<div class="card"><div class="card-header"><span class="card-title">CYCLE HISTORY</span><span class="card-badge">'+data.total_cycles+' runs</span></div>';
-    data.cycles.forEach(function(cy){
-      html+='<div class="feed-item"><div class="feed-header"><span class="feed-agent">'+esc(cy.trigger||'?')+'</span><span class="feed-time">'+timeAgo(cy.timestamp)+'</span></div>';
-      html+='<div class="feed-text">'+(cy.agents_fired||0)+' agents • '+(cy.opps_analyzed||0)+' opps • '+cy.mode+(cy.zero_cost?' • $0':'')+'</div></div>';
-    });
-    html+='</div>';c.innerHTML=html;
-  }
-}
-
-async function produceProposal(id){event.target.textContent='STARTING...';event.target.style.color='var(--amber)';await fetch(BASE+'/api/produce-proposal?id='+encodeURIComponent(id),{method:'POST'});event.target.textContent='RUNNING (~5min)';event.target.style.color='var(--green)';}
-async function complianceCheck(id){var c=document.getElementById('content');c.innerHTML='<div class="loading">CHECKING COMPLIANCE</div>';var data=await api('/api/compliance-check?id='+encodeURIComponent(id));if(data){var html='<div class="detail-back" onclick="S.detail=null;renderTab()">← BACK</div><div class="card"><div class="card-header"><span class="card-title">COMPLIANCE CHECK</span></div><div class="detail-content">'+esc(JSON.stringify(data,null,2))+'</div></div>';c.innerHTML=html;}}
+async function showAgentDetail(name){goSub('agent-detail',name);}
 
 loadAll();
 setInterval(loadAll,120000);
