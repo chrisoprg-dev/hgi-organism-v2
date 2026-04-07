@@ -951,7 +951,16 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         'RULES:\n' +
         '- Produce ONLY what the solicitation asks for — nothing more, nothing less\n' +
         '- Every claim must be backed by real HGI data from the company profile and organism intelligence above\n' +
-        '- MINIMIZE [ACTION REQUIRED] flags — use them ONLY for items that genuinely cannot be completed without human action: wet signatures, notarizations, insurance certificates, contact info the system truly does not have. If the data exists anywhere in the context above, USE IT instead of flagging it.\n' +
+        '- MINIMIZE [ACTION REQUIRED] flags. Use them ONLY for: wet signatures/notarizations, resumes of assigned staff, final rate decisions, draft contracts from legal counsel, physical certificate copies (insurance, NMSDC), and W-9/SAM printouts. For everything else, AUTO-FILL with known HGI data:\n' +
+        '  * Insurance coverage: State "HGI maintains $5M fidelity bond, $5M Errors & Omissions, $2M General Liability, Workers Compensation at statutory limits, and $1M Commercial Auto. Certificates of insurance with Additional Insured endorsement naming CLIENT will be provided upon contract execution." Do NOT flag as ACTION REQUIRED.\n' +
+        '  * Professional Regulation licenses: State "No Louisiana Department of Professional Regulation license is required for disaster recovery consulting, program management, claims administration, construction management oversight, or grant management services. HGI professionals hold individual certifications as applicable to their roles." Do NOT flag as ACTION REQUIRED.\n' +
+        '  * Drug Free Workplace: Write the standard federal Drug Free Workplace Act compliance statement. Flag ONLY the signature line as ACTION REQUIRED.\n' +
+        '  * Lobbying Certification, Debarment Certification, Non-Collusion Affidavit: Write the standard federal compliance language for each. Flag ONLY signature lines as ACTION REQUIRED.\n' +
+        '  * Business license: State "HGI Global (Hammerman & Gainer LLC) is registered and licensed to conduct business in the State of Louisiana, Secretary of State File Number [to be confirmed]." Do NOT flag the whole section.\n' +
+        '  * Addenda acknowledgment: State "HGI has monitored centralauctionhouse.com for addenda. All addenda issued as of the submission date have been acknowledged on the applicable form."\n' +
+        '  * SAM.gov: State "HGI is registered in SAM.gov with active status. UEI: DL4SJEVKZ6H4."\n' +
+        '  * Contractor questionnaire forms: Pre-fill all company information (name, address, phone, email, officers, years in business, etc.) from the HGI profile. Flag ONLY signature lines.\n' +
+        '  * Target: 5 or fewer ACTION REQUIRED items in the entire proposal — only items requiring wet signatures, real resumes, or final rate approval.\n' +
         '- Use ONLY confirmed HGI past performance. Never fabricate projects, dollar amounts, or references.\n' +
         '- Include specific dollar amounts, dates, and project details from HGI data\n' +
         '- Professional, confident tone — this goes directly to evaluators. No hedging, no "we believe" or "we feel" — state capabilities as facts.\n' +
