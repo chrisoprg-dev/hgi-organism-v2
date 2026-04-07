@@ -3431,7 +3431,8 @@ async function claudeCall(system, prompt, maxTokens, opts) {
 // === MULTI-SEARCH: Targeted pre-research before agent reasoning ===
 async function multiSearch(queries) {
   var results = [];
-  for (var i = 0; i < queries.length; i++) {
+  var maxQueries = Math.min(queries.length, 5); // SESSION 89: Cap at 5 searches per agent to control token cost
+  for (var i = 0; i < maxQueries; i++) {
     try {
       var r = await anthropic.messages.create({
         model: 'claude-haiku-4-5-20251001',
@@ -3554,7 +3555,7 @@ async function buildCycleBrief(opp, state) {
 function oppFull(opp) {
   var rfpSection = '';
   if (opp.rfp_text && opp.rfp_text.trim().length > 200) {
-    rfpSection = '\n\n=== ACTUAL RFP/SOQ DOCUMENT TEXT ===\n' + opp.rfp_text.slice(0, 50000) + '\n=== END RFP DOCUMENT ===\n';
+    rfpSection = '\n\n=== ACTUAL RFP/SOQ DOCUMENT TEXT (first 15K chars — full doc available in produce-proposal) ===\n' + opp.rfp_text.slice(0, 15000) + '\n=== END RFP EXCERPT ===\n';
   }
   return 'OPPORTUNITY: ' + (opp.title || 'unknown') +
     '\nAgency: ' + (opp.agency || 'unknown') +
@@ -5741,21 +5742,10 @@ async function runSession(trigger) {
         return isGo && highOpi && hasRfp && noProposal && o.status === 'active';
       });
       if (proposalCandidates.length > 0) {
-        log('AUTO-PROPOSAL: ' + proposalCandidates.length + ' opps qualify for automatic proposal generation');
-        for (var api = 0; api < proposalCandidates.length; api++) {
-          var apOpp = proposalCandidates[api];
-          log('AUTO-PROPOSAL: Triggering produce-proposal for ' + (apOpp.title || '').slice(0, 50) + ' (OPI ' + apOpp.opi_score + ')');
-          try {
-            var apResp = await fetch('http://localhost:' + (process.env.PORT || 8080) + '/api/produce-proposal', {
-              method: 'POST', headers: {'Content-Type':'application/json'},
-              body: JSON.stringify({id: apOpp.id}),
-              signal: AbortSignal.timeout(300000) // 5 min timeout for Opus
-            });
-            log('AUTO-PROPOSAL: Triggered for ' + (apOpp.title || '').slice(0, 40) + ' — status ' + apResp.status);
-          } catch(ape) { log('AUTO-PROPOSAL error: ' + ape.message); }
-        }
+        // SESSION 89: DO NOT auto-fire Opus proposals — each costs $2-5. Log candidates for Christopher to review.
+        log('AUTO-PROPOSAL: ' + proposalCandidates.length + ' opps QUALIFY but NOT auto-firing (cost control). Use /api/produce-proposal?id=X manually.');
         await storeMemory('auto_proposal_trigger', null, 'proposal,automation',
-          'AUTO-PROPOSAL: Triggered ' + proposalCandidates.length + ' proposals: ' + proposalCandidates.map(function(c) { return (c.title||'').slice(0,40) + ' (OPI ' + c.opi_score + ')'; }).join(', '),
+          'AUTO-PROPOSAL CANDIDATES (not fired — awaiting President approval): ' + proposalCandidates.map(function(c) { return (c.title||'').slice(0,40) + ' (OPI ' + c.opi_score + ')'; }).join(', ') + '. Trigger manually: /api/produce-proposal?id=OPPORTUNITY_ID',
           'analysis', null, 'high');
       }
     } catch(e) { log('Auto-proposal check error: ' + e.message); }
