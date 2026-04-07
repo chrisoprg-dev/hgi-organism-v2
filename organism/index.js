@@ -4464,6 +4464,145 @@ async function autoRetrieveRFPs() {
 }
 
 
+
+// ============================================================
+// ORCHESTRATION PIPELINE — Sequential deep analysis for new/changed opps
+// Ported from V1 orchestrate.js. Runs scope→financial→research→winnability.
+// Fires automatically when an opp has RFP text but no scope_analysis.
+// ============================================================
+
+async function kbQuery(vertical, oppText) {
+  try {
+    var chunks = await supabase.from('knowledge_base_chunks')
+      .select('chunk_text,document_title,vertical')
+      .or('vertical.eq.' + (vertical || 'disaster') + ',vertical.is.null')
+      .order('created_at', { ascending: false })
+      .limit(8);
+    if (!chunks.data || chunks.data.length === 0) return '';
+    return 'HGI KNOWLEDGE BASE:\n' + chunks.data.map(function(c) {
+      return '[' + (c.document_title || 'KB') + '] ' + (c.chunk_text || '').slice(0, 600);
+    }).join('\n');
+  } catch(e) { return ''; }
+}
+
+async function orchestrateOpp(opp) {
+  var oppId = opp.id;
+  var d = String.fromCharCode(36);
+  log('ORCHESTRATE: Starting 5-step analysis for ' + (opp.title || '').slice(0, 50));
+
+  var rfpContent = (opp.rfp_text || '').slice(0, 12000);
+  var kbContext = await kbQuery(opp.vertical, opp.title + ' ' + (opp.agency || ''));
+
+  // Load relevant organism memory
+  var memContext = '';
+  try {
+    var mems = await supabase.from('organism_memory')
+      .select('observation,agent')
+      .eq('opportunity_id', oppId)
+      .order('created_at', { ascending: false })
+      .limit(5);
+    if (mems.data && mems.data.length > 0) {
+      memContext = '\nORGANISM MEMORY:\n' + mems.data.map(function(m) { return '[' + m.agent + '] ' + (m.observation || '').slice(0, 400); }).join('\n');
+    }
+  } catch(e) {}
+
+  var classGuide = 'HGI CORE (score 70-95): workers comp TPA, property casualty TPA, insurance guaranty, FEMA PA grant mgmt, CDBG-DR program admin, disaster recovery program mgmt, property tax appeals, workforce WIOA, construction MANAGEMENT (not physical), housing authority mgmt, HUD compliance, grant management, class action settlement admin, staff augmentation, call center ops. NOT HGI (score below 25): Medicaid, clinical health, behavioral health, physical construction, debris removal, insurance brokerage, IT services, engineering, environmental remediation.';
+
+  var results = { steps: [], errors: [] };
+
+  // STEP 1: SCOPE ANALYSIS
+  try {
+    var scopeResp = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6', max_tokens: 3000,
+      system: 'Senior government contracting scope analyst. ' + classGuide + ' Geography: LA TX FL MS AL GA. Be exhaustive. Cite specific RFP sections.',
+      messages: [{ role: 'user', content: 'Deep scope analysis for HGI go/no-go.\n\nOPPORTUNITY: ' + opp.title + '\nAGENCY: ' + (opp.agency || '') + '\nSTATE: ' + (opp.state || 'LA') + '\nVERTICAL: ' + (opp.vertical || 'general') + '\nRFP TEXT:\n' + rfpContent + '\n' + kbContext.slice(0, 2000) + memContext.slice(0, 2000) + '\n\nProvide:\n1. SUB-VERTICAL CLASSIFICATION — exact type of work, is this HGI core?\n2. SCOPE SUMMARY — what is being asked, plain English, 3-5 sentences\n3. DETAILED DELIVERABLES — every task and work product from the RFP\n4. EVALUATION CRITERIA — exact criteria and point values from RFP\n5. HGI CAPABILITY ALIGNMENT — map each deliverable to HGI past performance, flag gaps\n6. COMPLIANCE REQUIREMENTS — licenses, certs, insurance, bonding\n7. CRITICAL QUESTIONS — what must HGI clarify before committing' }]
+    });
+    var scopeText = (scopeResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
+    if (scopeText.length > 100) {
+      await supabase.from('opportunities').update({ scope_analysis: scopeText, last_updated: new Date().toISOString() }).eq('id', oppId);
+      results.steps.push('scope');
+      log('ORCHESTRATE: Scope done (' + scopeText.length + ' chars)');
+    }
+  } catch(e) { results.errors.push('scope:' + e.message); log('ORCHESTRATE: Scope error: ' + e.message); }
+
+  // STEP 2: FINANCIAL ANALYSIS
+  var scopeAnalysis = results.steps.indexOf('scope') >= 0 ? scopeText : (opp.scope_analysis || '');
+  try {
+    var finResp = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6', max_tokens: 2500,
+      system: 'HGI CFO-level financial analyst. Show math for every estimate. Never present estimate as RFP fact. Rate card: Principal ' + d + '220, Prog Dir ' + d + '210, SME ' + d + '200, Sr Grant Mgr ' + d + '180, Grant Mgr ' + d + '175, Sr PM ' + d + '180, PM ' + d + '155, Grant Writer ' + d + '145, Cost Est ' + d + '125, Admin ' + d + '65.',
+      messages: [{ role: 'user', content: 'Contract value estimation for HGI.\n\nOPP: ' + opp.title + '\nAGENCY: ' + (opp.agency || '') + '\nESTIMATED VALUE: ' + (opp.estimated_value || 'Not stated') + '\nSCOPE:\n' + (scopeAnalysis || '').slice(0, 2000) + memContext.slice(0, 1500) + '\n\nEstimate using THREE methods with visible math:\n1. STAFFING MATH — list every RFP position, realistic monthly hours (MSA = 20-80 hrs/mo not 160), multiply by rate, base period only\n2. COMPARABLE CONTRACTS — 2-3 similar contracts in same state/vertical\n3. PERCENTAGE OF FEDERAL FUNDING — if FEMA/CDBG/HMGP, estimate total federal allocation, admin fee 5-12%\n\nThen: CONSOLIDATED ESTIMATE (LOW/MID/HIGH base period), option years separate as UPSIDE\nSTAFFING PLAN, HGI COST TO DELIVER, PROFIT MARGIN, FINANCIAL RISKS, RECOMMENDATION (PURSUE/CONDITIONAL/PASS)' }]
+    });
+    var finText = (finResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
+    if (finText.length > 100) {
+      await supabase.from('opportunities').update({ financial_analysis: finText, last_updated: new Date().toISOString() }).eq('id', oppId);
+      results.steps.push('financial');
+      log('ORCHESTRATE: Financial done (' + finText.length + ' chars)');
+    }
+  } catch(e) { results.errors.push('financial:' + e.message); log('ORCHESTRATE: Financial error: ' + e.message); }
+
+  // STEP 3: RESEARCH with web search
+  var finAnalysis = results.steps.indexOf('financial') >= 0 ? finText : (opp.financial_analysis || '');
+  try {
+    var researchResp = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6', max_tokens: 3000,
+      tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+      system: 'HGI senior capture intelligence analyst. Always search the web for agency facts, incumbents, budgets. Never guess. Cite sources.',
+      messages: [{ role: 'user', content: 'Capture intelligence brief for HGI.\n\nOPP: ' + opp.title + '\nAGENCY: ' + (opp.agency || '') + '\nSTATE: ' + (opp.state || 'LA') + '\nOPI: ' + opp.opi_score + '\nSCOPE:\n' + (scopeAnalysis || '').slice(0, 1500) + '\nFINANCIAL:\n' + (finAnalysis || '').slice(0, 1500) + '\n' + kbContext.slice(0, 1500) + memContext.slice(0, 2000) + '\n\nSearch the web and provide:\n1. AGENCY PROFILE — budget, leadership, procurement patterns\n2. COMPETITIVE LANDSCAPE — who will bid, strengths/weaknesses vs HGI\n3. HGI WIN STRATEGY — 3 differentiators mapped to eval criteria\n4. RED FLAGS\n5. 48-HOUR ACTION PLAN — use role titles only, never names\n6. RISKS & CHALLENGES — honest assessment' }]
+    });
+    var researchText = (researchResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('\n');
+    if (researchText.length > 100) {
+      await supabase.from('opportunities').update({ research_brief: researchText, last_updated: new Date().toISOString() }).eq('id', oppId);
+      results.steps.push('research');
+      log('ORCHESTRATE: Research done (' + researchText.length + ' chars)');
+    }
+  } catch(e) { results.errors.push('research:' + e.message); log('ORCHESTRATE: Research error: ' + e.message); }
+
+  // STEP 4: REVISED OPI
+  var researchBrief = results.steps.indexOf('research') >= 0 ? researchText : (opp.research_brief || '');
+  try {
+    var opiResp = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6', max_tokens: 100,
+      system: 'OPI calibration engine. ' + classGuide + ' Return ONLY: REVISED_OPI: [number]',
+      messages: [{ role: 'user', content: 'Re-score for HGI with full intel.\nTitle: ' + opp.title + '\nAgency: ' + (opp.agency || '') + '\nOriginal OPI: ' + opp.opi_score + '\nSCOPE:\n' + (scopeAnalysis || '').slice(0, 1000) + '\nFINANCIAL:\n' + (finAnalysis || '').slice(0, 1000) + '\nRESEARCH:\n' + (researchBrief || '').slice(0, 1000) + '\n\nIf not HGI core work: score below 25. If core: Past Perf 30pts, Tech Cap 20pts, Competitive 15pts, Relationships 15pts, Strategic 10pts, Financial 10pts.\nReturn ONLY: REVISED_OPI: [number]' }]
+    });
+    var opiText = (opiResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
+    var opiMatch = opiText.match(/REVISED_OPI:\s*(\d+)/i);
+    if (opiMatch) {
+      var revisedOpi = parseInt(opiMatch[1]);
+      await supabase.from('opportunities').update({ opi_score: revisedOpi, last_updated: new Date().toISOString() }).eq('id', oppId);
+      results.revisedOpi = revisedOpi;
+      results.steps.push('opi_rescore');
+      log('ORCHESTRATE: OPI rescored ' + opp.opi_score + ' → ' + revisedOpi);
+    }
+  } catch(e) { results.errors.push('opi:' + e.message); }
+
+  // STEP 5: WINNABILITY
+  try {
+    var winResp = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6', max_tokens: 1500,
+      system: 'HGI chief capture officer making final bid decision. First line MUST be: PWIN: [number]% | RECOMMENDATION: [GO|CONDITIONAL GO|NO-BID]',
+      messages: [{ role: 'user', content: 'Final GO/NO-GO assessment.\nOPP: ' + opp.title + '\nAGENCY: ' + (opp.agency || '') + '\nOPI: ' + (results.revisedOpi || opp.opi_score) + '\nSCOPE:\n' + (scopeAnalysis || '').slice(0, 1000) + '\nFINANCIAL:\n' + (finAnalysis || '').slice(0, 1000) + '\nRESEARCH:\n' + (researchBrief || '').slice(0, 1000) + '\n\nFirst line: PWIN: X% | RECOMMENDATION: GO/CONDITIONAL GO/NO-BID\nThen: decision justification, top 3 win factors, top 3 risks, conditions for GO, teaming recommendation' }]
+    });
+    var winText = (winResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
+    var pwinMatch = winText.match(/PWIN:\s*(\d+)/i);
+    var recMatch = winText.match(/RECOMMENDATION:\s*(GO|CONDITIONAL GO|NO-BID)/i);
+    results.pwin = pwinMatch ? parseInt(pwinMatch[1]) : 0;
+    results.recommendation = recMatch ? recMatch[1] : 'UNDETERMINED';
+    if (winText.length > 50) {
+      await supabase.from('opportunities').update({ capture_action: ('PWIN: ' + results.pwin + '% | ' + results.recommendation + '\n\n' + winText).slice(0, 2000), last_updated: new Date().toISOString() }).eq('id', oppId);
+      results.steps.push('winnability');
+      log('ORCHESTRATE: Winnability done — PWIN ' + results.pwin + '% ' + results.recommendation);
+    }
+    // Store to organism_memory
+    await storeMemory('orchestrator', oppId, (opp.agency || '') + ',' + (opp.vertical || '') + ',winnability,' + results.recommendation, 'ORCHESTRATION COMPLETE for ' + opp.title + ': OPI ' + (results.revisedOpi || opp.opi_score) + ', PWIN ' + results.pwin + '%, ' + results.recommendation + '. Steps: ' + results.steps.join('+'), 'winnability', null, 'high');
+  } catch(e) { results.errors.push('winnability:' + e.message); }
+
+  log('ORCHESTRATE: Complete. Steps: ' + results.steps.join('+') + (results.errors.length > 0 ? ' Errors: ' + results.errors.join(', ') : ''));
+  return results;
+}
+
+
 // ============================================================
 // RUN SESSION — The execution engine
 // ============================================================
@@ -4496,6 +4635,29 @@ async function runSession(trigger) {
 
     // 1.5. AUTO-RFP RETRIEVAL — always runs, tracks new retrievals
     try { var rfpResults = await autoRetrieveRFPs(); if (rfpResults && rfpResults.length > 0) { var successfulRFPs = rfpResults.filter(function(r) { return r && r.retrieved; }); if (successfulRFPs.length > 0) { newRFPsRetrieved = successfulRFPs.length; log('EVENT: ' + successfulRFPs.length + ' new RFPs retrieved — will trigger full analysis for those opps'); successfulRFPs.forEach(function(r) { if (r && r.id) eventTriggeredOpps.push(r.id); }); } var refreshed = await supabase.from('opportunities').select('*').eq('status', 'active').order('opi_score', { ascending: false }).limit(15); if (refreshed.data) { state.pipeline = refreshed.data; activeOpps = state.pipeline.filter(function(o) { return (o.opi_score || 0) >= 65; }); } } } catch (e) { log('Auto-RFP error: ' + e.message); }
+
+    // 2. ORCHESTRATION — Run full 5-step analysis on opps that need it
+    // Triggers when: scope_analysis is NULL/empty AND rfp_text has real content
+    try {
+      var needsOrch = state.pipeline.filter(function(o) {
+        var hasRfp = (o.rfp_text || '').length > 2000;
+        var noScope = !o.scope_analysis || (o.scope_analysis || '').length < 200;
+        var isActive = o.status === 'active' && (o.opi_score || 0) >= 60;
+        return hasRfp && noScope && isActive;
+      });
+      if (needsOrch.length > 0) {
+        log('ORCHESTRATE: ' + needsOrch.length + ' opps need full analysis');
+        for (var oi = 0; oi < needsOrch.length; oi++) {
+          try {
+            var orchResult = await orchestrateOpp(needsOrch[oi]);
+            allResults.push({ agent: 'orchestrator', chars: 500, opp: (needsOrch[oi].title || '').slice(0, 40), steps: orchResult.steps });
+            // Refresh state after orchestration changes OPI
+            var refreshOrch = await supabase.from('opportunities').select('*').eq('status', 'active').order('opi_score', { ascending: false }).limit(15);
+            if (refreshOrch.data) { state.pipeline = refreshOrch.data; activeOpps = state.pipeline.filter(function(o) { return (o.opi_score || 0) >= 65; }); }
+          } catch(oe) { log('ORCHESTRATE error on ' + (needsOrch[oi].title || '').slice(0, 40) + ': ' + oe.message); }
+        }
+      }
+    } catch(e) { log('Orchestration check error: ' + e.message); }
 
     // SKELETON GATE: In skeleton mode, only run essential system agents + event-triggered opps
     if (isSkeleton) {
