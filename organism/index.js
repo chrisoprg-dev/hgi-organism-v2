@@ -4992,8 +4992,19 @@ async function agentHunting(state) {
     try {
       var cand = preFiltered[c];
       var scorePrompt = HGI + '\n\nORGANISM INTELLIGENCE (use this to adjust scoring — relationships, competitor weaknesses, disasters, budget windows, and outcome lessons all affect how HGI should score this):' + huntContext +
+        '\n\nPER-VERTICAL OPI SCORING GUIDE — score each vertical on ITS OWN merits, not compared to DR:' +
+        '\nDISASTER (disaster): Score 70+ if LA/TX/FL/MS/AL/GA, FEMA PA or CDBG-DR, program mgmt not physical work. HGI has $750M+ managed FEMA funds.' +
+        '\nTPA/CLAIMS (tpa): Score 70+ if workers comp TPA, property/casualty claims admin, insurance guaranty, self-insured claims, liability claims. HGI has 20+ years TPCIGA/LIGA, $283K/mo City of NOLA WC TPA (ACTIVE).' +
+        '\nPROPERTY TAX/BILLING (tax_appeals): Score 70+ if property tax appeals, ad valorem, utility billing disputes, water billing, revenue recovery. HGI has $200K/mo SWBNO billing appeals (ACTIVE). White space — few competitors.' +
+        '\nWORKFORCE/WIOA (workforce): Score 70+ if WIOA administration, workforce board operations, unemployment claims, job training program mgmt, career services. HGI has 15,250+ claims adjudicated, statewide COVID contact tracing.' +
+        '\nCONSTRUCTION MGMT (construction): Score 70+ if construction MANAGEMENT/oversight/CM-at-risk, NOT physical construction. School boards, FEMA-funded facilities, capital programs. HGI has $2.96M TPSD CM (completed).' +
+        '\nHOUSING/HUD (housing): Score 70+ if housing authority mgmt, HUD compliance, Section 8/HCV admin, public housing, HMGP housing. HGI has Road Home + HAP $950M + HMGP experience.' +
+        '\nGRANT MGMT (grant): Score 70+ if pre-award/post-award grant admin, sub-recipient monitoring, federal grant management, Single Audit. HGI has grant admin across all programs.' +
+        '\nPROGRAM ADMIN (federal): Score 70+ if federal/state program administration, PMO, case advisory, BPO. HGI has PBGC (34M beneficiaries).' +
+        '\nFILTER: Score as FILTER if Medicaid, clinical health, physical construction, IT, engineering, environmental remediation, insurance brokerage, equipment/supplies.' +
+        '\n\nCRITICAL: A TPA opportunity in Louisiana with $1M+ value should score 75-85, NOT 13. Score based on HGI fit for THAT VERTICAL.' +
         '\n\nOPP: ' + cand.title + ' | ' + cand.agency + ' | ' + (cand.description || '').slice(0, 300) +
-        '\n\nJSON only: {"opi":N,"vertical":"disaster|tpa|workforce|housing|construction|grant|federal|FILTER","capture_action":"GO|WATCH|NO-BID","why":"1 sentence including any relationship/competitive/timing advantage"}';
+        '\n\nJSON only: {"opi":N,"vertical":"disaster|tpa|workforce|housing|construction|grant|tax_appeals|federal|FILTER","capture_action":"GO|WATCH|NO-BID","why":"1 sentence including any relationship/competitive/timing advantage"}';
       var scoreResp = await anthropic.messages.create({
         model: 'claude-haiku-4-5-20251001', max_tokens: 200,
         messages: [{ role: 'user', content: scorePrompt }]
