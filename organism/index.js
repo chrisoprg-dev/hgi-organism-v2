@@ -4982,8 +4982,8 @@ async function agentHunting(state) {
     for (var hi = 0; hi < hgiRelevant.length; hi++) {
       if (text.includes(hgiRelevant[hi])) return true;
     }
-    // If it matches neither list, keep it for Haiku to decide (could be something new)
-    return true;
+    // If it matches neither list, DROP it — CB has hundreds of irrelevant bids per entity
+    return false;
   });
   log('HUNTING: Pre-filter: ' + deduped.length + ' → ' + preFiltered.length + ' candidates (' + (deduped.length - preFiltered.length) + ' obvious non-HGI removed)');
   var qualified = [];
