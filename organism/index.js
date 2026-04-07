@@ -517,33 +517,212 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       var opp = oppR.data;
       if (!opp) { log('PROPOSAL ENGINE: Opp not found ' + ppId); return; }
 
-      // 2. Load all memories
-      var memR = await supabase.from('organism_memory').select('agent,observation,memory_type,created_at')
-        .eq('opportunity_id', ppId).neq('memory_type','decision_point')
-        .order('created_at',{ascending:false}).limit(200);
-      var mems = memR.data || [];
+      // ═══════════════════════════════════════════════════════════
+      // ALL-INTO-ALL: Load EVERY source of intelligence the organism has.
+      // The proposal is the organism's complete intelligence expressed as a document.
+      // Every finding from every agent, every table, every cross-reference flows in.
+      // ═══════════════════════════════════════════════════════════
+      var agency = (opp.agency||'').trim();
+      var agencyLower = agency.toLowerCase();
+      var vertical = (opp.vertical||'disaster recovery').trim();
+      var verticalLower = vertical.toLowerCase();
+      var oppState = (opp.state||'Louisiana').trim();
 
-      // 3. Load KB chunks (relevant to vertical)
-      var kbR = await supabase.from('knowledge_base_chunks').select('content,source_document')
-        .ilike('content', '%' + (opp.vertical || 'disaster recovery') + '%')
-        .order('id',{ascending:false}).limit(30);
-      // Fallback: if filtered returns < 5, get unfiltered
-      if (!kbR.data || kbR.data.length < 5) {
-        kbR = await supabase.from('knowledge_base_chunks').select('content,source_document')
-          .order('id',{ascending:false}).limit(30);
+      // Helper: fuzzy match for filtering cross-references
+      function matchesContext(text) {
+        if (!text) return false;
+        var t = text.toLowerCase();
+        return (agencyLower && t.indexOf(agencyLower) > -1) ||
+               t.indexOf(verticalLower) > -1 ||
+               (oppState && t.indexOf(oppState.toLowerCase()) > -1);
       }
-      var kbChunks = (kbR.data || []).map(function(c){ return c.content; }).join('\n---\n').slice(0, 8000);
 
-      // 4. Build agent intelligence summary by category
+      log('PROPOSAL ENGINE ALL-INTO-ALL: Loading all intelligence for ' + (opp.title||'').slice(0,60));
+
+      // Run ALL queries in parallel — every table, every source
+      var allQueries = await Promise.allSettled([
+        // 1. Direct opp memories (what agents found about THIS opportunity)
+        supabase.from('organism_memory').select('agent,observation,memory_type,entity_tags,confidence,created_at')
+          .eq('opportunity_id', ppId).neq('memory_type','decision_point')
+          .order('created_at',{ascending:false}).limit(300),
+
+        // 2. Cross-opp memories (patterns, lessons, insights from ALL other opps)
+        supabase.from('organism_memory').select('agent,observation,opportunity_id,memory_type,entity_tags,created_at')
+          .neq('opportunity_id', ppId).neq('memory_type','decision_point')
+          .order('created_at',{ascending:false}).limit(500),
+
+        // 3. Competitive intelligence — ALL competitors (filter later by relevance)
+        supabase.from('competitive_intelligence').select('competitor_name,agency,contract_value,outcome,bid_price,strengths,weaknesses,strategic_notes,hq_location,hq_state,company_size,certifications,key_personnel,active_states,active_verticals,known_contracts,price_intelligence,incumbent_at,teaming_history,win_rate_estimate,threat_level,last_seen_bidding,opportunity_id,vertical')
+          .order('created_at',{ascending:false}).limit(200),
+
+        // 4. Relationship graph — ALL contacts
+        supabase.from('relationship_graph').select('contact_name,title,organization,email,phone,relationship_strength,notes,connected_orgs,role_in_procurement,agency,state,contact_type,priority,hgi_relationship,outreach_status')
+          .order('created_at',{ascending:false}).limit(200),
+
+        // 5. Disaster alerts — ALL (filter by state/geography)
+        supabase.from('disaster_alerts').select('disaster_number,disaster_name,state,declaration_date,incident_type,counties,fema_programs,procurement_window,hgi_recommendation,threat_level,status')
+          .order('created_at',{ascending:false}).limit(100),
+
+        // 6. Budget cycles — ALL (filter by agency/state/vertical)
+        supabase.from('budget_cycles').select('agency,state,fiscal_year_start,fiscal_year_end,budget_amount,procurement_window,rfp_timing,hgi_vertical,notes')
+          .order('created_at',{ascending:false}).limit(100),
+
+        // 7. Recompete tracker — ALL (filter by agency/vertical)
+        supabase.from('recompete_tracker').select('client,contract_name,vertical,hgi_incumbent,known_competitor,contract_start_date,contract_end_date,estimated_value_annual,procurement_contact,procurement_contact_info,decision_maker,status,notes,rfp_expected_date')
+          .order('created_at',{ascending:false}).limit(100),
+
+        // 8. Regulatory changes — ALL (filter by vertical)
+        supabase.from('regulatory_changes').select('regulation_name,agency_source,effective_date,category,impact_level,affected_verticals,summary,hgi_action_required')
+          .order('created_at',{ascending:false}).limit(100),
+
+        // 9. Teaming partners — ALL
+        supabase.from('teaming_partners').select('partner_name,capability,location,certifications,past_teaming,verticals,fit_score,contact_info,notes')
+          .order('fit_score',{ascending:false}).limit(50),
+
+        // 10. Agency profiles — ALL (filter by agency name match)
+        supabase.from('agency_profiles').select('agency_name,state,agency_type,annual_budget,key_contacts,procurement_process,incumbent_contractors,hgi_relationship,hgi_history,verticals,notes')
+          .order('created_at',{ascending:false}).limit(50),
+
+        // 11. Pipeline analytics — ALL patterns and insights
+        supabase.from('pipeline_analytics').select('category,title,insight,affected_verticals,affected_agencies,confidence,recommendation')
+          .order('created_at',{ascending:false}).limit(50),
+
+        // 12. Knowledge base chunks — broad pull, then filter
+        supabase.from('knowledge_base_chunks').select('content,source_document')
+          .order('id',{ascending:false}).limit(60),
+
+        // 13. Outcome lessons — completed opps with outcomes (wins, losses, no-bids)
+        supabase.from('opportunities').select('title,agency,vertical,state,opi_score,outcome,outcome_notes,scope_analysis,financial_analysis,research_brief,capture_action')
+          .not('outcome','is',null)
+          .order('last_updated',{ascending:false}).limit(20),
+
+        // 14. Similar active pursuits — what we're learning from parallel efforts
+        supabase.from('opportunities').select('title,agency,vertical,state,opi_score,stage,scope_analysis,research_brief,capture_action,why_hgi_wins')
+          .eq('status','active').neq('id',ppId)
+          .order('opi_score',{ascending:false}).limit(15),
+
+        // 15. System performance / OPI calibration data
+        supabase.from('system_performance_log').select('event_type,metric_type,metric_value,details,opportunity_id')
+          .order('created_at',{ascending:false}).limit(50)
+      ]);
+
+      // Extract results (safe — allSettled never throws)
+      function getData(idx) { return (allQueries[idx].status === 'fulfilled' && allQueries[idx].value.data) || []; }
+
+      var mems = getData(0);
+      var crossMemsRaw = getData(1);
+      var ciAll = getData(2);
+      var rgAll = getData(3);
+      var disasterAll = getData(4);
+      var budgetAll = getData(5);
+      var recompeteAll = getData(6);
+      var regAll = getData(7);
+      var teamingAll = getData(8);
+      var agencyProfilesAll = getData(9);
+      var analyticsAll = getData(10);
+      var kbChunksRaw = getData(11);
+      var outcomeOpps = getData(12);
+      var siblingOpps = getData(13);
+      var perfLog = getData(14);
+
+      log('PROPOSAL ENGINE ALL-INTO-ALL loaded: ' + mems.length + ' direct mems, ' + crossMemsRaw.length + ' cross mems, ' +
+          ciAll.length + ' competitors, ' + rgAll.length + ' contacts, ' + disasterAll.length + ' disasters, ' +
+          budgetAll.length + ' budget cycles, ' + recompeteAll.length + ' recompetes, ' + regAll.length + ' regulations, ' +
+          teamingAll.length + ' teaming, ' + agencyProfilesAll.length + ' agency profiles, ' +
+          analyticsAll.length + ' analytics, ' + kbChunksRaw.length + ' KB chunks, ' +
+          outcomeOpps.length + ' outcomes, ' + siblingOpps.length + ' siblings, ' + perfLog.length + ' perf logs');
+
+      // ── FILTER cross-opp memories to those relevant to this pursuit ──
+      var crossMems = crossMemsRaw.filter(function(m) {
+        return matchesContext(m.observation) || matchesContext(m.entity_tags);
+      }).slice(0, 40);
+
+      // ── FILTER competitive intel to this opp + same agency/vertical/state ──
+      var ciRelevant = ciAll.filter(function(c) {
+        return c.opportunity_id === ppId || matchesContext(c.agency) ||
+               matchesContext(c.vertical) || matchesContext(c.active_states) ||
+               matchesContext(c.incumbent_at);
+      });
+
+      // ── FILTER contacts to this opp + same agency ──
+      var rgRelevant = rgAll.filter(function(r) {
+        return r.opportunity_id === ppId || matchesContext(r.organization) ||
+               matchesContext(r.agency) || matchesContext(r.connected_orgs);
+      });
+
+      // ── FILTER disasters to relevant state/geography ──
+      var disasterRelevant = disasterAll.filter(function(d) {
+        return (d.state||'').toLowerCase() === oppState.toLowerCase() ||
+               matchesContext(d.counties) || matchesContext(d.disaster_name);
+      });
+
+      // ── FILTER budget cycles ──
+      var budgetRelevant = budgetAll.filter(function(b) {
+        return matchesContext(b.agency) || (b.state||'').toLowerCase() === oppState.toLowerCase() ||
+               matchesContext(b.hgi_vertical);
+      });
+
+      // ── FILTER recompete tracker ──
+      var recompeteRelevant = recompeteAll.filter(function(r) {
+        return matchesContext(r.client) || matchesContext(r.contract_name) ||
+               matchesContext(r.known_competitor) || matchesContext(r.vertical);
+      });
+
+      // ── FILTER regulatory changes to relevant verticals ──
+      var regRelevant = regAll.filter(function(r) {
+        return matchesContext(r.affected_verticals) || matchesContext(r.summary) ||
+               matchesContext(r.agency_source);
+      });
+
+      // ── FILTER teaming partners to relevant verticals ──
+      var teamingRelevant = teamingAll.filter(function(t) {
+        return matchesContext(t.verticals) || matchesContext(t.capability) ||
+               matchesContext(t.location);
+      });
+
+      // ── FILTER agency profiles ──
+      var agencyRelevant = agencyProfilesAll.filter(function(a) {
+        return matchesContext(a.agency_name) || matchesContext(a.verticals) ||
+               (a.state||'').toLowerCase() === oppState.toLowerCase();
+      });
+
+      // ── FILTER pipeline analytics ──
+      var analyticsRelevant = analyticsAll.filter(function(a) {
+        return matchesContext(a.affected_agencies) || matchesContext(a.affected_verticals) ||
+               matchesContext(a.insight);
+      });
+
+      // ── KB chunks: filter by vertical keyword, then fallback to all ──
+      var kbFiltered = kbChunksRaw.filter(function(c) {
+        return matchesContext(c.content);
+      });
+      if (kbFiltered.length < 5) kbFiltered = kbChunksRaw;
+      var kbChunks = kbFiltered.map(function(c) { return c.content; }).join('\n---\n').slice(0, 12000);
+
+      // ── FILTER outcome lessons to same vertical/agency ──
+      var outcomeRelevant = outcomeOpps.filter(function(o) {
+        return matchesContext(o.agency) || matchesContext(o.vertical) || matchesContext(o.state);
+      });
+
+      // ── Sibling opps: same vertical or agency ──
+      var siblingRelevant = siblingOpps.filter(function(s) {
+        return matchesContext(s.agency) || matchesContext(s.vertical);
+      });
+
+      // ── ASSEMBLE: Build categorized intelligence sections ──
+
+      // Direct opp memories by agent category
       var intelSummary = '';
       var categories = {
-        'Scope & Requirements': ['scope','quality_gate','compliance','compliance_matrix'],
-        'Competitive Intelligence': ['intelligence','competitor','research'],
-        'Financial & Pricing': ['financial','price','cost','rate_table'],
-        'Staffing': ['staffing','recruiting','bench','talent'],
-        'Win Strategy': ['winnability','capture','brief'],
-        'Proposal Drafts': ['proposal','assembly','red_team','content'],
-        'Graphics & Diagrams': ['graphics','org_chart','diagram']
+        'Scope & Requirements': ['scope','quality_gate','compliance','compliance_matrix','orchestrat'],
+        'Competitive Intelligence': ['intelligence','competitor','research','deep_dive','loss'],
+        'Financial & Pricing': ['financial','price','cost','rate_table','budget'],
+        'Staffing & Talent': ['staffing','recruiting','bench','talent'],
+        'Win Strategy & Winnability': ['winnability','capture','brief','executive'],
+        'Client & Relationship Intel': ['crm','relationship','contact','agency_profile'],
+        'Proposal Drafts & Reviews': ['proposal','assembly','red_team','content'],
+        'Disaster & Regulatory Context': ['disaster','regulatory','recompete','teaming','budget_cycle'],
+        'Discovery & Pipeline Patterns': ['discovery','pipeline','scanner','dashboard','self_awareness','hunt','scraper']
       };
       Object.keys(categories).forEach(function(cat) {
         var keywords = categories[cat];
@@ -552,27 +731,184 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
           return keywords.some(function(k) { return a.indexOf(k) > -1; });
         });
         if (catMems.length > 0) {
-          intelSummary += '\n## ' + cat + '\n';
-          catMems.slice(0,8).forEach(function(m) {
-            intelSummary += '[' + m.agent + ']: ' + (m.observation||'').slice(0,3000) + '\n';
+          intelSummary += '\n### ' + cat + '\n';
+          catMems.slice(0,10).forEach(function(m) {
+            intelSummary += '[' + m.agent + ' | ' + (m.memory_type||'') + ']: ' + (m.observation||'').slice(0,4000) + '\n';
           });
         }
       });
 
-      // 5. Build the mega-prompt
+      // Cross-opp intelligence section
+      var crossIntel = '';
+      if (crossMems.length > 0) {
+        crossIntel = crossMems.map(function(m) {
+          return '[' + m.agent + ' from other pursuit]: ' + (m.observation||'').slice(0,2000);
+        }).join('\n').slice(0, 8000);
+      }
+
+      // Structured competitive intelligence
+      var ciText = '';
+      if (ciRelevant.length > 0) {
+        ciText = ciRelevant.map(function(c) {
+          return '### ' + (c.competitor_name||'Unknown') +
+            '\nHQ: ' + (c.hq_location||'') + ' | Size: ' + (c.company_size||'') + ' | Threat: ' + (c.threat_level||'') +
+            '\nStrengths: ' + (c.strengths||'') +
+            '\nWeaknesses: ' + (c.weaknesses||'') +
+            '\nKnown contracts: ' + (c.known_contracts||'') +
+            '\nPrice intel: ' + (c.price_intelligence||'') +
+            '\nIncumbent at: ' + (c.incumbent_at||'') +
+            '\nTeaming history: ' + (c.teaming_history||'') +
+            '\nWin rate: ' + (c.win_rate_estimate||'') +
+            '\nStrategy notes: ' + (c.strategic_notes||'');
+        }).join('\n\n').slice(0, 8000);
+      }
+
+      // Relationship/contact intelligence
+      var rgText = '';
+      if (rgRelevant.length > 0) {
+        rgText = rgRelevant.map(function(r) {
+          return '- ' + (r.contact_name||'') + ' | ' + (r.title||'') + ' @ ' + (r.organization||'') +
+            ' | Role: ' + (r.role_in_procurement||'') + ' | Strength: ' + (r.relationship_strength||'') +
+            ' | HGI relationship: ' + (r.hgi_relationship||'') + ' | Notes: ' + (r.notes||'');
+        }).join('\n').slice(0, 4000);
+      }
+
+      // Disaster context
+      var disasterText = '';
+      if (disasterRelevant.length > 0) {
+        disasterText = disasterRelevant.map(function(d) {
+          return '- ' + (d.disaster_number||'') + ': ' + (d.disaster_name||'') + ' (' + (d.declaration_date||'') + ')' +
+            ' | Type: ' + (d.incident_type||'') + ' | Counties: ' + (d.counties||'') +
+            ' | FEMA Programs: ' + (d.fema_programs||'') + ' | Procurement window: ' + (d.procurement_window||'') +
+            ' | HGI recommendation: ' + (d.hgi_recommendation||'');
+        }).join('\n').slice(0, 4000);
+      }
+
+      // Budget cycles
+      var budgetText = '';
+      if (budgetRelevant.length > 0) {
+        budgetText = budgetRelevant.map(function(b) {
+          return '- ' + (b.agency||'') + ' (' + (b.state||'') + '): FY ' + (b.fiscal_year_start||'') + '-' + (b.fiscal_year_end||'') +
+            ' | Budget: ' + (b.budget_amount||'') + ' | Procurement window: ' + (b.procurement_window||'') +
+            ' | RFP timing: ' + (b.rfp_timing||'') + ' | Notes: ' + (b.notes||'');
+        }).join('\n').slice(0, 3000);
+      }
+
+      // Recompete tracker
+      var recompeteText = '';
+      if (recompeteRelevant.length > 0) {
+        recompeteText = recompeteRelevant.map(function(r) {
+          return '- ' + (r.client||'') + ': ' + (r.contract_name||'') +
+            ' | HGI incumbent: ' + (r.hgi_incumbent||'') + ' | Competitor: ' + (r.known_competitor||'') +
+            ' | Value: ' + (r.estimated_value_annual||'') + ' | End: ' + (r.contract_end_date||'') +
+            ' | Decision maker: ' + (r.decision_maker||'') + ' | Status: ' + (r.status||'');
+        }).join('\n').slice(0, 3000);
+      }
+
+      // Regulatory changes
+      var regText = '';
+      if (regRelevant.length > 0) {
+        regText = regRelevant.map(function(r) {
+          return '- ' + (r.regulation_name||'') + ' (effective ' + (r.effective_date||'') + ')' +
+            ' | Impact: ' + (r.impact_level||'') + ' | Summary: ' + (r.summary||'').slice(0,500) +
+            ' | HGI action: ' + (r.hgi_action_required||'');
+        }).join('\n').slice(0, 3000);
+      }
+
+      // Teaming partners
+      var teamingText = '';
+      if (teamingRelevant.length > 0) {
+        teamingText = teamingRelevant.map(function(t) {
+          return '- ' + (t.partner_name||'') + ' | Capability: ' + (t.capability||'') +
+            ' | Location: ' + (t.location||'') + ' | Certs: ' + (t.certifications||'') +
+            ' | Fit: ' + (t.fit_score||'') + ' | Past teaming: ' + (t.past_teaming||'');
+        }).join('\n').slice(0, 3000);
+      }
+
+      // Agency profiles
+      var agencyText = '';
+      if (agencyRelevant.length > 0) {
+        agencyText = agencyRelevant.map(function(a) {
+          return '### ' + (a.agency_name||'') + ' (' + (a.state||'') + ')' +
+            '\nType: ' + (a.agency_type||'') + ' | Budget: ' + (a.annual_budget||'') +
+            '\nProcurement process: ' + (a.procurement_process||'') +
+            '\nIncumbent contractors: ' + (a.incumbent_contractors||'') +
+            '\nHGI relationship: ' + (a.hgi_relationship||'') +
+            '\nHGI history: ' + (a.hgi_history||'') +
+            '\nKey contacts: ' + (a.key_contacts||'') +
+            '\nNotes: ' + (a.notes||'');
+        }).join('\n\n').slice(0, 4000);
+      }
+
+      // Pipeline analytics / patterns
+      var analyticsText = '';
+      if (analyticsRelevant.length > 0) {
+        analyticsText = analyticsRelevant.map(function(a) {
+          return '- [' + (a.category||'') + '] ' + (a.title||'') + ': ' + (a.insight||'').slice(0,500) +
+            ' | Recommendation: ' + (a.recommendation||'');
+        }).join('\n').slice(0, 3000);
+      }
+
+      // Outcome lessons — what we learned from wins/losses/no-bids
+      var outcomeText = '';
+      if (outcomeRelevant.length > 0) {
+        outcomeText = outcomeRelevant.map(function(o) {
+          return '### ' + (o.title||'').slice(0,80) + ' — ' + (o.outcome||'').toUpperCase() +
+            '\nAgency: ' + (o.agency||'') + ' | OPI: ' + (o.opi_score||'') +
+            '\nOutcome notes: ' + (o.outcome_notes||'') +
+            '\nCapture analysis: ' + (o.capture_action||'').slice(0,1000);
+        }).join('\n\n').slice(0, 4000);
+      }
+
+      // Sibling opps — what we're learning from parallel pursuits
+      var siblingText = '';
+      if (siblingRelevant.length > 0) {
+        siblingText = siblingRelevant.map(function(s) {
+          return '- ' + (s.title||'').slice(0,80) + ' (OPI ' + (s.opi_score||'') + ', ' + (s.stage||'') + ')' +
+            ' | Why HGI wins: ' + (s.why_hgi_wins||'') +
+            ' | Research: ' + (s.research_brief||'').slice(0,500);
+        }).join('\n').slice(0, 4000);
+      }
+
+      // ═══ BUILD THE MEGA-PROMPT WITH ALL INTELLIGENCE ═══
       var D = String.fromCharCode(36);
       var proposalPrompt = 'You are the HGI Global proposal production engine. Your job is to produce a COMPLETE, SUBMISSION-READY response document.\n\n' +
+        'THE ENTIRE INTELLIGENCE OF THE HGI ORGANISM IS BELOW. Use ALL of it. Every competitive insight informs your ghost language. Every past outcome teaches what works. Every relationship tells you who the evaluators are. Every regulatory change shapes compliance language. Every KB chunk provides proven methodology. This proposal must be the synthesis of everything the organism knows — not a generic document with data sprinkled in.\n\n' +
         '## OPPORTUNITY\n' +
         'Title: ' + (opp.title||'') + '\n' +
         'Agency: ' + (opp.agency||'') + '\n' +
+        'State: ' + oppState + '\n' +
+        'Vertical: ' + vertical + '\n' +
         'Due: ' + (opp.due_date||'TBD') + '\n' +
-        'Value: ' + (opp.estimated_value||'TBD') + '\n\n' +
-        '## RFP/SOQ REQUIREMENTS\n' + ((opp.rfp_text && opp.rfp_text.trim().length > 200) ? opp.rfp_text.slice(0, 50000) : (opp.scope_analysis || opp.description || 'No RFP text available')) + '\n\n' +
+        'Value: ' + (opp.estimated_value||'TBD') + '\n' +
+        'OPI Score: ' + (opp.opi_score||'') + '\n' +
+        'Stage: ' + (opp.stage||'') + '\n' +
+        'Incumbent: ' + (opp.incumbent||'None identified') + '\n' +
+        'Recompete: ' + (opp.recompete||'Unknown') + '\n' +
+        'Why HGI Wins: ' + (opp.why_hgi_wins||'Not yet analyzed') + '\n' +
+        'HGI Fit: ' + (opp.hgi_fit||'') + '\n' +
+        'HGI Relevance: ' + (opp.hgi_relevance||'') + '\n\n' +
+        '## RFP/SOQ REQUIREMENTS (THE ACTUAL DOCUMENT)\n' + ((opp.rfp_text && opp.rfp_text.trim().length > 200) ? opp.rfp_text.slice(0, 50000) : (opp.scope_analysis || opp.description || 'No RFP text available')) + '\n\n' +
         '## HGI COMPANY PROFILE\n' + HGI + '\n\n' +
-        '## ORGANISM INTELLIGENCE (43 agents analyzed this opportunity)\n' + intelSummary + '\n\n' +
-        '## KNOWLEDGE BASE EXCERPTS\n' + kbChunks.slice(0,8000) + '\n\n' +
-        '## FINANCIAL ANALYSIS\n' + (opp.financial_analysis || 'Not yet produced') + '\n\n' +
+        '## SCOPE ANALYSIS (Organism deep analysis of requirements)\n' + (opp.scope_analysis || 'Not yet produced') + '\n\n' +
+        '## FINANCIAL ANALYSIS (Pricing strategy, market benchmarks)\n' + (opp.financial_analysis || 'Not yet produced') + '\n\n' +
+        '## RESEARCH BRIEF (Win strategy, competitive positioning)\n' + (opp.research_brief || 'Not yet produced') + '\n\n' +
+        '## CAPTURE ACTION (GO/NO-GO analysis, PWIN assessment)\n' + (opp.capture_action || 'Not yet produced') + '\n\n' +
         '## STAFFING PLAN\n' + (opp.staffing_plan || 'Not yet produced') + '\n\n' +
+        '## AGENT INTELLIGENCE — DIRECT FINDINGS ON THIS OPPORTUNITY\n' + (intelSummary || 'No agent memories yet') + '\n\n' +
+        '## CROSS-OPPORTUNITY INTELLIGENCE — PATTERNS FROM OTHER PURSUITS\n' + (crossIntel || 'No cross-opp patterns found') + '\n\n' +
+        '## COMPETITIVE INTELLIGENCE DATABASE\n' + (ciText || 'No competitor data yet') + '\n\n' +
+        '## RELATIONSHIP & CONTACT INTELLIGENCE\n' + (rgText || 'No contact data yet') + '\n\n' +
+        '## AGENCY PROFILE\n' + (agencyText || 'No agency profile yet') + '\n\n' +
+        '## DISASTER DECLARATIONS & CONTEXT\n' + (disasterText || 'No disaster data') + '\n\n' +
+        '## BUDGET CYCLES & FUNDING WINDOWS\n' + (budgetText || 'No budget cycle data') + '\n\n' +
+        '## RECOMPETE & INCUMBENT CONTRACTS\n' + (recompeteText || 'No recompete data') + '\n\n' +
+        '## REGULATORY CHANGES AFFECTING THIS PURSUIT\n' + (regText || 'No regulatory changes tracked') + '\n\n' +
+        '## POTENTIAL TEAMING PARTNERS\n' + (teamingText || 'No teaming partners identified') + '\n\n' +
+        '## PIPELINE ANALYTICS & PATTERNS\n' + (analyticsText || 'No pipeline patterns') + '\n\n' +
+        '## OUTCOME LESSONS — WHAT WE LEARNED FROM WINS/LOSSES\n' + (outcomeText || 'No outcomes recorded yet') + '\n\n' +
+        '## PARALLEL PURSUIT INTELLIGENCE\n' + (siblingText || 'No parallel pursuits') + '\n\n' +
+        '## KNOWLEDGE BASE — HGI INSTITUTIONAL EXPERTISE\n' + kbChunks.slice(0,12000) + '\n\n' +
         '## INSTRUCTIONS\n' +
         'STEP 1 — ANALYZE THE SUBMISSION FORMAT:\n' +
         'Read the RFP/SOQ document above CAREFULLY. Determine EXACTLY what the agency is asking for:\n' +
