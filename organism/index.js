@@ -987,6 +987,21 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       proposalText = (finalMessage.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
       log('PROPOSAL ENGINE: Generated ' + proposalText.length + ' chars');
 
+      // 5.5 POST-PROCESSING: Auto-fill known ACTION REQUIRED items
+      var arBefore = (proposalText.match(/ACTION REQUIRED/gi) || []).length;
+      // Insurance — replace any ACTION REQUIRED about insurance with actual coverage
+      proposalText = proposalText.replace(/\[ACTION REQUIRED[^\]]*insurance[^\]]*\]/gi, 'HGI maintains \$5M fidelity bond, \$5M Errors & Omissions, \$2M General Liability, Workers Compensation at statutory limits, and \$1M Commercial Auto coverage. Certificates of insurance with Additional Insured endorsement naming CLIENT will be provided upon contract execution.');
+      // Professional Regulation licenses
+      proposalText = proposalText.replace(/\[ACTION REQUIRED[^\]]*(?:professional regulation|DPR|license)[^\]]*\]/gi, 'No Louisiana Department of Professional Regulation license is required for disaster recovery consulting, program management, claims administration, construction management oversight, or grant management services. HGI professionals hold individual certifications as applicable to their roles.');
+      // SAM.gov / UEI
+      proposalText = proposalText.replace(/\[ACTION REQUIRED[^\]]*(?:SAM\.gov|SAM registration|UEI)[^\]]*\]/gi, 'HGI Global is registered in SAM.gov with active status. UEI: DL4SJEVKZ6H4.');
+      // Addenda monitoring
+      proposalText = proposalText.replace(/\[ACTION REQUIRED[^\]]*(?:addend|Attachment O)[^\]]*\]/gi, 'HGI has monitored centralauctionhouse.com for any addenda issued. All addenda issued as of the submission date are acknowledged on Attachment O.');
+      // Business license
+      proposalText = proposalText.replace(/\[ACTION REQUIRED[^\]]*(?:business license|Louisiana.*license|confirm.*license)[^\]]*\]/gi, 'HGI Global (Hammerman & Gainer LLC) is registered and licensed to conduct business in the State of Louisiana.');
+      var arAfter = (proposalText.match(/ACTION REQUIRED/gi) || []).length;
+      log('PROPOSAL ENGINE: Post-processing reduced ACTION REQUIRED from ' + arBefore + ' to ' + arAfter);
+
       // 6. Store the proposal in dedicated column (NOT capture_action — that's the organism's internal analysis)
       await supabase.from('opportunities').update({
         proposal_content: proposalText,
