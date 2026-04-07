@@ -15,6 +15,8 @@ process.on('uncaughtException', (e) => log('UNCAUGHT: ' + e.message.slice(0,150)
 import Anthropic from '@anthropic-ai/sdk';
 var pdfParse = null;
 try { pdfParse = (await import('pdf-parse')).default; } catch(e) { console.log('pdf-parse not available: ' + e.message); }
+var puppeteer = null;
+try { puppeteer = (await import('puppeteer')).default; } catch(e) { console.log('puppeteer not available: ' + e.message); }
 
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_KEY;
@@ -4411,113 +4413,206 @@ async function scoreAgentOutput(agent, oppId, output, state) {
   return { agent: agent, sourced: sourced, original: original, advancing: advancing };
 }
 
-// === DIRECT CB + LaPAC HUNTING — V2 self-sufficient, no V1/Apify dependency ===
+// === DIRECT CB + LaPAC HUNTING — V2 self-sufficient with headless browser ===
 async function huntCentralBidding() {
   var results = [];
+  if (!puppeteer) { log('CB-HUNT: Puppeteer not available — skipping direct CB scraping'); return []; }
+  var browser = null;
   try {
-    var cookie = await cbLogin();
-    if (!cookie) { log('CB-HUNT: Login failed — skipping CB'); return []; }
-    // CB search page: browse by state. Cover all HGI target states.
-    var states = ['Louisiana', 'Mississippi', 'Texas', 'Florida', 'Alabama', 'Georgia'];
-    for (var si = 0; si < states.length; si++) {
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--single-process'],
+      timeout: 30000
+    });
+    var page = await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+    page.setDefaultTimeout(15000);
+    page.setDefaultNavigationTimeout(15000);
+
+    // Login to CB
+    log('CB-HUNT: Logging in...');
+    await page.goto('https://www.centralauctionhouse.com/login.php', { waitUntil: 'networkidle2' });
+    var md5hash = crypto.createHash('md5').update('Whatever1340!').digest('hex');
+    await page.evaluate(function(hash) {
+      var f = document.createElement('form');
+      f.action = '/login.php'; f.method = 'POST';
+      f.innerHTML = '<input name="username" value="HGIGLOBAL"><input name="md5pass" value="' + hash + '"><input name="md5pass_utf" value="' + hash + '"><input name="login_process" value="1"><input name="redirect" value="">';
+      document.body.appendChild(f); f.submit();
+    }, md5hash);
+    await page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(function() {});
+    log('CB-HUNT: Logged in');
+
+    // State category IDs on CB (Texas/Georgia may not be on CB — web search covers them)
+    var stateCIDs = { Louisiana: 1, Mississippi: 2, Alabama: 10600, Florida: 10694, Arkansas: 10548 };
+
+    for (var stateName in stateCIDs) {
       try {
-        var searchUrl = 'https://www.centralauctionhouse.com/search.php?searchtext=&state=' + encodeURIComponent(states[si]) + '&status=open';
-        var resp = await fetch(searchUrl, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; HGI-Organism/2.0)', 'Cookie': cookie },
-          redirect: 'follow', signal: AbortSignal.timeout(20000)
-        });
-        if (!resp.ok) {
-          // Try alternative URL pattern
-          searchUrl = 'https://www.centralauctionhouse.com/bids.php?state=' + encodeURIComponent(states[si]);
-          resp = await fetch(searchUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; HGI-Organism/2.0)', 'Cookie': cookie },
-            redirect: 'follow', signal: AbortSignal.timeout(20000)
-          });
-        }
-        if (!resp.ok) continue;
-        var html = await resp.text();
-        // Parse bid listings from HTML — look for table rows or bid card patterns
-        var titleRx = /<a[^>]*href=["']([^"']*(?:rfp|bid|sol)[^"']*)["'][^>]*>([^<]+)<\/a>/gi;
-        var match;
-        var stateCount = 0;
-        while ((match = titleRx.exec(html)) !== null && stateCount < 20) {
-          var href = match[1];
-          var title = match[2].replace(/&amp;/g, '&').replace(/&#\d+;/g, '').trim();
-          if (title.length < 10) continue;
-          var fullUrl = href.startsWith('http') ? href : 'https://www.centralauctionhouse.com/' + href.replace(/^\//, '');
-          results.push({
-            title: title, agency: states[si] + ' Agency',
-            source: 'centralbidding_direct', source_url: fullUrl,
-            description: title, due_date: null
-          });
-          stateCount++;
-        }
-        // Also try broader parsing — any table row with bid-like content
-        var rowRx = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-        var rowMatch;
-        while ((rowMatch = rowRx.exec(html)) !== null && stateCount < 30) {
-          var cells = [];
-          var cellRx = /<td[^>]*>([\s\S]*?)<\/td>/gi;
-          var cellM;
-          while ((cellM = cellRx.exec(rowMatch[1])) !== null) {
-            cells.push(cellM[1].replace(/<[^>]+>/g, '').trim());
-          }
-          if (cells.length >= 2 && cells[0].length > 10) {
-            var linkM = /href=["']([^"']+)["']/i.exec(rowMatch[1]);
-            var rowUrl = linkM ? (linkM[1].startsWith('http') ? linkM[1] : 'https://www.centralauctionhouse.com/' + linkM[1].replace(/^\//, '')) : null;
-            if (rowUrl && !results.some(function(r) { return r.source_url === rowUrl; })) {
-              results.push({
-                title: cells[0].slice(0, 200), agency: cells[1] || states[si] + ' Agency',
-                source: 'centralbidding_direct', source_url: rowUrl,
-                description: cells.slice(0, 3).join(' — ').slice(0, 500), due_date: cells[2] || null
-              });
-              stateCount++;
+        await page.goto('https://www.centralauctionhouse.com/rfp.php?&cid=' + stateCIDs[stateName], { waitUntil: 'networkidle2' });
+        // Get entity links
+        var entityLinks = await page.evaluate(function() {
+          var links = [];
+          document.querySelectorAll('a[href*="Category/"]').forEach(function(a) {
+            var name = (a.textContent || '').trim();
+            var href = a.getAttribute('href') || '';
+            if (name.length > 5 && href.includes('Category/')) {
+              links.push({ name: name, url: href.startsWith('http') ? href : 'https://www.centralauctionhouse.com/' + href.replace(/^\//, '') });
             }
-          }
+          });
+          return links;
+        });
+        log('CB-HUNT: ' + stateName + ' — ' + entityLinks.length + ' entities, visiting top 12');
+
+        // Visit up to 12 entities per state — prioritize school boards, parishes, cities, housing authorities
+        var prioritized = entityLinks.sort(function(a, b) {
+          var score = function(name) {
+            var n = name.toLowerCase();
+            if (n.includes('school')) return 10;
+            if (n.includes('housing')) return 9;
+            if (n.includes('parish') && (n.includes('government') || n.includes('police jury'))) return 8;
+            if (n.includes('city of') || n.includes('town of')) return 7;
+            if (n.includes('water') || n.includes('sewer') || n.includes('utility')) return 6;
+            if (n.includes('sheriff') || n.includes('district')) return 5;
+            return 1;
+          };
+          return score(b.name) - score(a.name);
+        });
+
+        var stateResults = 0;
+        for (var ei = 0; ei < Math.min(prioritized.length, 12); ei++) {
+          try {
+            await page.goto(prioritized[ei].url, { waitUntil: 'networkidle2', timeout: 12000 });
+            var bids = await page.evaluate(function(entityName) {
+              var found = [];
+              // CB uses listing_boxes for bid display
+              document.querySelectorAll('.listing_boxes_title a, .listing_boxes a[href*=".html"], a[href*="rfpc"], a[href*="rfp-"]').forEach(function(a) {
+                var text = (a.textContent || '').trim();
+                var href = a.getAttribute('href') || '';
+                if (text.length > 15 && !href.includes('Category/') && !href.includes('login')) {
+                  var parent = a.closest('.listing_boxes') || a.closest('tr') || a.closest('div') || a.parentElement;
+                  found.push({
+                    title: text.slice(0, 200),
+                    url: href.startsWith('http') ? href : 'https://www.centralauctionhouse.com/' + href.replace(/^\//, ''),
+                    agency: entityName,
+                    context: parent ? (parent.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 300) : ''
+                  });
+                }
+              });
+              // Also grab any links that look like open bids
+              document.querySelectorAll('a').forEach(function(a) {
+                var text = (a.textContent || '').trim();
+                var href = a.getAttribute('href') || '';
+                if (text.length > 20 && href.includes('.html') && !href.includes('Category/') && !href.includes('login') && !href.includes('register') && !href.includes('rfp.php')) {
+                  if (!found.some(function(f) { return f.url === href || f.title === text; })) {
+                    found.push({ title: text.slice(0, 200), url: href.startsWith('http') ? href : 'https://www.centralauctionhouse.com/' + href.replace(/^\//, ''), agency: entityName, context: '' });
+                  }
+                }
+              });
+              return found;
+            }, prioritized[ei].name);
+
+            bids.forEach(function(b) {
+              if (b.title && b.title.length > 15) {
+                results.push({ title: b.title, agency: b.agency, source: 'centralbidding_v2', source_url: b.url, description: (b.context || b.title).slice(0, 500), due_date: null });
+                stateResults++;
+              }
+            });
+          } catch (entErr) { /* entity page timeout — skip */ }
         }
-        log('CB-HUNT: ' + states[si] + ' — ' + stateCount + ' listings found');
-      } catch (se) { log('CB-HUNT: ' + states[si] + ' err: ' + (se.message||'').slice(0,60)); }
+        log('CB-HUNT: ' + stateName + ' — ' + stateResults + ' bids found');
+      } catch (stateErr) { log('CB-HUNT: ' + stateName + ' error: ' + (stateErr.message || '').slice(0, 60)); }
     }
-  } catch (e) { log('CB-HUNT: error: ' + (e.message||'').slice(0,80)); }
-  log('CB-HUNT: Total ' + results.length + ' raw listings from Central Bidding');
+  } catch (e) { log('CB-HUNT: Browser error: ' + (e.message || '').slice(0, 100)); }
+  finally { if (browser) { try { await browser.close(); } catch(e) {} } }
+  log('CB-HUNT: Total ' + results.length + ' bids from Central Bidding (Puppeteer)');
   return results;
 }
 
 async function huntLaPAC() {
   var results = [];
-  try {
-    var resp = await fetch('https://wwwcfprd.doa.louisiana.gov/osp/lapac/pubMain.cfm', {
-      headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(15000)
-    });
-    if (!resp.ok) {
-      // Try alternate URL
-      resp = await fetch('https://lapac.doa.louisiana.gov/vendor/bidding/current-solicitations/', {
-        headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(15000)
+  if (!puppeteer) { log('LaPAC: Puppeteer not available — trying HTTP fallback'); }
+  // Try Puppeteer first, fall back to HTTP
+  if (puppeteer) {
+    var browser = null;
+    try {
+      browser = await puppeteer.launch({
+        headless: 'new', args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--single-process'], timeout: 20000
       });
-    }
-    if (!resp.ok) { log('LaPAC: Could not reach — ' + resp.status); return []; }
-    var html = await resp.text();
-    var rowRx = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-    var rowM;
-    while ((rowM = rowRx.exec(html)) !== null && results.length < 25) {
-      var cells = [];
-      var cellRx = /<td[^>]*>([\s\S]*?)<\/td>/gi;
-      var cellM;
-      while ((cellM = cellRx.exec(rowM[1])) !== null) {
-        cells.push(cellM[1].replace(/<[^>]+>/g, '').trim());
+      var page = await browser.newPage();
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
+      page.setDefaultTimeout(12000);
+      // Try both known LaPAC URLs
+      var loaded = false;
+      var urls = ['https://wwwcfprd.doa.louisiana.gov/osp/lapac/pubMain.cfm', 'https://lapac.doa.louisiana.gov/vendor/bidding/current-solicitations/'];
+      for (var li = 0; li < urls.length && !loaded; li++) {
+        try {
+          await page.goto(urls[li], { waitUntil: 'networkidle2', timeout: 15000 });
+          loaded = true;
+        } catch (e) { log('LaPAC: ' + urls[li].slice(0, 50) + ' failed: ' + e.message.slice(0, 40)); }
       }
-      if (cells.length >= 2 && cells[0].length > 3) {
-        var linkM = /href=["']([^"']+)["']/i.exec(rowM[1]);
-        var url = linkM ? (linkM[1].startsWith('http') ? linkM[1] : 'https://wwwcfprd.doa.louisiana.gov' + linkM[1]) : 'https://wwwcfprd.doa.louisiana.gov/osp/lapac/pubMain.cfm';
-        results.push({
-          title: (cells[1] || cells[0]).slice(0, 200), agency: cells[2] || 'Louisiana State Agency',
-          source: 'lapac_direct', source_url: url,
-          description: cells.slice(0, 4).join(' — ').slice(0, 500), due_date: cells[3] || null
+      if (loaded) {
+        var bids = await page.evaluate(function() {
+          var found = [];
+          // Extract table rows with bid data
+          document.querySelectorAll('tr').forEach(function(row) {
+            var cells = row.querySelectorAll('td');
+            if (cells.length >= 2) {
+              var title = (cells[1] || cells[0]).textContent.trim();
+              var link = row.querySelector('a');
+              if (title.length > 5) {
+                found.push({
+                  title: title.slice(0, 200),
+                  agency: cells.length > 2 ? cells[2].textContent.trim() : 'Louisiana State Agency',
+                  url: link ? (link.href || '') : '',
+                  due: cells.length > 3 ? cells[3].textContent.trim() : null
+                });
+              }
+            }
+          });
+          // Also check for any bid-like links
+          document.querySelectorAll('a').forEach(function(a) {
+            var text = (a.textContent || '').trim();
+            if (text.length > 20 && (a.href || '').includes('lapac') && !found.some(function(f) { return f.title === text; })) {
+              found.push({ title: text.slice(0, 200), agency: 'Louisiana State Agency', url: a.href || '', due: null });
+            }
+          });
+          return found;
+        });
+        bids.forEach(function(b) {
+          if (b.title && b.title.length > 5) {
+            results.push({
+              title: b.title, agency: b.agency,
+              source: 'lapac_v2', source_url: b.url || 'https://wwwcfprd.doa.louisiana.gov/osp/lapac/pubMain.cfm',
+              description: b.title, due_date: b.due || null
+            });
+          }
         });
       }
-    }
-    log('LaPAC: ' + results.length + ' listings found');
-  } catch (e) { log('LaPAC err: ' + (e.message||'').slice(0,80)); }
+    } catch (e) { log('LaPAC Puppeteer err: ' + (e.message || '').slice(0, 80)); }
+    finally { if (browser) { try { await browser.close(); } catch(e) {} } }
+  } else {
+    // HTTP fallback
+    try {
+      var resp = await fetch('https://wwwcfprd.doa.louisiana.gov/osp/lapac/pubMain.cfm', {
+        headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(15000)
+      });
+      if (resp.ok) {
+        var html = await resp.text();
+        var rowRx = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+        var rowM;
+        while ((rowM = rowRx.exec(html)) !== null && results.length < 25) {
+          var cells = [];
+          var cellRx = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+          var cellM;
+          while ((cellM = cellRx.exec(rowM[1])) !== null) { cells.push(cellM[1].replace(/<[^>]+>/g, '').trim()); }
+          if (cells.length >= 2 && cells[0].length > 3) {
+            var linkM = /href=["']([^"']+)["']/i.exec(rowM[1]);
+            results.push({ title: (cells[1] || cells[0]).slice(0, 200), agency: cells[2] || 'Louisiana State Agency', source: 'lapac_v2', source_url: linkM ? linkM[1] : 'https://wwwcfprd.doa.louisiana.gov/osp/lapac/pubMain.cfm', description: cells.slice(0, 4).join(' — ').slice(0, 500), due_date: cells[3] || null });
+          }
+        }
+      }
+    } catch (e) { log('LaPAC HTTP err: ' + (e.message||'').slice(0,60)); }
+  }
+  log('LaPAC: ' + results.length + ' listings found');
   return results;
 }
 
