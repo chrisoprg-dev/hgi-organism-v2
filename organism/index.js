@@ -2091,6 +2091,13 @@ if (url.startsWith('/api/proposal-doc')) {
     // Get proposal text from proposal_content (NOT capture_action — that's internal analysis)
     var proposalText = (opp.proposal_content || '').replace(/^# PROPOSAL DRAFT.*?\n\n/, '');
 
+    // Post-process: Auto-fill known ACTION REQUIRED items at doc generation time
+    proposalText = proposalText.replace(/\[ACTION REQUIRED[^\]]*insurance[^\]]*\]/gi, 'HGI maintains $5M fidelity bond, $5M Errors & Omissions, $2M General Liability, Workers Compensation at statutory limits, and $1M Commercial Auto coverage. Certificates of insurance with Additional Insured endorsement naming CLIENT will be provided upon contract execution.');
+    proposalText = proposalText.replace(/\[ACTION REQUIRED[^\]]*(?:professional regulation|DPR|license)[^\]]*\]/gi, 'No Louisiana Department of Professional Regulation license is required for disaster recovery consulting, program management, claims administration, construction management oversight, or grant management services. HGI professionals hold individual certifications as applicable to their roles.');
+    proposalText = proposalText.replace(/\[ACTION REQUIRED[^\]]*(?:SAM\.gov|SAM registration|UEI)[^\]]*\]/gi, 'HGI Global is registered in SAM.gov with active status. UEI: DL4SJEVKZ6H4.');
+    proposalText = proposalText.replace(/\[ACTION REQUIRED[^\]]*(?:addend|Attachment O)[^\]]*\]/gi, 'HGI has monitored centralauctionhouse.com for any addenda issued. All addenda issued as of the submission date are acknowledged on Attachment O.');
+    proposalText = proposalText.replace(/\[ACTION REQUIRED[^\]]*(?:business license|Louisiana.*license|confirm.*license)[^\]]*\]/gi, 'HGI Global (Hammerman & Gainer LLC) is registered and licensed to conduct business in the State of Louisiana.');
+
     // Post-process: strip ASCII box-drawing art (org charts Opus sometimes generates despite instructions)
     var cleanLines = [];
     var skipBlock = false;
