@@ -6135,8 +6135,7 @@ function scheduleWeekdayCron() {
     scheduleWeekdayCron();
   }, msUntil);
 }
-// CRON DISABLED Session 89 — manual trigger only via /api/trigger until cost structure resolved
-// scheduleWeekdayCron();
+scheduleWeekdayCron(); // RE-ENABLED Session 89 with cost controls: Haiku system agents, no auto-proposal, 15K RFP cap, 5-query multiSearch cap
 
 log('V5.0 ready. CRON DISABLED. Manual only: /api/trigger or /api/trigger-full. Weekday cron: 7AM CST smart trigger. Manual: /api/trigger. Endpoints: disaster-check, loss-analysis, exec-brief, compliance-check, system-status, record-outcome.');
 
