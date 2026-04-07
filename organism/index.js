@@ -53,7 +53,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url === '/api/pipeline') {
-      const r = await supabase.from('opportunities').select('id,title,agency,vertical,opi_score,stage,status,due_date,estimated_value,capture_action,scope_analysis,research_brief,staffing_plan,financial_analysis,source_url,outcome,rfp_document_retrieved').eq('status','active').order('opi_score', { ascending: false }).limit(20);
+      const r = await supabase.from('opportunities').select('id,title,agency,vertical,opi_score,stage,status,due_date,estimated_value,capture_action,scope_analysis,research_brief,staffing_plan,financial_analysis,proposal_content,source_url,outcome,rfp_document_retrieved').eq('status','active').order('opi_score', { ascending: false }).limit(20);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(r.data || []));
       return;
@@ -376,7 +376,7 @@ if (url === '/' || url === '/dashboard' || url === '/interface' || url === '/int
 if (url.startsWith('/api/opportunity-detail')) {
   var oId = (req.url.split('?id=')[1]||'').split('&')[0];
   if (!oId) { res.writeHead(400); res.end(JSON.stringify({error:'id required'})); return; }
-  var dr = await supabase.from('opportunities').select('id,title,agency,vertical,opi_score,stage,status,due_date,estimated_value,scope_analysis,financial_analysis,research_brief,staffing_plan,capture_action,source_url,outcome,outcome_notes').eq('id',oId).single();
+  var dr = await supabase.from('opportunities').select('id,title,agency,vertical,opi_score,stage,status,due_date,estimated_value,scope_analysis,financial_analysis,research_brief,staffing_plan,capture_action,source_url,outcome,outcome_notes,rfp_text,proposal_content,rfp_document_retrieved').eq('id',oId).single();
   res.writeHead(200, {'Content-Type':'application/json'});
   res.end(JSON.stringify(dr.data || {}));
   return;
