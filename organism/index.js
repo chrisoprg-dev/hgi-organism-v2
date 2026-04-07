@@ -4939,11 +4939,58 @@ async function agentHunting(state) {
 
   // Deduplicate and score with Haiku + full intelligence
   var deduped = newOpps.filter(function(o, i, a) { return a.findIndex(function(x) { return x.title.slice(0, 40) === o.title.slice(0, 40); }) === i; });
+
+  // === PRE-FILTER: Remove obvious non-HGI bids before Haiku scoring ===
+  // HGI relevant keywords — if title/description contains ANY of these, keep it for scoring
+  var hgiRelevant = ['professional services', 'consulting', 'program management', 'project management',
+    'disaster', 'fema', 'cdbg', 'hazard mitigation', 'emergency management', 'recovery',
+    'claims', 'tpa', 'third party', 'workers comp', 'insurance', 'guaranty', 'liability', 'adjuster',
+    'construction management', 'construction oversight', 'capital program', 'owner representative',
+    'workforce', 'wioa', 'employment services', 'job training', 'career',
+    'housing authority', 'hud', 'public housing', 'affordable housing', 'section 8', 'voucher',
+    'grant management', 'grant administration', 'federal grant', 'pre-award', 'sub-recipient',
+    'property tax', 'ad valorem', 'billing appeal', 'utility billing', 'revenue recovery', 'water billing',
+    'staff augmentation', 'call center', 'bpo', 'case management', 'contact center',
+    'program administration', 'compliance', 'monitoring', 'audit', 'fiduciary',
+    'settlement', 'mediation', 'class action', 'dispute resolution', 'claims processing',
+    'dei', 'diversity equity', 'minority', 'assessment appeal',
+    'rfp', 'rfq', 'soq', 'solicitation', 'request for proposal', 'request for qualif',
+    'management services', 'administration services', 'consulting services', 'advisory'];
+  // Obvious non-HGI — filter OUT immediately
+  var notHGI = ['grass cut', 'mowing', 'mow ', 'janitorial', 'custodial', 'cleaning service',
+    'fuel ', 'gasoline', 'diesel', 'propane',
+    'food service', 'cafeteria', 'lunch', 'meal', 'vending',
+    'vehicle', 'automobile', 'truck purchase', 'bus purchase', 'fleet',
+    'hvac', 'air condition', 'plumbing repair', 'electrical repair',
+    'supplies', 'materials purchase', 'office supplies', 'paper ', 'toner',
+    'pest control', 'exterminator', 'termite',
+    'roofing', 'paving', 'asphalt', 'concrete pour', 'gravel', 'aggregate',
+    'printing', 'uniform', 'signage', 'banner',
+    'playground', 'athletic', 'sports equip', 'gymnasium',
+    'dental', 'optometry', 'pharmacy benefit', 'medical equipment',
+    'porta potty', 'portable toilet', 'dumpster', 'waste hauling', 'garbage',
+    'paint ', 'painting service', 'floor', 'carpet', 'tile install',
+    'security guard', 'armed guard', 'surveillance camera'];
+
+  var preFiltered = deduped.filter(function(o) {
+    var text = ((o.title || '') + ' ' + (o.description || '')).toLowerCase();
+    // If it matches a notHGI term, drop it immediately
+    for (var ni = 0; ni < notHGI.length; ni++) {
+      if (text.includes(notHGI[ni])) return false;
+    }
+    // If it matches an hgiRelevant term, keep it
+    for (var hi = 0; hi < hgiRelevant.length; hi++) {
+      if (text.includes(hgiRelevant[hi])) return true;
+    }
+    // If it matches neither list, keep it for Haiku to decide (could be something new)
+    return true;
+  });
+  log('HUNTING: Pre-filter: ' + deduped.length + ' → ' + preFiltered.length + ' candidates (' + (deduped.length - preFiltered.length) + ' obvious non-HGI removed)');
   var qualified = [];
 
-  for (var c = 0; c < Math.min(deduped.length, 15); c++) {
+  for (var c = 0; c < Math.min(preFiltered.length, 75); c++) {
     try {
-      var cand = deduped[c];
+      var cand = preFiltered[c];
       var scorePrompt = HGI + '\n\nORGANISM INTELLIGENCE (use this to adjust scoring — relationships, competitor weaknesses, disasters, budget windows, and outcome lessons all affect how HGI should score this):' + huntContext +
         '\n\nOPP: ' + cand.title + ' | ' + cand.agency + ' | ' + (cand.description || '').slice(0, 300) +
         '\n\nJSON only: {"opi":N,"vertical":"disaster|tpa|workforce|housing|construction|grant|federal|FILTER","capture_action":"GO|WATCH|NO-BID","why":"1 sentence including any relationship/competitive/timing advantage"}';
@@ -4968,7 +5015,7 @@ async function agentHunting(state) {
   }
 
   log('HUNTING: ' + qualified.length + ' qualified and added');
-  await storeMemory('hunting_agent', null, 'hunting', 'HUNTING: ' + qualified.length + '/' + deduped.length + ' qualified.\n' + qualified.map(function(q) { return 'OPI:' + q.opi + ' [' + q.source + '] ' + q.title.slice(0, 50); }).join('\n'), 'analysis', null, 'high');
+  await storeMemory('hunting_agent', null, 'hunting', 'HUNTING: ' + qualified.length + '/' + preFiltered.length + ' qualified (from ' + newOpps.length + ' raw, ' + deduped.length + ' deduped, ' + preFiltered.length + ' pre-filtered).\n' + qualified.map(function(q) { return 'OPI:' + q.opi + ' [' + q.source + '] ' + q.title.slice(0, 50); }).join('\n'), 'analysis', null, 'high');
   return { agent: 'hunting_agent', chars: 300, new_opps: qualified.length };
 }
 
@@ -5460,9 +5507,9 @@ async function runSession(trigger) {
       });
       log('SMART FILTER: ' + activeOpps.length + ' of ' + beforeCount + ' opps need analysis (' + (beforeCount - activeOpps.length) + ' skipped — no changes)');
       if (activeOpps.length === 0) {
-        log('=== SMART SESSION COMPLETE: Nothing changed. $0 API cost. ===');
-        await storeMemory('v4_engine', null, 'v4,smart,session', 'SMART SESSION — no changes detected across ' + beforeCount + ' opps. Zero API calls. Trigger: ' + trigger, 'analysis', null, 'high');
-        return;
+        log('SMART: No per-opp changes — skipping per-opp agents but RUNNING system-wide agents');
+        await storeMemory('v4_engine', null, 'v4,smart,session', 'SMART SESSION — no per-opp changes across ' + beforeCount + ' opps. System-wide agents still running. Trigger: ' + trigger, 'analysis', null, 'high');
+        // Don't return — fall through to system-wide agents below
       }
     }
 
