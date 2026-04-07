@@ -41,7 +41,7 @@ const server = http.createServer(async (req, res) => {
 
     if (url === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'alive', uptime_seconds: Math.floor(process.uptime()), timestamp: new Date().toISOString(), version: 'V4.5-full-intel', agents_active: 29 }));
+      res.end(JSON.stringify({ status: 'alive', uptime_seconds: Math.floor(process.uptime()), timestamp: new Date().toISOString(), version: 'V5.0-full-organism', agents_active: 42 }));
       return;
     }
 
@@ -1859,7 +1859,7 @@ if (url === '/api/exec-brief') {
       alerts: alerts,
       awaiting_award: submitted.map(function(o) { return { title: o.title, opi: o.opi_score }; }),
       recent_intel: briefMems,
-      agent_health: { active_agents: 29, version: 'V4.5-full-intel', last_cycle: briefMems.length > 0 ? briefMems[0].when : null }
+      agent_health: { active_agents: 42, version: 'V5.0-full-organism', last_cycle: briefMems.length > 0 ? briefMems[0].when : null }
     }));
   } catch (e) { res.end(JSON.stringify({ error: e.message })); }
   return;
@@ -5838,7 +5838,7 @@ async function runSession(trigger) {
 // ============================================================
 log('==========================================================');
 log('HGI ORGANISM V4.5-full-intel - STARTING');
-log('29 active agents. Direct FEMA API. Full intelligence suite. Smart trigger cron. 6 new endpoints.');
+log('V5.0-full-organism: 42 active agents. Direct CB+LaPAC hunting. All 8 verticals. Multi-source discovery. Self-sufficient V2.');
 log('12h dedup guard. Crash logging. Test endpoints.');
 log('==========================================================');
 
