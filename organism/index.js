@@ -4411,6 +4411,116 @@ async function scoreAgentOutput(agent, oppId, output, state) {
   return { agent: agent, sourced: sourced, original: original, advancing: advancing };
 }
 
+// === DIRECT CB + LaPAC HUNTING — V2 self-sufficient, no V1/Apify dependency ===
+async function huntCentralBidding() {
+  var results = [];
+  try {
+    var cookie = await cbLogin();
+    if (!cookie) { log('CB-HUNT: Login failed — skipping CB'); return []; }
+    // CB search page: browse by state. Cover all HGI target states.
+    var states = ['Louisiana', 'Mississippi', 'Texas', 'Florida', 'Alabama', 'Georgia'];
+    for (var si = 0; si < states.length; si++) {
+      try {
+        var searchUrl = 'https://www.centralauctionhouse.com/search.php?searchtext=&state=' + encodeURIComponent(states[si]) + '&status=open';
+        var resp = await fetch(searchUrl, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; HGI-Organism/2.0)', 'Cookie': cookie },
+          redirect: 'follow', signal: AbortSignal.timeout(20000)
+        });
+        if (!resp.ok) {
+          // Try alternative URL pattern
+          searchUrl = 'https://www.centralauctionhouse.com/bids.php?state=' + encodeURIComponent(states[si]);
+          resp = await fetch(searchUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; HGI-Organism/2.0)', 'Cookie': cookie },
+            redirect: 'follow', signal: AbortSignal.timeout(20000)
+          });
+        }
+        if (!resp.ok) continue;
+        var html = await resp.text();
+        // Parse bid listings from HTML — look for table rows or bid card patterns
+        var titleRx = /<a[^>]*href=["']([^"']*(?:rfp|bid|sol)[^"']*)["'][^>]*>([^<]+)<\/a>/gi;
+        var match;
+        var stateCount = 0;
+        while ((match = titleRx.exec(html)) !== null && stateCount < 20) {
+          var href = match[1];
+          var title = match[2].replace(/&amp;/g, '&').replace(/&#\d+;/g, '').trim();
+          if (title.length < 10) continue;
+          var fullUrl = href.startsWith('http') ? href : 'https://www.centralauctionhouse.com/' + href.replace(/^\//, '');
+          results.push({
+            title: title, agency: states[si] + ' Agency',
+            source: 'centralbidding_direct', source_url: fullUrl,
+            description: title, due_date: null
+          });
+          stateCount++;
+        }
+        // Also try broader parsing — any table row with bid-like content
+        var rowRx = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+        var rowMatch;
+        while ((rowMatch = rowRx.exec(html)) !== null && stateCount < 30) {
+          var cells = [];
+          var cellRx = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+          var cellM;
+          while ((cellM = cellRx.exec(rowMatch[1])) !== null) {
+            cells.push(cellM[1].replace(/<[^>]+>/g, '').trim());
+          }
+          if (cells.length >= 2 && cells[0].length > 10) {
+            var linkM = /href=["']([^"']+)["']/i.exec(rowMatch[1]);
+            var rowUrl = linkM ? (linkM[1].startsWith('http') ? linkM[1] : 'https://www.centralauctionhouse.com/' + linkM[1].replace(/^\//, '')) : null;
+            if (rowUrl && !results.some(function(r) { return r.source_url === rowUrl; })) {
+              results.push({
+                title: cells[0].slice(0, 200), agency: cells[1] || states[si] + ' Agency',
+                source: 'centralbidding_direct', source_url: rowUrl,
+                description: cells.slice(0, 3).join(' — ').slice(0, 500), due_date: cells[2] || null
+              });
+              stateCount++;
+            }
+          }
+        }
+        log('CB-HUNT: ' + states[si] + ' — ' + stateCount + ' listings found');
+      } catch (se) { log('CB-HUNT: ' + states[si] + ' err: ' + (se.message||'').slice(0,60)); }
+    }
+  } catch (e) { log('CB-HUNT: error: ' + (e.message||'').slice(0,80)); }
+  log('CB-HUNT: Total ' + results.length + ' raw listings from Central Bidding');
+  return results;
+}
+
+async function huntLaPAC() {
+  var results = [];
+  try {
+    var resp = await fetch('https://wwwcfprd.doa.louisiana.gov/osp/lapac/pubMain.cfm', {
+      headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(15000)
+    });
+    if (!resp.ok) {
+      // Try alternate URL
+      resp = await fetch('https://lapac.doa.louisiana.gov/vendor/bidding/current-solicitations/', {
+        headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(15000)
+      });
+    }
+    if (!resp.ok) { log('LaPAC: Could not reach — ' + resp.status); return []; }
+    var html = await resp.text();
+    var rowRx = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+    var rowM;
+    while ((rowM = rowRx.exec(html)) !== null && results.length < 25) {
+      var cells = [];
+      var cellRx = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+      var cellM;
+      while ((cellM = cellRx.exec(rowM[1])) !== null) {
+        cells.push(cellM[1].replace(/<[^>]+>/g, '').trim());
+      }
+      if (cells.length >= 2 && cells[0].length > 3) {
+        var linkM = /href=["']([^"']+)["']/i.exec(rowM[1]);
+        var url = linkM ? (linkM[1].startsWith('http') ? linkM[1] : 'https://wwwcfprd.doa.louisiana.gov' + linkM[1]) : 'https://wwwcfprd.doa.louisiana.gov/osp/lapac/pubMain.cfm';
+        results.push({
+          title: (cells[1] || cells[0]).slice(0, 200), agency: cells[2] || 'Louisiana State Agency',
+          source: 'lapac_direct', source_url: url,
+          description: cells.slice(0, 4).join(' — ').slice(0, 500), due_date: cells[3] || null
+        });
+      }
+    }
+    log('LaPAC: ' + results.length + ' listings found');
+  } catch (e) { log('LaPAC err: ' + (e.message||'').slice(0,80)); }
+  return results;
+}
+
 // === HUNTING AGENT — preserved from V2, uses existing portal APIs ===
 async function agentHunting(state) {
   log('HUNTING: checking procurement portals...');
@@ -4429,26 +4539,41 @@ async function agentHunting(state) {
   function daysAgo(n) { var d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10).replace(/-/g, '/'); }
   function today() { return new Date().toISOString().slice(0, 10).replace(/-/g, '/'); }
 
-  // Central Bidding
+  // Central Bidding — DIRECT V2 hunting (no V1/Apify dependency)
   try {
-    var cbResp = await supabase.from('hunt_runs').select('*').eq('source', 'centralbidding').order('run_at', { ascending: false }).limit(10);
-    (cbResp.data || []).forEach(function(run) {
-      try {
-        var opps = (JSON.parse(run.status || '{}')).opportunities || [];
-        opps.forEach(function(o) {
-          var t = o.title || o.name || '';
-          if (t && !isDupe(t)) newOpps.push({ title: t, agency: o.agency || 'Louisiana Agency', source: 'centralbidding', source_url: o.url || 'https://www.centralauctionhouse.com', description: (o.description || '').slice(0, 500), due_date: o.due_date || null });
-        });
-      } catch (e) {}
+    var cbResults = await huntCentralBidding();
+    cbResults.forEach(function(o) {
+      if (o.title && !isDupe(o.title)) newOpps.push(o);
     });
-  } catch (e) {}
+  } catch (e) { log('HUNTING CB direct err: ' + e.message); }
 
-  // LaPAC — DISABLED: No REST API exists. Real LaPAC is ColdFusion web form at wwwcfprd.doa.louisiana.gov/osp/lapac/pubMain.cfm
-  // Needs Apify actor to scrape. Central Bidding covers most LA local/parish solicitations.
-  // TODO: Build LaPAC Apify scraper for state-level coverage
+  // LaPAC — Direct scraping
+  try {
+    var lapacResults = await huntLaPAC();
+    lapacResults.forEach(function(o) {
+      if (o.title && !isDupe(o.title)) newOpps.push(o);
+    });
+  } catch (e) { log('HUNTING LaPAC err: ' + e.message); }
 
-  // SAM.gov
-  var samKW = ['disaster recovery program management', 'grant administration', 'FEMA public assistance', 'CDBG-DR', 'housing authority'];
+  // LaPAC — now handled by huntLaPAC() above
+
+  // SAM.gov — ALL 8 VERTICALS
+  var samKW = [
+    // Disaster Recovery
+    'disaster recovery program management', 'FEMA public assistance', 'CDBG-DR',
+    // TPA / Claims
+    'claims administration third party', 'workers compensation TPA', 'insurance guaranty association',
+    // Housing / HUD
+    'housing authority management', 'HUD housing program administration',
+    // Workforce / WIOA
+    'WIOA workforce development', 'workforce services program',
+    // Construction Management
+    'construction management services oversight',
+    // Grant Management
+    'grant administration services', 'federal grant program management',
+    // Program Administration
+    'program administration services'
+  ];
   for (var s = 0; s < samKW.length; s++) {
     try {
       var sr = await fetch('https://api.sam.gov/opportunities/v2/search?api_key=DEMO_KEY&q=' + encodeURIComponent(samKW[s]) + '&postedFrom=' + daysAgo(14) + '&postedTo=' + today() + '&active=true&limit=10');
@@ -4501,9 +4626,10 @@ async function agentHunting(state) {
       filters: {
         place_of_performance_locations: [
           { country: 'USA', state: 'LA' }, { country: 'USA', state: 'TX' },
-          { country: 'USA', state: 'FL' }, { country: 'USA', state: 'MS' }
+          { country: 'USA', state: 'FL' }, { country: 'USA', state: 'MS' },
+          { country: 'USA', state: 'AL' }, { country: 'USA', state: 'GA' }
         ],
-        naics_codes: { require: ['541611', '541618', '541990', '624230', '524292'] },
+        naics_codes: { require: ['541611', '541618', '541690', '541990', '561110', '561990', '524291', '524292', '624230', '923120', '921190', '236220', '237990', '624310'] },
         award_type_codes: ['A', 'B', 'C', 'D']
       },
       fields: ['Award ID', 'Recipient Name', 'Award Amount', 'Description',
@@ -4540,7 +4666,7 @@ async function agentHunting(state) {
     var gr = await fetch('https://api.grants.gov/v1/api/search2', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        keyword: 'disaster recovery OR housing program OR workforce development OR grant management OR CDBG OR hazard mitigation',
+        keyword: 'disaster recovery OR CDBG-DR OR housing program OR workforce development OR WIOA OR grant management OR hazard mitigation OR workers compensation OR claims administration OR construction management OR housing authority',
         oppStatuses: 'forecasted|posted', rows: 15, startRecordNum: 0
       })
     });
@@ -4565,7 +4691,7 @@ async function agentHunting(state) {
 
   // === NEW: Federal Register CDBG-DR and FEMA notices (free, no key) ===
   try {
-    var frTerms = ['CDBG-DR', 'FEMA Public Assistance', 'Hazard Mitigation Grant'];
+    var frTerms = ['CDBG-DR', 'FEMA Public Assistance', 'Hazard Mitigation Grant', 'WIOA workforce', 'housing authority HUD', 'workers compensation insurance', 'construction management oversight', 'grant administration federal'];
     for (var frt = 0; frt < frTerms.length; frt++) {
       var frUrl = 'https://www.federalregister.gov/api/v1/documents.json?' +
         'conditions[term]=' + encodeURIComponent(frTerms[frt]) +
@@ -4591,6 +4717,59 @@ async function agentHunting(state) {
     }
     log('HUNTING: Federal Register checked ' + frTerms.length + ' terms');
   } catch (e) { log('HUNTING Federal Register err: ' + e.message); }
+
+  // === WEB SEARCH HUNTING — portals without APIs, ALL 8 VERTICALS ===
+  try {
+    var webHuntQueries = [
+      // TPA / Claims — OpenGov, BidNet, DemandStar, state insurance
+      { label: 'TPA_CLAIMS', q: 'RFP "third party administrator" OR "claims administration" OR "workers compensation TPA" Louisiana Texas Florida Mississippi site:opengov.com OR site:bidnet.com OR site:demandstar.com 2026' },
+      { label: 'INSURANCE_GUARANTY', q: 'RFP "insurance guaranty" OR "guaranty association" OR "insolvent insurer" claims administration 2026' },
+      // Workforce / WIOA
+      { label: 'WORKFORCE_LA', q: 'RFP WIOA OR "workforce development" OR "workforce services" Louisiana workforce commission 2026' },
+      { label: 'WORKFORCE_TX', q: 'RFP WIOA OR "workforce services" OR "workforce board" Texas TWC procurement 2026' },
+      { label: 'WORKFORCE_FL', q: 'RFP "CareerSource" OR WIOA OR "workforce services" Florida procurement 2026' },
+      // Housing / HUD / PHA
+      { label: 'HOUSING_PHA', q: 'RFP "housing authority" OR "public housing" OR "Section 8" program management Louisiana Texas Mississippi Alabama 2026' },
+      { label: 'HOUSING_HUD', q: 'RFP "HUD compliance" OR "housing program management" OR "voucher administration" Gulf Coast 2026' },
+      // Property Tax / Billing Appeals
+      { label: 'TAX_BILLING', q: 'RFP "property tax appeals" OR "billing disputes" OR "utility billing" OR "ad valorem" OR "revenue recovery" Louisiana Texas Florida 2026' },
+      { label: 'WATER_UTILITY', q: 'RFP "water billing" OR "billing dispute resolution" OR "customer billing appeals" municipality 2026' },
+      // Construction Management
+      { label: 'CM_SCHOOLS', q: 'RFP "construction management" OR "program management" school board OR school district Louisiana Texas Mississippi 2026' },
+      { label: 'CM_FEMA', q: 'RFP "construction management" FEMA OR "disaster recovery" OR "capital program" Louisiana Florida 2026' },
+      // Grant Management
+      { label: 'GRANT_MGMT', q: 'RFP "grant management" OR "grant administration" OR "pre-award" parish OR county OR city Louisiana Texas 2026' },
+      // Program Administration
+      { label: 'PROGRAM_ADMIN', q: 'RFP "program administration" OR "program management services" government Louisiana Texas Florida Mississippi 2026' }
+    ];
+    var webResults = await multiSearch(webHuntQueries);
+    if (webResults && webResults.length > 100) {
+      // Parse web search results for opportunity-like entries
+      var webScorePrompt = HGI + '\n\nYou are parsing web search results to find REAL procurement opportunities (RFPs, RFQs, SOQs, ITBs) for HGI across ALL 8 verticals. Extract only REAL opportunities with titles, agencies, due dates, and URLs. Ignore news articles, old awards, and irrelevant results.\n\nWEB SEARCH RESULTS:\n' + webResults.slice(0, 6000) +
+        '\n\nReturn JSON array only: [{"title":"...","agency":"...","due_date":"YYYY-MM-DD or null","source_url":"...","vertical":"disaster|tpa|workforce|housing|construction|grant|program_admin|tax_appeals","description":"1 sentence"}]\nReturn [] if no real opportunities found. Maximum 10 entries.';
+      var webResp = await anthropic.messages.create({
+        model: 'claude-haiku-4-5-20251001', max_tokens: 2000,
+        messages: [{ role: 'user', content: webScorePrompt }]
+      });
+      var webText = (webResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('').replace(/```json|```/g, '').trim();
+      try {
+        var webOpps = JSON.parse(webText);
+        if (Array.isArray(webOpps)) {
+          webOpps.forEach(function(wo) {
+            if (wo.title && !isDupe(wo.title)) {
+              newOpps.push({
+                title: wo.title, agency: wo.agency || 'Unknown Agency',
+                source: 'web_search', source_url: wo.source_url || 'https://www.google.com',
+                description: (wo.description || '').slice(0, 500),
+                due_date: wo.due_date || null, vertical: wo.vertical || null
+              });
+            }
+          });
+          log('HUNTING: Web search found ' + webOpps.length + ' candidates across all verticals');
+        }
+      } catch (pe) { log('HUNTING: Web search parse error: ' + pe.message); }
+    }
+  } catch (e) { log('HUNTING web search err: ' + e.message); }
 
   log('HUNTING: ' + newOpps.length + ' raw candidates. Scoring with ALL organism intelligence...');
   if (newOpps.length === 0) {
@@ -5228,15 +5407,15 @@ async function runSession(trigger) {
       try { var rRT = await agentRedTeam(opp2, state, cb2); if (rRT) allResults.push(rRT); } catch (e) { log('RT err: ' + e.message); }
       try { var rPTW = await agentPriceToWin(opp2, state, cb2); if (rPTW) allResults.push(rPTW); } catch (e) { log('PTW err: ' + e.message); }
       try { var rPA = await agentProposalAssembly(opp2, state, cb2); if (rPA) allResults.push(rPA); } catch (e) { log('PA err: ' + e.message); }
-      // CUT (Session 81): brief_agent, opp_brief, oral_prep, post_award — re-enable when needed
-      // try { var rBr = await agentBrief(opp2, state, cb2); if (rBr) allResults.push(rBr); } catch (e) { log('Brief err: ' + e.message); }
-      // try { var rOB = await agentOppBrief(opp2, state, cb2); if (rOB) allResults.push(rOB); } catch (e) { log('OB err: ' + e.message); }
-      // try { var rOP = await agentOralPrep(opp2, state, cb2); if (rOP) allResults.push(rOP); } catch (e) { log('OP err: ' + e.message); }
-      // try { var rPO = await agentPostAward(opp2, state); if (rPO) allResults.push(rPO); } catch (e) { log('PO err: ' + e.message); }
+      // SESSION 88: ALL AGENTS RE-ENABLED — full organism intelligence
+      try { var rBr = await agentBrief(opp2, state, cb2); if (rBr) allResults.push(rBr); } catch (e) { log('Brief err: ' + e.message); }
+      try { var rOB = await agentOppBrief(opp2, state, cb2); if (rOB) allResults.push(rOB); } catch (e) { log('OB err: ' + e.message); }
+      try { var rOP = await agentOralPrep(opp2, state, cb2); if (rOP) allResults.push(rOP); } catch (e) { log('OP err: ' + e.message); }
+      try { var rPO = await agentPostAward(opp2, state); if (rPO) allResults.push(rPO); } catch (e) { log('PO err: ' + e.message); }
     }
 
     // 4. SYSTEM-WIDE AGENTS — SESSION 81 AUDIT: 4 keepers, 21 cut
-    log('--- System-wide agents (18 active) ---');
+    log('--- System-wide agents (ALL active — Session 88) ---');
     try { var rPS = await agentPipelineScanner(state); if (rPS) allResults.push(rPS); } catch (e) { log('PS err: ' + e.message); }
     try { var rDM = await agentDisasterMonitor(state); if (rDM) allResults.push(rDM); } catch (e) { log('DM err: ' + e.message); }
     try { var rDA = await agentDashboard(state); if (rDA) allResults.push(rDA); } catch (e) { log('Dash err: ' + e.message); }
@@ -5255,21 +5434,21 @@ async function runSession(trigger) {
     try { var rKB = await agentKnowledgeBase(state); if (rKB) allResults.push(rKB); } catch (e) { log('KB err: ' + e.message); }
     try { var rSI = await agentScraperInsights(state); if (rSI) allResults.push(rSI); } catch (e) { log('SI err: ' + e.message); }
     // try { var rEB = await agentExecutiveBrief(state); if (rEB) allResults.push(rEB); } catch (e) { log('EB err: ' + e.message); }
-    // try { var rDV = await agentDesignVisual(state); if (rDV) allResults.push(rDV); } catch (e) { log('DV err: ' + e.message); }
+    try { var rDV = await agentDesignVisual(state); if (rDV) allResults.push(rDV); } catch (e) { log('DV err: ' + e.message); }
     try { var rTM = await agentTeaming(state); if (rTM) allResults.push(rTM); } catch (e) { log('Team err: ' + e.message); }
-    // try { var rSE = await agentSourceExpansion(state); if (rSE) allResults.push(rSE); } catch (e) { log('SE err: ' + e.message); }
-    // try { var rCX = await agentContractExpiration(state); if (rCX) allResults.push(rCX); } catch (e) { log('CX err: ' + e.message); }
+    try { var rSE = await agentSourceExpansion(state); if (rSE) allResults.push(rSE); } catch (e) { log('SE err: ' + e.message); }
+    try { var rCX = await agentContractExpiration(state); if (rCX) allResults.push(rCX); } catch (e) { log('CX err: ' + e.message); }
     try { var rBC = await agentBudgetCycle(state); if (rBC) allResults.push(rBC); } catch (e) { log('BC err: ' + e.message); }
     try { var rLA = await agentLossAnalysis(state); if (rLA) allResults.push(rLA); } catch (e) { log('LA err: ' + e.message); }
-    // try { var rWR = await agentWinRateAnalytics(state); if (rWR) allResults.push(rWR); } catch (e) { log('WR err: ' + e.message); }
-    // try { var rRM = await agentRegulatoryMonitor(state); if (rRM) allResults.push(rRM); } catch (e) { log('RM err: ' + e.message); }
-    // try { var rOA = await agentOutreachAutomation(state); if (rOA) allResults.push(rOA); } catch (e) { log('OA err: ' + e.message); }
-    // try { var rLL = await agentLearningLoop(state); if (rLL) allResults.push(rLL); } catch (e) { log('LL err: ' + e.message); }
-    // try { var rEN = await agentEntrepreneurial(state); if (rEN) allResults.push(rEN); } catch (e) { log('EN err: ' + e.message); }
+    try { var rWR = await agentWinRateAnalytics(state); if (rWR) allResults.push(rWR); } catch (e) { log('WR err: ' + e.message); }
+    try { var rRM = await agentRegulatoryMonitor(state); if (rRM) allResults.push(rRM); } catch (e) { log('RM err: ' + e.message); }
+    try { var rOA = await agentOutreachAutomation(state); if (rOA) allResults.push(rOA); } catch (e) { log('OA err: ' + e.message); }
+    // LearningLoop already active above (line 5317) — skip duplicate
+    try { var rEN = await agentEntrepreneurial(state); if (rEN) allResults.push(rEN); } catch (e) { log('EN err: ' + e.message); }
     try { var rRC = await agentRecompete(state); if (rRC) allResults.push(rRC); } catch (e) { log('RC err: ' + e.message); }
     try { var rCD = await agentCompetitorDeepDive(state); if (rCD) allResults.push(rCD); } catch (e) { log('CD err: ' + e.message); }
     try { var rAP = await agentAgencyProfile(state); if (rAP) allResults.push(rAP); } catch (e) { log('AP err: ' + e.message); }
-    // try { var rSD = await agentSubcontractorDB(state); if (rSD) allResults.push(rSD); } catch (e) { log('SD err: ' + e.message); }
+    try { var rSD = await agentSubcontractorDB(state); if (rSD) allResults.push(rSD); } catch (e) { log('SD err: ' + e.message); }
 
     // 5. EVAL SCORING
     log('--- Eval scoring ---');
