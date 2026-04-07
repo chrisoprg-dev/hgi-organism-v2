@@ -4979,7 +4979,15 @@ async function agentHunting(state) {
     'dental', 'optometry', 'pharmacy benefit', 'medical equipment',
     'porta potty', 'portable toilet', 'dumpster', 'waste hauling', 'garbage',
     'paint ', 'painting service', 'floor', 'carpet', 'tile install',
-    'security guard', 'armed guard', 'surveillance camera'];
+    'security guard', 'armed guard', 'surveillance camera',
+    'lawn care', 'landscaping', 'tree trim', 'tree removal', 'stump',
+    'demolition', 'debris removal', 'debris hauling',
+    'copier', 'telephone system', 'internet service', 'fiber optic',
+    'school bus', 'transportation service', 'student transport',
+    'elevator', 'generator', 'fire alarm', 'fire extinguisher',
+    'portable building', 'modular', 'trailer rental',
+    'athletic field', 'scoreboard', 'bleacher',
+    'bank deposit', 'banking service', 'depository'];
 
   var preFiltered = deduped.filter(function(o) {
     var text = ((o.title || '') + ' ' + (o.description || '')).toLowerCase();
@@ -4994,10 +5002,22 @@ async function agentHunting(state) {
     // If it matches neither list, DROP it — CB has hundreds of irrelevant bids per entity
     return false;
   });
-  log('HUNTING: Pre-filter: ' + deduped.length + ' → ' + preFiltered.length + ' candidates (' + (deduped.length - preFiltered.length) + ' obvious non-HGI removed)');
+  // PRIORITY SORT: Most HGI-specific keywords scored first (not random array order)
+  var tier1kw = ['third party admin', 'claims admin', 'workers comp', 'worker comp', 'tpa ', 'disaster recovery', 'fema ', 'cdbg', 'housing authority', 'public housing', 'section 8', 'wioa', 'workforce develop', 'grant management', 'grant admin', 'construction management', 'hazard mitigation', 'property tax', 'billing appeal', 'utility billing', 'water billing', 'guaranty', 'adjuster', 'adjudic', 'actuarial'];
+  var tier2kw = ['program management', 'project management', 'consulting services', 'professional services', 'emergency management', 'recovery', 'pre-award', 'sub-recipient', 'voucher', 'capital program', 'insurance', 'claims', 'assessment'];
+  preFiltered.forEach(function(o) {
+    var text = ((o.title || '') + ' ' + (o.description || '')).toLowerCase();
+    var prio = 0;
+    for (var t1i = 0; t1i < tier1kw.length; t1i++) { if (text.includes(tier1kw[t1i])) prio += 10; }
+    for (var t2i = 0; t2i < tier2kw.length; t2i++) { if (text.includes(tier2kw[t2i])) prio += 3; }
+    o._priority = prio;
+  });
+  preFiltered.sort(function(a, b) { return (b._priority || 0) - (a._priority || 0); });
+  log('HUNTING: Pre-filter: ' + deduped.length + ' \u2192 ' + preFiltered.length + ' candidates (' + (deduped.length - preFiltered.length) + ' removed). Top: ' + (preFiltered[0] ? preFiltered[0]._priority + 'pts ' + (preFiltered[0].title || '').slice(0,60) : 'none'));
   var qualified = [];
+  var rejectedSamples = [];
 
-  for (var c = 0; c < Math.min(preFiltered.length, 75); c++) {
+  for (var c = 0; c < Math.min(preFiltered.length, 150); c++) {
     try {
       var cand = preFiltered[c];
       var scorePrompt = HGI + '\n\nORGANISM INTELLIGENCE (use this to adjust scoring — relationships, competitor weaknesses, disasters, budget windows, and outcome lessons all affect how HGI should score this):' + huntContext +
