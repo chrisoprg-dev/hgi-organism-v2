@@ -3875,7 +3875,7 @@ async function agentBrief(opp, state, cycleBrief) {
   var ctx = buildAgentCtx(state, 'brief_agent', opp.id);
   var task = 'TASK: 1-page team briefing. Situation summary, competitive landscape (named competitors), win strategy, top 3 actions, deadline status. Decision-oriented for the team lead.';
   var prompt = cycleBrief + '\n\n' + oppFull(opp) + '\n\nORGANISM MEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1500);
+  var out = await claudeCall(task, prompt, 1500, { model: HAIKU });
   if (!out || out.length < 100) return null;
   await storeMemory('brief_agent', opp.id, (opp.agency || '') + ',briefing', out, 'analysis', null, 'medium');
   return { agent: 'brief_agent', opp: opp.title, chars: out.length };
@@ -3886,7 +3886,7 @@ async function agentOppBrief(opp, state, cycleBrief) {
   var ctx = buildAgentCtx(state, 'opportunity_brief_agent', opp.id);
   var task = 'TASK: Deep single-opportunity dossier integrating ALL intelligence. A reader with zero context should understand this opportunity, HGI competitive position, and recommended actions from this document alone.';
   var prompt = cycleBrief + '\n\n' + oppFull(opp) + '\n\nORGANISM MEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 2500);
+  var out = await claudeCall(task, prompt, 2500, { model: HAIKU });
   if (!out || out.length < 100) return null;
   await storeMemory('opportunity_brief_agent', opp.id, (opp.agency || '') + ',dossier', out, 'analysis', null, 'medium');
   return { agent: 'opportunity_brief_agent', opp: opp.title, chars: out.length };
@@ -3920,7 +3920,7 @@ async function agentOralPrep(opp, state, cycleBrief) {
   var ctx = buildAgentCtx(state, 'oral_prep', opp.id);
   var task = 'TASK: Oral presentation strategy. 3-5 key messages, anticipated tough questions from evaluators, prepared answers with evidence, speaker assignments, timing.';
   var prompt = cycleBrief + '\n\n' + oppFull(opp) + '\n\nORGANISM MEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 2000);
+  var out = await claudeCall(task, prompt, 2000, { model: HAIKU });
   if (!out || out.length < 100) return null;
   await storeMemory('oral_prep', opp.id, (opp.agency || '') + ',oral', out, 'analysis', null, 'medium');
   return { agent: 'oral_prep', opp: opp.title, chars: out.length };
@@ -3950,7 +3950,7 @@ async function agentDiscovery(state) {
   var ctx = buildAgentCtx(state, 'discovery_agent', null);
   var task = 'TASK: Search for pre-solicitation signals 6-24 months out in HGI verticals. Search congressional appropriations, agency strategic plans, procurement forecasts. Each signal: source URL, timeline, estimated value, recommended action.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1500, { webSearch: true });
+  var out = await claudeCall(task, prompt, 1500, { webSearch: true, model: HAIKU });
   if (!out || out.length < 100) return null;
   var hasUrl = /https?:\/\//.test(out);
   await storeMemory('discovery_agent', null, 'pre_solicitation', out, 'analysis', hasUrl ? 'web_search' : null, hasUrl ? 'high' : 'inferred');
@@ -4062,7 +4062,7 @@ async function agentSourceExpansion(state) {
   log('SOURCE EXPANSION...');
   var task = 'TASK: Map procurement portals for LA, MS, TX, FL, AL, GA. For each: URL, verticals covered, access requirements, estimated volume. Focus on portals not currently monitored.';
   var prompt = task;
-  var out = await claudeCall(task, prompt, 1200, { webSearch: true });
+  var out = await claudeCall(task, prompt, 1200, { webSearch: true, model: HAIKU });
   if (!out || out.length < 100) return null;
   await storeMemory('source_expansion', null, 'sources', out, 'analysis', null, 'medium');
   return { agent: 'source_expansion', opp: 'system', chars: out.length };
@@ -4073,7 +4073,7 @@ async function agentContractExpiration(state) {
   var ctx = buildAgentCtx(state, 'contract_expiration', null);
   var task = 'TASK: Search USAspending and state portals for expiring contracts in HGI verticals. Recompete window = 6-12 months before expiration. For each: holder, agency, value, end date, recompete timeline.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1200, { webSearch: true });
+  var out = await claudeCall(task, prompt, 1200, { webSearch: true, model: HAIKU });
   if (!out || out.length < 100) return null;
   var hasUrl = /https?:\/\//.test(out);
   await storeMemory('contract_expiration', null, 'recompete', out, 'analysis', hasUrl ? 'web_search' : null, hasUrl ? 'high' : 'inferred');
@@ -4097,7 +4097,7 @@ async function agentAmendmentTracker(state) {
   var oppList = pursuing.map(function(o) { return (o.title || '?') + ' | Source: ' + (o.source_url || 'none'); }).join('\n');
   var task = 'TASK: Check each pursuing-stage opportunity for RFP amendments, addenda, Q&A postings, deadline changes. Flag any competitor activity visible on bid boards (questions asked, firms registered). This is CRITICAL — if a competitor asked a question on a bid board, that is confirmed competitive intelligence.';
   var prompt = 'OPPORTUNITIES:\n' + oppList + preResearch + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1200, { webSearch: true });
+  var out = await claudeCall(task, prompt, 1200, { webSearch: true, model: HAIKU });
   if (!out || out.length < 100) return null;
   await storeMemory('amendment_tracker', null, 'amendments', out, 'analysis', null, 'medium');
   return { agent: 'amendment_tracker', opp: 'system', chars: out.length };
@@ -4107,7 +4107,7 @@ async function agentRegulatoryMonitor(state) {
   log('REGULATORY MONITOR...');
   var task = 'TASK: Search Federal Register, FEMA policy updates, HUD notices, LA legislature for regulatory changes affecting HGI verticals. For each: change, effective date, impact, recommended response.';
   var prompt = task;
-  var out = await claudeCall(task, prompt, 1200, { webSearch: true });
+  var out = await claudeCall(task, prompt, 1200, { webSearch: true, model: HAIKU });
   if (!out || out.length < 100) return null;
   var hasUrl = /https?:\/\//.test(out);
   await storeMemory('regulatory_monitor', null, 'regulatory', out, 'analysis', hasUrl ? 'web_search' : null, hasUrl ? 'high' : 'inferred');
@@ -4119,7 +4119,7 @@ async function agentEntrepreneurial(state) {
   var ctx = buildAgentCtx(state, 'entrepreneurial_agent', null);
   var task = 'TASK: Find unsolicited opportunities where HGI creates demand. THE NOLA MODEL: HGI identified S&WB $2B crisis + $222M deficit, created concept paper without waiting for RFP. Search for: agencies in crisis, infrastructure failures, audit findings, new federal funding agencies haven\'t accessed, DR situations needing capacity. Each: agency pain point (sourced), available funding, HGI fit, approach.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1500, { webSearch: true });
+  var out = await claudeCall(task, prompt, 1500, { webSearch: true, model: HAIKU });
   if (!out || out.length < 100) return null;
   var hasUrl = /https?:\/\//.test(out);
   await storeMemory('entrepreneurial_agent', null, 'unsolicited', out, 'analysis', hasUrl ? 'web_search' : null, hasUrl ? 'high' : 'inferred');
@@ -4131,7 +4131,7 @@ async function agentRecompete(state) {
   var ctx = buildAgentCtx(state, 'recompete_agent', null);
   var task = 'TASK: Monitor for recompete opportunities. Search for competitor contracts approaching expiration in HGI verticals. Timeline, threats, defense strategy.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1200, { webSearch: true });
+  var out = await claudeCall(task, prompt, 1200, { webSearch: true, model: HAIKU });
   if (!out || out.length < 100) return null;
   await storeMemory('recompete_agent', null, 'recompete', out, 'analysis', null, 'medium');
   return { agent: 'recompete_agent', opp: 'system', chars: out.length };
@@ -4142,7 +4142,7 @@ async function agentCompetitorDeepDive(state) {
   var ctx = buildAgentCtx(state, 'competitor_deep_dive', null);
   var task = 'TASK: Build profiles of HGI top competitors: CDR Maguire, IEM, Tetra Tech, Hagerty. For each: recent wins (sourced), key personnel, geographic footprint, strengths/weaknesses. Source every claim.';
   var prompt = 'MEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1500, { webSearch: true });
+  var out = await claudeCall(task, prompt, 1500, { webSearch: true, model: HAIKU });
   if (!out || out.length < 100) return null;
   var hasUrl = /https?:\/\//.test(out);
   await storeMemory('competitor_deep_dive', null, 'competitors', out, 'competitive_intel', hasUrl ? 'web_search' : null, hasUrl ? 'high' : 'inferred');
@@ -4155,7 +4155,7 @@ async function agentAgencyProfile(state) {
   var agencies = state.pipeline.map(function(o) { return o.agency || ''; }).filter(function(a, i, arr) { return a && arr.indexOf(a) === i; }).join(', ');
   var task = 'TASK: Build profiles of target agencies: ' + agencies + '. Org chart, procurement patterns, budget cycle, current contracts, strategic priorities.';
   var prompt = 'MEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1500, { webSearch: true });
+  var out = await claudeCall(task, prompt, 1500, { webSearch: true, model: HAIKU });
   if (!out || out.length < 100) return null;
   var hasUrl = /https?:\/\//.test(out);
   await storeMemory('agency_profile_agent', null, 'agencies', out, 'analysis', hasUrl ? 'web_search' : null, hasUrl ? 'high' : 'inferred');
@@ -4267,7 +4267,7 @@ async function agentBudgetCycle(state) {
   log('BUDGET CYCLE...');
   var task = 'TASK: Track budget cycles for target agencies. Search budget documents, fiscal year calendars. When do agencies release RFPs relative to budget cycle? Timing recommendations.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1200, { webSearch: true });
+  var out = await claudeCall(task, prompt, 1200, { webSearch: true, model: HAIKU });
   if (!out || out.length < 100) return null;
   await storeMemory('budget_cycle', null, 'budget', out, 'analysis', null, 'medium');
   return { agent: 'budget_cycle', opp: 'system', chars: out.length };
@@ -4335,7 +4335,7 @@ async function agentExecutiveBrief(state) {
   var ctx = buildAgentCtx(state, 'executive_brief_agent', null);
   var task = 'TASK: Weekly digest for CEO and Chairman. (1) Pipeline: new/active/won/lost (2) Top 3 priority actions (3) Risk alerts (4) Competitive intel highlights (5) Resource needs. 1 page. Decision-oriented.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 2000);
+  var out = await claudeCall(task, prompt, 2000, { model: HAIKU });
   if (!out || out.length < 100) return null;
   await storeMemory('executive_brief_agent', null, 'executive', out, 'analysis', null, 'medium');
   return { agent: 'executive_brief_agent', opp: 'system', chars: out.length };
@@ -4346,7 +4346,7 @@ async function agentDashboard(state) {
   var ctx = buildAgentCtx(state, 'dashboard_agent', null);
   var task = 'TASK: Morning briefing for the President. Top 3 things to know. Top 3 actions needed. Alerts. Concise. Decision-oriented. No fluff.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1500);
+  var out = await claudeCall(task, prompt, 1500, { model: HAIKU });
   if (!out || out.length < 100) return null;
   await storeMemory('dashboard_agent', null, 'dashboard', out, 'analysis', null, 'medium');
   return { agent: 'dashboard_agent', opp: 'system', chars: out.length };
@@ -4428,7 +4428,7 @@ async function agentSelfAwareness(state, sessionResults, evalScores) {
   
   var task = 'TASK: You see everything. (1) Patterns across opps individual agents missed (2) Which agents produced highest-value intelligence (3) SINGLE improvement to most raise next proposal score (4) Costliest data gaps (5) ONE thing the President must do this week.' + evalSummary;
   var prompt = 'SESSION RESULTS:\n' + resultsSummary + '\n\nPIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 3000);
+  var out = await claudeCall(task, prompt, 3000, { model: HAIKU });
   if (!out || out.length < 100) return null;
   await storeMemory('self_awareness', null, 'self_assessment', out, 'analysis', null, 'medium');
   return { agent: 'self_awareness', opp: 'system', chars: out.length };
