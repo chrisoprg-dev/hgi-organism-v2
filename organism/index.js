@@ -531,7 +531,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       // Helper: fuzzy match for filtering cross-references
       function matchesContext(text) {
         if (!text) return false;
-        var t = text.toLowerCase();
+        var t = (typeof text === 'string' ? text : JSON.stringify(text)).toLowerCase();
         return (agencyLower && t.indexOf(agencyLower) > -1) ||
                t.indexOf(verticalLower) > -1 ||
                (oppState && t.indexOf(oppState.toLowerCase()) > -1);
@@ -4915,7 +4915,7 @@ async function orchestrateOpp(opp) {
   var oppState = (opp.state||'Louisiana').trim();
   function orchMatch(text) {
     if (!text) return false;
-    var t = text.toLowerCase();
+    var t = (typeof text === 'string' ? text : JSON.stringify(text)).toLowerCase();
     return (agencyLower && t.indexOf(agencyLower) > -1) || t.indexOf(verticalLower) > -1 || (oppState && t.indexOf(oppState.toLowerCase()) > -1);
   }
 
@@ -5313,6 +5313,38 @@ async function runSession(trigger) {
     await storeMemory('v4_engine', null, 'v4,session',
       'V4 SESSION - trigger:' + trigger + ' pipeline:' + state.pipeline.length + ' agents:' + allResults.length + ' opps_analyzed:' + activeOpps.length + ' uptime:' + Math.floor(process.uptime()) + 's',
       'analysis', null, 'high');
+
+    // ═══ AUTO-PROPOSAL TRIGGER ═══
+    // After all agents run, check if any opp qualifies for automatic proposal generation
+    // Conditions: GO recommendation + OPI >= 85 + RFP retrieved + no proposal content yet
+    try {
+      var proposalCandidates = state.pipeline.filter(function(o) {
+        var isGo = (o.capture_action || '').toUpperCase().indexOf('GO') > -1 &&
+                   (o.capture_action || '').toUpperCase().indexOf('NO-BID') === -1;
+        var highOpi = (o.opi_score || 0) >= 85;
+        var hasRfp = o.rfp_document_retrieved === true || (o.rfp_text || '').length > 2000;
+        var noProposal = !o.proposal_content || (o.proposal_content || '').length < 1000;
+        return isGo && highOpi && hasRfp && noProposal && o.status === 'active';
+      });
+      if (proposalCandidates.length > 0) {
+        log('AUTO-PROPOSAL: ' + proposalCandidates.length + ' opps qualify for automatic proposal generation');
+        for (var api = 0; api < proposalCandidates.length; api++) {
+          var apOpp = proposalCandidates[api];
+          log('AUTO-PROPOSAL: Triggering produce-proposal for ' + (apOpp.title || '').slice(0, 50) + ' (OPI ' + apOpp.opi_score + ')');
+          try {
+            var apResp = await fetch('http://localhost:' + (process.env.PORT || 8080) + '/api/produce-proposal', {
+              method: 'POST', headers: {'Content-Type':'application/json'},
+              body: JSON.stringify({id: apOpp.id}),
+              signal: AbortSignal.timeout(300000) // 5 min timeout for Opus
+            });
+            log('AUTO-PROPOSAL: Triggered for ' + (apOpp.title || '').slice(0, 40) + ' — status ' + apResp.status);
+          } catch(ape) { log('AUTO-PROPOSAL error: ' + ape.message); }
+        }
+        await storeMemory('auto_proposal_trigger', null, 'proposal,automation',
+          'AUTO-PROPOSAL: Triggered ' + proposalCandidates.length + ' proposals: ' + proposalCandidates.map(function(c) { return (c.title||'').slice(0,40) + ' (OPI ' + c.opi_score + ')'; }).join(', '),
+          'analysis', null, 'high');
+      }
+    } catch(e) { log('Auto-proposal check error: ' + e.message); }
 
     log('=== SESSION COMPLETE: ' + id + ' | ' + allResults.length + ' agent outputs ===');
     log('Completed: ' + allResults.map(function(r) { return r.agent + '(' + r.chars + ')'; }).join(', '));
