@@ -4474,8 +4474,9 @@ async function scoreAgentOutput(agent, oppId, output, state) {
 }
 
 // === DIRECT CB + LaPAC HUNTING — V2 self-sufficient with headless browser ===
-async function huntCentralBidding() {
+async function huntCentralBidding(isCron) {
   var results = [];
+  if (!isCron) { log('CB-HUNT: Skipping Puppeteer scrape (manual trigger — CB scraping only runs on scheduled cron to control costs)'); return []; }
   if (!puppeteer) { log('CB-HUNT: Puppeteer not available — skipping direct CB scraping'); return []; }
   var browser = null;
   try {
@@ -4677,7 +4678,7 @@ async function huntLaPAC() {
 }
 
 // === HUNTING AGENT — preserved from V2, uses existing portal APIs ===
-async function agentHunting(state) {
+async function agentHunting(state, trigger) {
   log('HUNTING: checking procurement portals...');
   var newOpps = [];
   var existingTitles = state.pipeline.map(function(o) { return (o.title || '').toLowerCase().slice(0, 50); });
@@ -4696,7 +4697,8 @@ async function agentHunting(state) {
 
   // Central Bidding — DIRECT V2 hunting (no V1/Apify dependency)
   try {
-    var cbResults = await huntCentralBidding();
+    var isCronHunt = (trigger || '').indexOf('cron') >= 0;
+    var cbResults = await huntCentralBidding(isCronHunt);
     cbResults.forEach(function(o) {
       if (o.title && !isDupe(o.title)) newOpps.push(o);
     });
@@ -5068,7 +5070,7 @@ async function agentHunting(state) {
   var qualified = [];
   var rejectedSamples = [];
 
-  for (var c = 0; c < Math.min(preFiltered.length, 150); c++) {
+  for (var c = 0; c < Math.min(preFiltered.length, 50); c++) {
     try {
       var cand = preFiltered[c];
       var scorePrompt = HGI + '\n\nORGANISM INTELLIGENCE (use this to adjust scoring — relationships, competitor weaknesses, disasters, budget windows, and outcome lessons all affect how HGI should score this):' + huntContext +
@@ -5512,7 +5514,7 @@ async function runSession(trigger) {
     var eventTriggeredOpps = []; // opps that need full analysis due to events
 
     // 1. HUNTING — fires first (always runs, even in skeleton)
-    try { var rH = await agentHunting(state); if (rH) { allResults.push(rH); if (rH.new_opps > 0) { newOppsFound = rH.new_opps; log('EVENT: ' + rH.new_opps + ' new opps discovered — will trigger full analysis'); var fresh = await supabase.from('opportunities').select('*').eq('status', 'active').order('opi_score', { ascending: false }).limit(15); if (fresh.data) { state.pipeline = fresh.data; activeOpps = state.pipeline.filter(function(o) { return (o.opi_score || 0) >= 65; }); } } } } catch (e) { log('Hunt error: ' + e.message); }
+    try { var rH = await agentHunting(state, trigger); if (rH) { allResults.push(rH); if (rH.new_opps > 0) { newOppsFound = rH.new_opps; log('EVENT: ' + rH.new_opps + ' new opps discovered — will trigger full analysis'); var fresh = await supabase.from('opportunities').select('*').eq('status', 'active').order('opi_score', { ascending: false }).limit(15); if (fresh.data) { state.pipeline = fresh.data; activeOpps = state.pipeline.filter(function(o) { return (o.opi_score || 0) >= 65; }); } } } } catch (e) { log('Hunt error: ' + e.message); }
 
     // 1.5. AUTO-RFP RETRIEVAL — always runs, tracks new retrievals
     try { var rfpResults = await autoRetrieveRFPs(); if (rfpResults && rfpResults.length > 0) { var successfulRFPs = rfpResults.filter(function(r) { return r && r.retrieved; }); if (successfulRFPs.length > 0) { newRFPsRetrieved = successfulRFPs.length; log('EVENT: ' + successfulRFPs.length + ' new RFPs retrieved — will trigger full analysis for those opps'); successfulRFPs.forEach(function(r) { if (r && r.id) eventTriggeredOpps.push(r.id); }); } var refreshed = await supabase.from('opportunities').select('*').eq('status', 'active').order('opi_score', { ascending: false }).limit(15); if (refreshed.data) { state.pipeline = refreshed.data; activeOpps = state.pipeline.filter(function(o) { return (o.opi_score || 0) >= 65; }); } } } catch (e) { log('Auto-RFP error: ' + e.message); }
