@@ -4582,22 +4582,90 @@ async function agentHunting(state) {
     log('HUNTING: Federal Register checked ' + frTerms.length + ' terms');
   } catch (e) { log('HUNTING Federal Register err: ' + e.message); }
 
-  log('HUNTING: ' + newOpps.length + ' raw candidates. Scoring...');
+  log('HUNTING: ' + newOpps.length + ' raw candidates. Scoring with ALL organism intelligence...');
   if (newOpps.length === 0) {
     await storeMemory('hunting_agent', null, 'hunting', 'No new candidates from CB + SAM + FEMA + USAspending + Grants.gov + FedReg (LaPAC disabled — no API)', 'analysis', null, 'high');
     return { agent: 'hunting_agent', chars: 100, new_opps: 0 };
   }
 
-  // Deduplicate and score with Haiku
+  // ═══ ALL-INTO-ALL HUNTING: Load organism intelligence to inform scoring ═══
+  var huntIntel = await Promise.allSettled([
+    supabase.from('competitive_intelligence').select('competitor_name,agency,strengths,weaknesses,threat_level,incumbent_at,active_verticals,price_intelligence').order('created_at',{ascending:false}).limit(100),
+    supabase.from('relationship_graph').select('contact_name,organization,relationship_strength,hgi_relationship,agency').order('created_at',{ascending:false}).limit(100),
+    supabase.from('disaster_alerts').select('disaster_name,state,counties,declaration_date,fema_programs,hgi_recommendation').order('created_at',{ascending:false}).limit(50),
+    supabase.from('budget_cycles').select('agency,state,procurement_window,rfp_timing,hgi_vertical').order('created_at',{ascending:false}).limit(50),
+    supabase.from('recompete_tracker').select('client,contract_name,known_competitor,contract_end_date,hgi_incumbent,estimated_value_annual').order('created_at',{ascending:false}).limit(50),
+    supabase.from('agency_profiles').select('agency_name,state,incumbent_contractors,hgi_relationship,hgi_history,procurement_process').order('created_at',{ascending:false}).limit(30),
+    supabase.from('organism_memory').select('agent,observation').ilike('observation','%pattern%').order('created_at',{ascending:false}).limit(30),
+    supabase.from('opportunities').select('title,agency,vertical,opi_score,outcome,outcome_notes').not('outcome','is',null).order('last_updated',{ascending:false}).limit(10)
+  ]);
+  function getHI(idx) { return (huntIntel[idx].status === 'fulfilled' && huntIntel[idx].value.data) || []; }
+  var hiCI = getHI(0), hiRG = getHI(1), hiDA = getHI(2), hiBC = getHI(3), hiRC = getHI(4), hiAP = getHI(5), hiPatterns = getHI(6), hiOutcomes = getHI(7);
+
+  // Build compressed intelligence context for scoring
+  var huntContext = '';
+
+  // Relationships: which agencies do we know people at?
+  var knownAgencies = {};
+  hiRG.forEach(function(r) {
+    var org = (r.organization||r.agency||'').toLowerCase();
+    if (org && !knownAgencies[org]) knownAgencies[org] = (r.hgi_relationship||r.relationship_strength||'known');
+  });
+  if (Object.keys(knownAgencies).length > 0) {
+    huntContext += '\nAGENCIES WITH HGI RELATIONSHIPS: ' + Object.keys(knownAgencies).map(function(a) { return a + ' (' + knownAgencies[a] + ')'; }).join(', ');
+  }
+
+  // Competitors: who is weak where?
+  var weakIncumbents = hiCI.filter(function(c) { return c.weaknesses && c.weaknesses.length > 10; });
+  if (weakIncumbents.length > 0) {
+    huntContext += '\nCOMPETITOR WEAKNESSES: ' + weakIncumbents.slice(0,10).map(function(c) { return c.competitor_name + ' at ' + (c.agency||c.incumbent_at||'?') + ': ' + (c.weaknesses||'').slice(0,100); }).join('; ');
+  }
+
+  // Recent disasters: where is new work coming?
+  if (hiDA.length > 0) {
+    huntContext += '\nRECENT DISASTERS (procurement signals): ' + hiDA.slice(0,8).map(function(d) { return (d.disaster_name||'') + ' (' + (d.state||'') + ', ' + (d.declaration_date||'').slice(0,10) + ') Programs: ' + (d.fema_programs||''); }).join('; ');
+  }
+
+  // Budget cycles: what procurement windows are open?
+  if (hiBC.length > 0) {
+    huntContext += '\nOPEN PROCUREMENT WINDOWS: ' + hiBC.slice(0,8).map(function(b) { return (b.agency||'') + ' (' + (b.state||'') + '): ' + (b.procurement_window||'') + ' ' + (b.rfp_timing||''); }).join('; ');
+  }
+
+  // Recompetes: which incumbents' contracts are ending?
+  if (hiRC.length > 0) {
+    huntContext += '\nEXPIRING INCUMBENT CONTRACTS: ' + hiRC.slice(0,8).map(function(r) { return (r.client||'') + ': ' + (r.contract_name||'').slice(0,50) + ' (incumbent: ' + (r.known_competitor||'?') + ', ends ' + (r.contract_end_date||'?') + ')'; }).join('; ');
+  }
+
+  // Agency profiles: procurement process intelligence
+  if (hiAP.length > 0) {
+    huntContext += '\nAGENCY PROFILES: ' + hiAP.slice(0,8).map(function(a) { return (a.agency_name||'') + ': ' + (a.hgi_relationship||'none') + ' relationship, incumbent: ' + (a.incumbent_contractors||'unknown'); }).join('; ');
+  }
+
+  // Outcome lessons: what did we learn from wins/losses?
+  if (hiOutcomes.length > 0) {
+    huntContext += '\nOUTCOME LESSONS: ' + hiOutcomes.map(function(o) { return (o.title||'').slice(0,40) + ' (' + (o.outcome||'') + ', OPI ' + (o.opi_score||'') + '): ' + (o.outcome_notes||''); }).join('; ');
+  }
+
+  // Patterns from organism memory
+  if (hiPatterns.length > 0) {
+    huntContext += '\nORGANISM PATTERNS: ' + hiPatterns.slice(0,5).map(function(p) { return (p.observation||'').slice(0,200); }).join('; ');
+  }
+
+  log('HUNTING: Intelligence context loaded (' + huntContext.length + ' chars) — scoring ' + newOpps.length + ' candidates');
+
+  // Deduplicate and score with Haiku + full intelligence
   var deduped = newOpps.filter(function(o, i, a) { return a.findIndex(function(x) { return x.title.slice(0, 40) === o.title.slice(0, 40); }) === i; });
   var qualified = [];
 
   for (var c = 0; c < Math.min(deduped.length, 15); c++) {
     try {
       var cand = deduped[c];
+      var scorePrompt = HGI + '\n\nORGANISM INTELLIGENCE (use this to adjust scoring — relationships, competitor weaknesses, disasters, budget windows, and outcome lessons all affect how HGI should score this):' + huntContext +
+        '\n\nOPP: ' + cand.title + ' | ' + cand.agency + ' | ' + (cand.description || '').slice(0, 300) +
+        '\n\nJSON only: {"opi":N,"vertical":"disaster|tpa|workforce|housing|construction|grant|federal|FILTER","capture_action":"GO|WATCH|NO-BID","why":"1 sentence including any relationship/competitive/timing advantage"}';
       var scoreResp = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-20251001', max_tokens: 150,
-        messages: [{ role: 'user', content: HGI + '\nOPP: ' + cand.title + ' | ' + cand.agency + ' | ' + (cand.description || '').slice(0, 200) + '\n\nJSON only: {"opi":N,"vertical":"disaster|tpa|workforce|housing|construction|grant|federal|FILTER","capture_action":"GO|WATCH|NO-BID","why":"1 sentence"}' }]
+        model: 'claude-haiku-4-5-20251001', max_tokens: 200,
+        messages: [{ role: 'user', content: scorePrompt }]
       });
       var st = (scoreResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('').replace(/```json|```/g, '').trim();
       var score = JSON.parse(st);
