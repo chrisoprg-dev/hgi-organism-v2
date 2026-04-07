@@ -927,6 +927,16 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         'If they want a 20-page narrative, write a 20-page narrative with their exact section headings.\n' +
         'If they want Exhibit A and Exhibit B, produce both exhibits with HGI data filled in.\n' +
         'If they want a fee schedule by staff classification, build it from the HGI rate card.\n\n' +
+        'STEP 3.5 — TECHNICAL DEPTH AND REGULATORY PRECISION (CRITICAL):\n' +
+        'This is what separates winning proposals from generic ones. Every technical approach and methodology section MUST demonstrate:\n' +
+        '1. SPECIFIC REGULATORY CITATIONS — cite exact CFR sections, Public Law numbers, PAPPG version, FEMA policy guides, state statutes. Never say "federal requirements" when you can say "2 CFR 200.318-327 procurement standards" or "PAPPG v5.0 Chapter 6."\n' +
+        '2. NAMED SYSTEMS AND PLATFORMS — reference the actual systems where work happens: FEMA Grants Portal, Grants Manager, DRGR, PMS/SmartLink, EIV, IDIS, Primavera P6, HiRE, Employ Florida. These prove operational experience.\n' +
+        '3. METHODOLOGY SPECIFICITY — describe actual procedures with operational detail, not aspirational language. Evaluators who have done this work will immediately recognize whether the proposer has actually performed it.\n' +
+        '4. RISK AWARENESS — demonstrate knowledge of what goes wrong in this specific type of work. OIG findings, deobligation triggers, common compliance failures, audit failure modes. Showing you know the pitfalls proves you have navigated them.\n' +
+        '5. QUANTIFIED BENCHMARKS — use specific numbers that anchor credibility: procurement thresholds, performance targets, cost caps, timeline requirements. These numbers cannot be approximated and evaluators know instantly if they are correct.\n' +
+        '6. GHOST LANGUAGE — use the competitive intelligence above to craft language that highlights HGI strengths against competitor weaknesses WITHOUT naming competitors. Examples: "dedicated Louisiana-based team rather than rotating national surge staff" or "zero-finding audit record across $14B+ in managed programs."\n' +
+        '7. EXTERNAL BEST PRACTICES — go beyond what HGI has done to demonstrate knowledge of industry-wide best practices, emerging approaches, and lessons learned from the broader field. The technical approach should reflect the best available methodology, not just HGI internal procedures.\n' +
+        'The proposal must read as if it was written by someone who has done this exact work for 20 years — because the organism intelligence above contains that depth. USE IT.\n\n' +
         'STEP 4 — WRITE EVERY SECTION TO ITS BEST POSSIBLE VERSION:\n' +
         'Every section of this proposal must be written as the best possible version of that section. No section gets less effort or depth than any other. The technical approach must be excellent because it IS the technical approach. The staffing section must be sharp because evaluators are looking at qualifications. Past performance must be specific and compelling because it proves HGI can deliver.\n' +
         'Do NOT allocate depth based on evaluation scoring weights. A 10-point section written poorly loses those 10 points. Write every section as if the evaluator reads only that section to make their decision.\n' +
@@ -4897,18 +4907,73 @@ async function orchestrateOpp(opp) {
   var rfpContent = (opp.rfp_text || '').slice(0, 12000);
   var kbContext = await kbQuery(opp.vertical, opp.title + ' ' + (opp.agency || ''));
 
-  // Load relevant organism memory
-  var memContext = '';
-  try {
-    var mems = await supabase.from('organism_memory')
-      .select('observation,agent')
-      .eq('opportunity_id', oppId)
-      .order('created_at', { ascending: false })
-      .limit(5);
-    if (mems.data && mems.data.length > 0) {
-      memContext = '\nORGANISM MEMORY:\n' + mems.data.map(function(m) { return '[' + m.agent + '] ' + (m.observation || '').slice(0, 400); }).join('\n');
-    }
-  } catch(e) {}
+  // ═══ ALL-INTO-ALL ORCHESTRATION: Load EVERY intelligence source ═══
+  var agency = (opp.agency||'').trim();
+  var agencyLower = agency.toLowerCase();
+  var vertical = (opp.vertical||'disaster recovery').trim();
+  var verticalLower = vertical.toLowerCase();
+  var oppState = (opp.state||'Louisiana').trim();
+  function orchMatch(text) {
+    if (!text) return false;
+    var t = text.toLowerCase();
+    return (agencyLower && t.indexOf(agencyLower) > -1) || t.indexOf(verticalLower) > -1 || (oppState && t.indexOf(oppState.toLowerCase()) > -1);
+  }
+
+  var orchIntel = await Promise.allSettled([
+    supabase.from('organism_memory').select('observation,agent').eq('opportunity_id', oppId).order('created_at',{ascending:false}).limit(30),
+    supabase.from('competitive_intelligence').select('competitor_name,agency,strengths,weaknesses,threat_level,incumbent_at,price_intelligence,known_contracts,active_verticals,win_rate_estimate').order('created_at',{ascending:false}).limit(100),
+    supabase.from('relationship_graph').select('contact_name,title,organization,relationship_strength,hgi_relationship,role_in_procurement,agency,notes').order('created_at',{ascending:false}).limit(100),
+    supabase.from('disaster_alerts').select('disaster_name,state,counties,declaration_date,fema_programs,hgi_recommendation,procurement_window').order('created_at',{ascending:false}).limit(50),
+    supabase.from('budget_cycles').select('agency,state,procurement_window,rfp_timing,budget_amount,hgi_vertical').order('created_at',{ascending:false}).limit(50),
+    supabase.from('recompete_tracker').select('client,contract_name,known_competitor,contract_end_date,hgi_incumbent,estimated_value_annual,decision_maker').order('created_at',{ascending:false}).limit(50),
+    supabase.from('regulatory_changes').select('regulation_name,effective_date,impact_level,affected_verticals,summary,hgi_action_required').order('created_at',{ascending:false}).limit(50),
+    supabase.from('teaming_partners').select('partner_name,capability,location,certifications,verticals,fit_score').order('fit_score',{ascending:false}).limit(30),
+    supabase.from('agency_profiles').select('agency_name,state,annual_budget,incumbent_contractors,hgi_relationship,hgi_history,procurement_process,key_contacts').order('created_at',{ascending:false}).limit(30),
+    supabase.from('pipeline_analytics').select('category,title,insight,recommendation,affected_verticals').order('created_at',{ascending:false}).limit(30),
+    supabase.from('opportunities').select('title,agency,vertical,opi_score,outcome,outcome_notes').not('outcome','is',null).order('last_updated',{ascending:false}).limit(15),
+    supabase.from('organism_memory').select('observation,agent').neq('opportunity_id', oppId).order('created_at',{ascending:false}).limit(300)
+  ]);
+  function getOI(idx) { return (orchIntel[idx].status === 'fulfilled' && orchIntel[idx].value.data) || []; }
+
+  var oiMems = getOI(0), oiCI = getOI(1), oiRG = getOI(2), oiDA = getOI(3);
+  var oiBC = getOI(4), oiRC = getOI(5), oiReg = getOI(6), oiTeam = getOI(7);
+  var oiAP = getOI(8), oiAnalytics = getOI(9), oiOutcomes = getOI(10), oiCrossMem = getOI(11);
+
+  // Filter to relevant records
+  var relCI = oiCI.filter(function(c) { return c.opportunity_id === oppId || orchMatch(c.agency) || orchMatch(c.active_verticals) || orchMatch(c.incumbent_at); });
+  var relRG = oiRG.filter(function(r) { return orchMatch(r.organization) || orchMatch(r.agency); });
+  var relDA = oiDA.filter(function(d) { return (d.state||'').toLowerCase() === oppState.toLowerCase() || orchMatch(d.counties); });
+  var relBC = oiBC.filter(function(b) { return orchMatch(b.agency) || (b.state||'').toLowerCase() === oppState.toLowerCase(); });
+  var relRC = oiRC.filter(function(r) { return orchMatch(r.client) || orchMatch(r.known_competitor); });
+  var relReg = oiReg.filter(function(r) { return orchMatch(r.affected_verticals) || orchMatch(r.summary); });
+  var relTeam = oiTeam.filter(function(t) { return orchMatch(t.verticals) || orchMatch(t.capability); });
+  var relAP = oiAP.filter(function(a) { return orchMatch(a.agency_name) || (a.state||'').toLowerCase() === oppState.toLowerCase(); });
+  var relAnalytics = oiAnalytics.filter(function(a) { return orchMatch(a.affected_verticals) || orchMatch(a.insight); });
+  var relOutcomes = oiOutcomes.filter(function(o) { return orchMatch(o.agency) || orchMatch(o.vertical); });
+  var relCross = oiCrossMem.filter(function(m) { return orchMatch(m.observation); }).slice(0, 20);
+
+  // Build compressed intelligence context for injection into each analysis step
+  var orchContext = '';
+  if (oiMems.length > 0) orchContext += '\nORGANISM MEMORY:\n' + oiMems.map(function(m) { return '[' + m.agent + '] ' + (m.observation || '').slice(0, 600); }).join('\n');
+  if (relCI.length > 0) orchContext += '\nCOMPETITORS:\n' + relCI.slice(0,10).map(function(c) { return c.competitor_name + ' | Threat:' + (c.threat_level||'?') + ' | Strengths:' + (c.strengths||'').slice(0,150) + ' | Weaknesses:' + (c.weaknesses||'').slice(0,150) + ' | Prices:' + (c.price_intelligence||'') + ' | Incumbent at:' + (c.incumbent_at||''); }).join('\n');
+  if (relRG.length > 0) orchContext += '\nHGI CONTACTS AT THIS AGENCY:\n' + relRG.slice(0,8).map(function(r) { return (r.contact_name||'') + ', ' + (r.title||'') + ' @ ' + (r.organization||'') + ' (strength:' + (r.relationship_strength||'') + ', HGI:' + (r.hgi_relationship||'') + ') Role:' + (r.role_in_procurement||''); }).join('\n');
+  if (relDA.length > 0) orchContext += '\nDISASTER DECLARATIONS:\n' + relDA.slice(0,5).map(function(d) { return (d.disaster_name||'') + ' (' + (d.declaration_date||'').slice(0,10) + ') Programs:' + (d.fema_programs||'') + ' Procurement:' + (d.procurement_window||''); }).join('\n');
+  if (relBC.length > 0) orchContext += '\nBUDGET CYCLES:\n' + relBC.slice(0,5).map(function(b) { return (b.agency||'') + ': ' + (b.procurement_window||'') + ' ' + (b.rfp_timing||'') + ' Budget:' + (b.budget_amount||''); }).join('\n');
+  if (relRC.length > 0) orchContext += '\nRECOMPETE/INCUMBENT DATA:\n' + relRC.slice(0,5).map(function(r) { return (r.client||'') + ': incumbent=' + (r.known_competitor||'?') + ' ends ' + (r.contract_end_date||'?') + ' value=' + (r.estimated_value_annual||'?') + ' decision-maker=' + (r.decision_maker||'?'); }).join('\n');
+  if (relReg.length > 0) orchContext += '\nREGULATORY CHANGES:\n' + relReg.slice(0,5).map(function(r) { return (r.regulation_name||'') + ' (effective ' + (r.effective_date||'') + '): ' + (r.summary||'').slice(0,200) + ' HGI action:' + (r.hgi_action_required||''); }).join('\n');
+  if (relTeam.length > 0) orchContext += '\nPOTENTIAL TEAMING PARTNERS:\n' + relTeam.slice(0,5).map(function(t) { return (t.partner_name||'') + ' | ' + (t.capability||'') + ' | ' + (t.location||'') + ' | fit:' + (t.fit_score||''); }).join('\n');
+  if (relAP.length > 0) orchContext += '\nAGENCY PROFILES:\n' + relAP.slice(0,3).map(function(a) { return (a.agency_name||'') + ': budget=' + (a.annual_budget||'?') + ' incumbent=' + (a.incumbent_contractors||'?') + ' HGI=' + (a.hgi_relationship||'none') + ' history=' + (a.hgi_history||'none') + ' procurement=' + (a.procurement_process||''); }).join('\n');
+  if (relAnalytics.length > 0) orchContext += '\nPIPELINE PATTERNS:\n' + relAnalytics.slice(0,5).map(function(a) { return '[' + (a.category||'') + '] ' + (a.title||'') + ': ' + (a.insight||'').slice(0,200); }).join('\n');
+  if (relOutcomes.length > 0) orchContext += '\nOUTCOME LESSONS:\n' + relOutcomes.map(function(o) { return (o.title||'').slice(0,50) + ' (' + (o.outcome||'') + ', OPI ' + (o.opi_score||'') + '): ' + (o.outcome_notes||''); }).join('\n');
+  if (relCross.length > 0) orchContext += '\nCROSS-OPP INTELLIGENCE:\n' + relCross.slice(0,10).map(function(m) { return '[' + m.agent + '] ' + (m.observation||'').slice(0,300); }).join('\n');
+
+  log('ORCHESTRATE ALL-INTO-ALL: ' + orchContext.length + ' chars of intelligence loaded (' +
+      relCI.length + ' competitors, ' + relRG.length + ' contacts, ' + relDA.length + ' disasters, ' +
+      relBC.length + ' budgets, ' + relRC.length + ' recompetes, ' + relReg.length + ' regulations, ' +
+      relTeam.length + ' teaming, ' + relAP.length + ' agencies, ' + relOutcomes.length + ' outcomes)');
+
+  // Trim orchContext for Sonnet calls (keep under ~4000 chars per step)
+  var orchSlice = orchContext.slice(0, 6000);
 
   var classGuide = 'HGI CORE (score 70-95): workers comp TPA, property casualty TPA, insurance guaranty, FEMA PA grant mgmt, CDBG-DR program admin, disaster recovery program mgmt, property tax appeals, workforce WIOA, construction MANAGEMENT (not physical), housing authority mgmt, HUD compliance, grant management, class action settlement admin, staff augmentation, call center ops. NOT HGI (score below 25): Medicaid, clinical health, behavioral health, physical construction, debris removal, insurance brokerage, IT services, engineering, environmental remediation.';
 
@@ -4919,7 +4984,7 @@ async function orchestrateOpp(opp) {
     var scopeResp = await anthropic.messages.create({
       model: 'claude-sonnet-4-6', max_tokens: 3000,
       system: 'Senior government contracting scope analyst. ' + classGuide + ' Geography: LA TX FL MS AL GA. Be exhaustive. Cite specific RFP sections.',
-      messages: [{ role: 'user', content: 'Deep scope analysis for HGI go/no-go.\n\nOPPORTUNITY: ' + opp.title + '\nAGENCY: ' + (opp.agency || '') + '\nSTATE: ' + (opp.state || 'LA') + '\nVERTICAL: ' + (opp.vertical || 'general') + '\nRFP TEXT:\n' + rfpContent + '\n' + kbContext.slice(0, 2000) + memContext.slice(0, 2000) + '\n\nProvide:\n1. SUB-VERTICAL CLASSIFICATION — exact type of work, is this HGI core?\n2. SCOPE SUMMARY — what is being asked, plain English, 3-5 sentences\n3. DETAILED DELIVERABLES — every task and work product from the RFP\n4. EVALUATION CRITERIA — exact criteria and point values from RFP\n5. HGI CAPABILITY ALIGNMENT — map each deliverable to HGI past performance, flag gaps\n6. COMPLIANCE REQUIREMENTS — licenses, certs, insurance, bonding\n7. CRITICAL QUESTIONS — what must HGI clarify before committing' }]
+      messages: [{ role: 'user', content: 'Deep scope analysis for HGI go/no-go.\n\nOPPORTUNITY: ' + opp.title + '\nAGENCY: ' + (opp.agency || '') + '\nSTATE: ' + (opp.state || 'LA') + '\nVERTICAL: ' + (opp.vertical || 'general') + '\nRFP TEXT:\n' + rfpContent + '\n' + kbContext.slice(0, 2000) + '\n\nORGANISM INTELLIGENCE (competitors, contacts, disasters, budgets, regulations, patterns):\n' + orchSlice + '\n\nProvide:\n1. SUB-VERTICAL CLASSIFICATION — exact type of work, is this HGI core?\n2. SCOPE SUMMARY — what is being asked, plain English, 3-5 sentences\n3. DETAILED DELIVERABLES — every task and work product from the RFP\n4. EVALUATION CRITERIA — exact criteria and point values from RFP\n5. HGI CAPABILITY ALIGNMENT — map each deliverable to HGI past performance, flag gaps. Use the competitor intelligence above to identify where HGI is stronger or weaker than likely bidders.\n6. COMPLIANCE REQUIREMENTS — licenses, certs, insurance, bonding. Cross-reference regulatory changes above.\n7. CRITICAL QUESTIONS — what must HGI clarify before committing\n8. COMPETITIVE POSITIONING — based on the competitor data above, who is the primary threat and why? What is HGI\'s key differentiator?' }]
     });
     var scopeText = (scopeResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
     if (scopeText.length > 100) {
@@ -4935,7 +5000,7 @@ async function orchestrateOpp(opp) {
     var finResp = await anthropic.messages.create({
       model: 'claude-sonnet-4-6', max_tokens: 2500,
       system: 'HGI CFO-level financial analyst. Show math for every estimate. Never present estimate as RFP fact. Rate card: Principal ' + d + '220, Prog Dir ' + d + '210, SME ' + d + '200, Sr Grant Mgr ' + d + '180, Grant Mgr ' + d + '175, Sr PM ' + d + '180, PM ' + d + '155, Grant Writer ' + d + '145, Cost Est ' + d + '125, Admin ' + d + '65.',
-      messages: [{ role: 'user', content: 'Contract value estimation for HGI.\n\nOPP: ' + opp.title + '\nAGENCY: ' + (opp.agency || '') + '\nESTIMATED VALUE: ' + (opp.estimated_value || 'Not stated') + '\nSCOPE:\n' + (scopeAnalysis || '').slice(0, 2000) + memContext.slice(0, 1500) + '\n\nEstimate using THREE methods with visible math:\n1. STAFFING MATH — list every RFP position, realistic monthly hours (MSA = 20-80 hrs/mo not 160), multiply by rate, base period only\n2. COMPARABLE CONTRACTS — 2-3 similar contracts in same state/vertical\n3. PERCENTAGE OF FEDERAL FUNDING — if FEMA/CDBG/HMGP, estimate total federal allocation, admin fee 5-12%\n\nThen: CONSOLIDATED ESTIMATE (LOW/MID/HIGH base period), option years separate as UPSIDE\nSTAFFING PLAN, HGI COST TO DELIVER, PROFIT MARGIN, FINANCIAL RISKS, RECOMMENDATION (PURSUE/CONDITIONAL/PASS)' }]
+      messages: [{ role: 'user', content: 'Contract value estimation for HGI.\n\nOPP: ' + opp.title + '\nAGENCY: ' + (opp.agency || '') + '\nESTIMATED VALUE: ' + (opp.estimated_value || 'Not stated') + '\nSCOPE:\n' + (scopeAnalysis || '').slice(0, 2000) + '\n\nORGANISM INTELLIGENCE (competitor pricing, incumbent contracts, budget data, market rates):\n' + orchSlice + '\n\nEstimate using THREE methods with visible math:\n1. STAFFING MATH — list every RFP position, realistic monthly hours (MSA = 20-80 hrs/mo not 160), multiply by rate, base period only\n2. COMPARABLE CONTRACTS — use the competitor pricing intelligence and incumbent contract data above, plus 2-3 similar contracts in same state/vertical\n3. PERCENTAGE OF FEDERAL FUNDING — if FEMA/CDBG/HMGP, estimate total federal allocation, admin fee 5-12%. Use disaster declaration data above for context.\n\nThen: CONSOLIDATED ESTIMATE (LOW/MID/HIGH base period), option years separate as UPSIDE\nPRICE-TO-WIN ANALYSIS — based on competitor pricing intelligence above, what rate structure wins this against the likely field?\nSTAFFING PLAN, HGI COST TO DELIVER, PROFIT MARGIN, FINANCIAL RISKS, RECOMMENDATION (PURSUE/CONDITIONAL/PASS)' }]
     });
     var finText = (finResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
     if (finText.length > 100) {
@@ -4952,7 +5017,7 @@ async function orchestrateOpp(opp) {
       model: 'claude-sonnet-4-6', max_tokens: 3000,
       tools: [{ type: 'web_search_20250305', name: 'web_search' }],
       system: 'HGI senior capture intelligence analyst. Always search the web for agency facts, incumbents, budgets. Never guess. Cite sources.',
-      messages: [{ role: 'user', content: 'Capture intelligence brief for HGI.\n\nOPP: ' + opp.title + '\nAGENCY: ' + (opp.agency || '') + '\nSTATE: ' + (opp.state || 'LA') + '\nOPI: ' + opp.opi_score + '\nSCOPE:\n' + (scopeAnalysis || '').slice(0, 1500) + '\nFINANCIAL:\n' + (finAnalysis || '').slice(0, 1500) + '\n' + kbContext.slice(0, 1500) + memContext.slice(0, 2000) + '\n\nSearch the web and provide:\n1. AGENCY PROFILE — budget, leadership, procurement patterns\n2. COMPETITIVE LANDSCAPE — who will bid, strengths/weaknesses vs HGI\n3. HGI WIN STRATEGY — 3 differentiators mapped to eval criteria\n4. RED FLAGS\n5. 48-HOUR ACTION PLAN — use role titles only, never names\n6. RISKS & CHALLENGES — honest assessment' }]
+      messages: [{ role: 'user', content: 'Capture intelligence brief for HGI.\n\nOPP: ' + opp.title + '\nAGENCY: ' + (opp.agency || '') + '\nSTATE: ' + (opp.state || 'LA') + '\nOPI: ' + opp.opi_score + '\nSCOPE:\n' + (scopeAnalysis || '').slice(0, 1500) + '\nFINANCIAL:\n' + (finAnalysis || '').slice(0, 1500) + '\n' + kbContext.slice(0, 1500) + '\n\nORGANISM INTELLIGENCE (existing competitor data, contacts, relationships, incumbent info, budget cycles, regulatory context, outcome lessons, cross-opp patterns):\n' + orchSlice + '\n\nUse the organism intelligence above as your STARTING POINT — do not duplicate what the organism already knows. Search the web to FILL GAPS and verify/update existing intelligence. Provide:\n1. AGENCY PROFILE — budget, leadership, procurement patterns. Cross-reference agency profiles above.\n2. COMPETITIVE LANDSCAPE — START with the competitor data above, then add new findings. Who will bid? What are their real weaknesses HGI can exploit?\n3. HGI WIN STRATEGY — 3 differentiators mapped to eval criteria. Use relationship data above to identify insider advantages.\n4. GHOST LANGUAGE — specific themes that highlight competitor weaknesses without naming them (based on the weaknesses data above)\n5. RED FLAGS\n6. 48-HOUR ACTION PLAN — use role titles only, never names\n7. RISKS & CHALLENGES — honest assessment' }]
     });
     var researchText = (researchResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('\n');
     if (researchText.length > 100) {
@@ -4986,7 +5051,7 @@ async function orchestrateOpp(opp) {
     var winResp = await anthropic.messages.create({
       model: 'claude-sonnet-4-6', max_tokens: 1500,
       system: 'HGI chief capture officer making final bid decision. First line MUST be: PWIN: [number]% | RECOMMENDATION: [GO|CONDITIONAL GO|NO-BID]',
-      messages: [{ role: 'user', content: 'Final GO/NO-GO assessment.\nOPP: ' + opp.title + '\nAGENCY: ' + (opp.agency || '') + '\nOPI: ' + (results.revisedOpi || opp.opi_score) + '\nSCOPE:\n' + (scopeAnalysis || '').slice(0, 1000) + '\nFINANCIAL:\n' + (finAnalysis || '').slice(0, 1000) + '\nRESEARCH:\n' + (researchBrief || '').slice(0, 1000) + '\n\nFirst line: PWIN: X% | RECOMMENDATION: GO/CONDITIONAL GO/NO-BID\nThen: decision justification, top 3 win factors, top 3 risks, conditions for GO, teaming recommendation' }]
+      messages: [{ role: 'user', content: 'Final GO/NO-GO assessment.\nOPP: ' + opp.title + '\nAGENCY: ' + (opp.agency || '') + '\nOPI: ' + (results.revisedOpi || opp.opi_score) + '\nSCOPE:\n' + (scopeAnalysis || '').slice(0, 1000) + '\nFINANCIAL:\n' + (finAnalysis || '').slice(0, 1000) + '\nRESEARCH:\n' + (researchBrief || '').slice(0, 1000) + '\n\nORGANISM INTELLIGENCE (relationships, competitors, outcomes, patterns):\n' + orchSlice.slice(0, 3000) + '\n\nFirst line: PWIN: X% | RECOMMENDATION: GO/CONDITIONAL GO/NO-BID\nThen: decision justification considering competitor weaknesses and HGI relationships above, top 3 win factors, top 3 risks, conditions for GO, teaming recommendation based on partner data above' }]
     });
     var winText = (winResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
     var pwinMatch = winText.match(/PWIN:\s*(\d+)/i);
