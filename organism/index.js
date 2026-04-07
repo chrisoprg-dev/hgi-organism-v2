@@ -588,7 +588,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
           .order('created_at',{ascending:false}).limit(50),
 
         // 12. Knowledge base chunks — broad pull, then filter
-        supabase.from('knowledge_base_chunks').select('content,source_document')
+        supabase.from('knowledge_chunks').select('chunk_text,filename')
           .order('id',{ascending:false}).limit(60),
 
         // 13. Outcome lessons — completed opps with outcomes (wins, losses, no-bids)
@@ -694,10 +694,10 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
 
       // ── KB chunks: filter by vertical keyword, then fallback to all ──
       var kbFiltered = kbChunksRaw.filter(function(c) {
-        return matchesContext(c.content);
+        return matchesContext(c.chunk_text);
       });
       if (kbFiltered.length < 5) kbFiltered = kbChunksRaw;
-      var kbChunks = kbFiltered.map(function(c) { return c.content; }).join('\n---\n').slice(0, 12000);
+      var kbChunks = kbFiltered.map(function(c) { return c.chunk_text; }).join('\n---\n').slice(0, 12000);
 
       // ── FILTER outcome lessons to same vertical/agency ──
       var outcomeRelevant = outcomeOpps.filter(function(o) {
@@ -4809,7 +4809,7 @@ async function autoRetrieveRFPs() {
 
 async function kbQuery(vertical, oppText) {
   try {
-    var chunks = await supabase.from('knowledge_base_chunks')
+    var chunks = await supabase.from('knowledge_chunks')
       .select('chunk_text,document_title,vertical')
       .or('vertical.eq.' + (vertical || 'disaster') + ',vertical.is.null')
       .order('created_at', { ascending: false })
