@@ -1965,6 +1965,25 @@ if (url === '/api/record-outcome' && req.method === 'POST') {
   return;
 }
 
+// === UPDATE STAGE — /api/update-stage ===
+if (url === '/api/update-stage' && req.method === 'POST') {
+  var body = '';
+  req.on('data', function(c) { body += c; });
+  req.on('end', async function() {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    try {
+      var params = JSON.parse(body);
+      if (!params.id || !params.stage) { res.end(JSON.stringify({ error: 'id and stage required' })); return; }
+      var validStages = ['identified', 'pursuing', 'proposal', 'submitted', 'watching', 'no_bid', 'closed'];
+      if (validStages.indexOf(params.stage) < 0) { res.end(JSON.stringify({ error: 'stage must be: ' + validStages.join(', ') })); return; }
+      await supabase.from('opportunities').update({ stage: params.stage, last_updated: new Date().toISOString() }).eq('id', params.id);
+      log('STAGE UPDATE: ' + params.id.slice(0,40) + ' -> ' + params.stage);
+      res.end(JSON.stringify({ success: true, stage: params.stage }));
+    } catch (e) { res.end(JSON.stringify({ error: e.message })); }
+  });
+  return;
+}
+
 // === COMPLIANCE CHECK — /api/compliance-check?id= ===
 if (url.startsWith('/api/compliance-check')) {
   var ccRawUrl = req.url || '';
