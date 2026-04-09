@@ -459,11 +459,12 @@ function renderDetailHTML(c,o,mems){
 
   // === COMPLETENESS STATS ===
   html+='<div class="stats" style="grid-template-columns:repeat(5,1fr)">';
-  html+=stat((o.scope_analysis||'').length>100?'\u2713':'\u2014','SCOPE',((o.scope_analysis||'').length>100?'green':''));
-  html+=stat((o.research_brief||'').length>100?'\u2713':'\u2014','INTEL',((o.research_brief||'').length>100?'green':''));
-  html+=stat((o.financial_analysis||'').length>100?'\u2713':'\u2014','FIN',((o.financial_analysis||'').length>100?'green':''));
-  html+=stat((o.staffing_plan||'').length>100?'\u2713':'\u2014','STAFF',((o.staffing_plan||'').length>100?'green':''));
-  html+=stat((o.proposal_content||'').length>100?'\u2713':'\u2014','PROP',((o.proposal_content||'').length>100?'green':''));
+  var hs=o.has_scope||(o.scope_analysis||'').length>100,hi=o.has_intel||(o.research_brief||'').length>100,hf=o.has_financial||(o.financial_analysis||'').length>100,hst=o.has_staffing||(o.staffing_plan||'').length>100,hp=o.has_proposal||(o.proposal_content||'').length>100;
+  html+=stat(hs?'\u2713':'\u2014','SCOPE',(hs?'green':''));
+  html+=stat(hi?'\u2713':'\u2014','INTEL',(hi?'green':''));
+  html+=stat(hf?'\u2713':'\u2014','FIN',(hf?'green':''));
+  html+=stat(hst?'\u2713':'\u2014','STAFF',(hst?'green':''));
+  html+=stat(hp?'\u2713':'\u2014','PROP',(hp?'green':''));
   html+='</div>';
 
   // === DETAIL SUB-TABS ===
@@ -534,7 +535,7 @@ function renderDetailOverview(o){
   html+='<div class="btn primary" onclick="produceProposal(\''+o.id+'\')">PRODUCE PROPOSAL</div>';
   html+='<div class="btn" onclick="goSub(\'compliance\',\''+o.id+'\')">COMPLIANCE CHECK</div>';
   if(o.source_url)html+='<div class="btn" onclick="window.open(\''+esc(o.source_url)+'\',\'_blank\')">SOURCE</div>';
-  if(o.proposal_content&&o.proposal_content.length>100)html+='<div class="btn" onclick="window.open(BASE+\'/api/proposal-doc?id='+encodeURIComponent(o.id)+'\')">DOWNLOAD DOC</div>';
+  if(o.has_proposal||o.proposal_content&&o.proposal_content.length>100)html+='<div class="btn" onclick="window.open(BASE+\'/api/proposal-doc?id='+encodeURIComponent(o.id)+'\')">DOWNLOAD DOC</div>';
   html+='</div></div>';
   return html;
 }
