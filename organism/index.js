@@ -30,6 +30,21 @@ const anthropic = new Anthropic({ apiKey: AK });
 var logBuffer = [];
 var LOG_MAX = 500;
 
+// === COST TRACKING (Session 95) ===
+var costLog = [];
+var PRICING = {
+  'claude-sonnet-4-6': { in_per_tok: 0.000003, out_per_tok: 0.000015 },
+  'claude-sonnet-4-20250514': { in_per_tok: 0.000003, out_per_tok: 0.000015 },
+  'claude-haiku-4-5-20251001': { in_per_tok: 0.00000025, out_per_tok: 0.00000125 },
+  'claude-opus-4-6': { in_per_tok: 0.000015, out_per_tok: 0.000075 }
+};
+function trackCost(agent, model, usage) {
+  if (!usage) return;
+  var p = PRICING[model] || PRICING['claude-haiku-4-5-20251001'];
+  var cost = (usage.input_tokens || 0) * p.in_per_tok + (usage.output_tokens || 0) * p.out_per_tok;
+  costLog.push({ agent: agent, model: model, input_tokens: usage.input_tokens || 0, output_tokens: usage.output_tokens || 0, cost_usd: cost, ts: new Date().toISOString() });
+}
+
 const server = http.createServer(async (req, res) => {
   // Crash protection - never let a request handler kill the server
   try {
@@ -2060,6 +2075,96 @@ if (url === '/api/health-monitor') {
   return;
 }
 
+// === COST MONITOR — /api/cost-monitor ===
+// Port from V1 cost-monitor.js (109 lines). Reads cost logs from hunt_runs.
+if (url === '/api/cost-monitor') {
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+  try {
+    var cmRows = await supabase.from('hunt_runs')
+      .select('status,run_at')
+      .eq('source', 'api_cost')
+      .order('run_at', { ascending: false })
+      .limit(500);
+    var cmData = cmRows.data || [];
+    if (cmData.length === 0) {
+      res.end(JSON.stringify({
+        message: 'No cost data yet. Cost logs appear after next cron session completes.',
+        total_usd: 0,
+        current_session: { calls: costLog.length, est_cost_usd: Math.round(costLog.reduce(function(s,c) { return s + c.cost_usd; }, 0) * 10000) / 10000 }
+      }));
+      return;
+    }
+
+    var cstNow = new Date(Date.now() - 6 * 3600000);
+    var todayCST = cstNow.toISOString().slice(0, 10);
+    var weekAgo = new Date(cstNow - 7 * 86400000).toISOString().slice(0, 10);
+    var monthStart = cstNow.toISOString().slice(0, 7) + '-01';
+
+    var totals = { today: 0, week: 0, month: 0, all_time: 0 };
+    var byAgent = {};
+    var byDay = {};
+    var totalCalls = 0;
+
+    for (var cmi = 0; cmi < cmData.length; cmi++) {
+      var cmRow = cmData[cmi];
+      var cmD;
+      try { cmD = JSON.parse(cmRow.status || '{}'); } catch(e) { continue; }
+      if (!cmD.total_usd) continue;
+
+      var cmCost = cmD.total_usd;
+      var cmDayKey = (cmRow.run_at || '').slice(0, 10);
+      totalCalls += cmD.calls || 0;
+
+      totals.all_time += cmCost;
+      if (cmDayKey === todayCST) totals.today += cmCost;
+      if (cmDayKey >= weekAgo) totals.week += cmCost;
+      if (cmDayKey >= monthStart) totals.month += cmCost;
+
+      if (!byDay[cmDayKey]) byDay[cmDayKey] = 0;
+      byDay[cmDayKey] += cmCost;
+
+      // Aggregate by-agent from session summaries
+      if (cmD.by_agent) {
+        Object.keys(cmD.by_agent).forEach(function(a) {
+          if (!byAgent[a]) byAgent[a] = { calls: 0, cost: 0 };
+          byAgent[a].calls += cmD.by_agent[a].calls || 0;
+          byAgent[a].cost += cmD.by_agent[a].cost || 0;
+        });
+      }
+    }
+
+    var agentList = Object.keys(byAgent).map(function(a) {
+      return { agent: a, calls: byAgent[a].calls, cost_usd: Math.round(byAgent[a].cost * 10000) / 10000 };
+    }).sort(function(a, b) { return b.cost_usd - a.cost_usd; });
+
+    var dayList = Object.keys(byDay).sort().slice(-14).map(function(day) {
+      return { date: day, cost_usd: Math.round(byDay[day] * 10000) / 10000 };
+    });
+
+    var dailyCap = 5;
+    var capStatus = totals.today >= dailyCap ? 'OVER_CAP' : totals.today >= dailyCap * 0.8 ? 'NEAR_CAP' : 'OK';
+
+    res.end(JSON.stringify({
+      summary: {
+        today_usd: Math.round(totals.today * 10000) / 10000,
+        week_usd: Math.round(totals.week * 10000) / 10000,
+        month_usd: Math.round(totals.month * 10000) / 10000,
+        all_time_usd: Math.round(totals.all_time * 10000) / 10000,
+        total_api_calls: totalCalls,
+        daily_cap_usd: dailyCap,
+        cap_status: capStatus
+      },
+      by_agent: agentList,
+      daily_spend: dayList,
+      current_session: { calls: costLog.length, est_cost_usd: Math.round(costLog.reduce(function(s,c) { return s + c.cost_usd; }, 0) * 10000) / 10000 },
+      as_of_cst: cstNow.toISOString().slice(0, 19).replace('T', ' ') + ' CST'
+    }));
+  } catch(cmErr) {
+    res.end(JSON.stringify({ error: cmErr.message }));
+  }
+  return;
+}
+
 // === DISASTER MONITOR MANUAL TRIGGER — /api/disaster-check ===
 if (url === '/api/disaster-check') {
   res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
@@ -3682,6 +3787,7 @@ async function claudeCall(system, prompt, maxTokens, opts) {
   }
 
   var response = await anthropic.messages.create(params);
+  trackCost(opts.agent || system.slice(0, 40), model, response.usage);
   var texts = [];
   for (var i = 0; i < (response.content || []).length; i++) {
     if (response.content[i].type === 'text') texts.push(response.content[i].text);
@@ -3702,6 +3808,7 @@ async function multiSearch(queries) {
         system: 'Intelligence analyst. Return specific verified findings with sources. Be concise.',
         messages: [{ role: 'user', content: queries[i].q }]
       });
+      trackCost('multiSearch', 'claude-haiku-4-5-20251001', r.usage);
       var text = (r.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('\n');
       if (text && text.length > 30) {
         results.push(queries[i].label + ':\n' + text.slice(0, 1500));
@@ -6013,6 +6120,29 @@ async function runSession(trigger) {
 
     log('=== SESSION COMPLETE: ' + id + ' | ' + allResults.length + ' agent outputs ===');
     log('Completed: ' + allResults.map(function(r) { return r.agent + '(' + r.chars + ')'; }).join(', '));
+
+    // Flush cost log to hunt_runs
+    if (costLog.length > 0) {
+      var sessionCost = costLog.reduce(function(s, c) { return s + c.cost_usd; }, 0);
+      var costByAgent = {};
+      costLog.forEach(function(c) {
+        if (!costByAgent[c.agent]) costByAgent[c.agent] = { calls: 0, cost: 0, in_tok: 0, out_tok: 0 };
+        costByAgent[c.agent].calls++;
+        costByAgent[c.agent].cost += c.cost_usd;
+        costByAgent[c.agent].in_tok += c.input_tokens;
+        costByAgent[c.agent].out_tok += c.output_tokens;
+      });
+      var costSummary = JSON.stringify({ session: id, total_usd: Math.round(sessionCost * 10000) / 10000, calls: costLog.length, by_agent: costByAgent });
+      try {
+        await supabase.from('hunt_runs').insert({
+          id: 'hr-cost-' + Date.now(), source: 'api_cost',
+          status: costSummary,
+          run_at: new Date().toISOString(), opportunities_found: 0
+        });
+        log('COST TRACKER: Session cost ' + sessionCost.toFixed(4) + ' USD across ' + costLog.length + ' API calls');
+      } catch(ce) { log('COST TRACKER ERROR: ' + ce.message); }
+      costLog = [];
+    }
 
     // Auto-extract structured CI from new competitive_intel memories
     try {
