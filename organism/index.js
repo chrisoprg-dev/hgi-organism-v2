@@ -2246,6 +2246,107 @@ if (url === '/api/cost-monitor') {
   return;
 }
 
+// === NOTIFICATION SYSTEM — /api/notify ===
+// Port from V1 notify.js (115 lines). CRUD notifications stored in hunt_runs.
+// GET = list unread, POST = create, PATCH = mark read
+if (url === '/api/notify' || url.startsWith('/api/notify?')) {
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS' });
+
+  if (req.method === 'OPTIONS') { res.end('{}'); return; }
+
+  // GET — list notifications
+  if (req.method === 'GET') {
+    try {
+      var nLimit = 20;
+      var nParams = req.url.split('?')[1] || '';
+      if (nParams.indexOf('limit=') >= 0) nLimit = parseInt(nParams.split('limit=')[1]) || 20;
+
+      var nRows = await supabase.from('hunt_runs')
+        .select('id,source,status,run_at')
+        .like('source', 'notify:%')
+        .order('run_at', { ascending: false })
+        .limit(nLimit);
+
+      var notifications = (nRows.data || []).map(function(n) {
+        var parts = (n.status || '').split('|');
+        return {
+          id: n.id, type: (n.source || '').replace('notify:', ''),
+          priority: parts[0] || 'medium', opportunity_id: parts[1] || null,
+          title: parts[3] || '', read: parts[2] === 'read', timestamp: n.run_at
+        };
+      });
+      var unread = notifications.filter(function(n) { return !n.read; }).length;
+      res.end(JSON.stringify({ notifications: notifications, unread_count: unread }));
+    } catch(nErr) {
+      res.end(JSON.stringify({ notifications: [], unread_count: 0, error: nErr.message }));
+    }
+    return;
+  }
+
+  // POST — create notification
+  if (req.method === 'POST') {
+    try {
+      var nBody = '';
+      for await (var nChunk of req) nBody += nChunk;
+      var nData = JSON.parse(nBody || '{}');
+      var nType = nData.type || 'info';
+      var nPriority = nData.priority || 'medium';
+      var nOppId = nData.opportunity_id || 'system';
+      var nTitle = nData.title || '';
+
+      // Auto-format based on type
+      var nTemplates = {
+        'tier1_alert': { priority: 'high', title: 'Tier 1: ' + (nData.opp_title || nTitle) },
+        'go_decision': { priority: 'high', title: 'GO: ' + (nData.opp_title || nTitle) },
+        'stage_change': { priority: 'medium', title: (nData.opp_title || nTitle) + ' → ' + (nData.stage || '') },
+        'deadline_warning': { priority: 'high', title: 'DEADLINE: ' + (nData.opp_title || nTitle) + ' — ' + (nData.days_left || '?') + ' days' },
+        'proposal_ready': { priority: 'high', title: 'PROPOSAL READY: ' + (nData.opp_title || nTitle) },
+        'disaster_alert': { priority: 'high', title: 'DISASTER: ' + (nData.disaster_name || nTitle) }
+      };
+      var tmpl = nTemplates[nType] || {};
+      nPriority = tmpl.priority || nPriority;
+      var nDisplayTitle = tmpl.title || nTitle;
+
+      await supabase.from('hunt_runs').insert({
+        id: 'notify-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+        source: 'notify:' + nType,
+        status: nPriority + '|' + nOppId + '|unread|' + nDisplayTitle,
+        run_at: new Date().toISOString(),
+        opportunities_found: 0
+      });
+
+      res.end(JSON.stringify({ success: true, type: nType, priority: nPriority, title: nDisplayTitle }));
+    } catch(nErr) {
+      res.end(JSON.stringify({ error: nErr.message }));
+    }
+    return;
+  }
+
+  // PATCH — mark as read
+  if (req.method === 'PATCH') {
+    try {
+      var pBody = '';
+      for await (var pChunk of req) pBody += pChunk;
+      var pData = JSON.parse(pBody || '{}');
+      var nId = pData.id;
+      if (!nId) { res.end(JSON.stringify({ error: 'id required' })); return; }
+
+      var existing = await supabase.from('hunt_runs').select('status').eq('id', nId).single();
+      if (existing.data) {
+        var newStatus = (existing.data.status || '').replace('unread', 'read');
+        await supabase.from('hunt_runs').update({ status: newStatus }).eq('id', nId);
+      }
+      res.end(JSON.stringify({ success: true }));
+    } catch(nErr) {
+      res.end(JSON.stringify({ error: nErr.message }));
+    }
+    return;
+  }
+
+  res.end(JSON.stringify({ error: 'Use GET, POST, or PATCH' }));
+  return;
+}
+
 // === DISASTER MONITOR MANUAL TRIGGER — /api/disaster-check ===
 if (url === '/api/disaster-check') {
   res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
