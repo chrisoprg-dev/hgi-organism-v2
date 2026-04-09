@@ -5715,8 +5715,29 @@ async function agentHunting(state, trigger) {
         model: 'claude-haiku-4-5-20251001', max_tokens: 200,
         messages: [{ role: 'user', content: scorePrompt }]
       });
+      trackCost('intake_scoring', 'claude-haiku-4-5-20251001', scoreResp.usage);
       var st = (scoreResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('').replace(/```json|```/g, '').trim();
       var score = JSON.parse(st);
+
+      // DEADLINE PROXIMITY ADJUSTMENT (Session 95, Build #6)
+      // Adjust OPI based on time remaining before deadline
+      if (cand.due_date && score.opi >= 45) {
+        var daysLeft = Math.floor((new Date(cand.due_date).getTime() - Date.now()) / 86400000);
+        if (daysLeft < 0) {
+          score.opi = Math.max(score.opi - 30, 20); // Past deadline — major penalty
+          score.why = (score.why || '') + ' [DEADLINE PASSED]';
+        } else if (daysLeft < 5) {
+          score.opi = Math.max(score.opi - 15, 30); // <5 days — likely can't respond
+          score.why = (score.why || '') + ' [' + daysLeft + ' days — tight deadline penalty]';
+        } else if (daysLeft < 10) {
+          score.opi = Math.max(score.opi - 5, 40); // 5-10 days — slight penalty
+          score.why = (score.why || '') + ' [' + daysLeft + ' days — deadline proximity]';
+        } else if (daysLeft >= 14 && daysLeft <= 45) {
+          score.opi = Math.min(score.opi + 3, 99); // Sweet spot — slight boost
+        }
+        // >45 days: no adjustment
+      }
+
       if (score.vertical === 'FILTER' || score.opi < 45) continue;
 
       var newId = cand.source + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
