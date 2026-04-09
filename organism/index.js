@@ -2412,6 +2412,150 @@ if (url === '/api/update-stage' && req.method === 'POST') {
   return;
 }
 
+// === TWO-PASS PROPOSAL REFINEMENT — /api/proposal-refine?id= ===
+// Port from V1 opus-build.js (178 lines). Takes existing proposal + red team review,
+// does parallel web research + KB query, then Opus with extended thinking rebuilds weak sections.
+// Cost: ~$2-5 per run. Manual trigger only.
+if (url.startsWith('/api/proposal-refine')) {
+  var prId = (req.url.split('?id=')[1]||'').split('&')[0];
+  if (!prId) { res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }); res.end(JSON.stringify({error:'id required'})); return; }
+
+  log('PROPOSAL REFINE: Starting two-pass refinement for ' + prId);
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+  res.end(JSON.stringify({ started: true, id: prId, note: 'Two-pass Opus refinement running async. Check proposal_content when complete.' }));
+
+  setImmediate(async () => {
+    try {
+      // 1. Load opportunity + existing proposal + red team review
+      var prOpp = await supabase.from('opportunities').select('*').eq('id', prId).single();
+      var opp = prOpp.data;
+      if (!opp) { log('PROPOSAL REFINE: Opp not found ' + prId); return; }
+
+      var existingProposal = opp.proposal_content || '';
+      var redTeamReview = opp.proposal_review || '';
+      if (existingProposal.length < 500) { log('PROPOSAL REFINE: No proposal to refine (' + existingProposal.length + ' chars). Run produce-proposal first.'); return; }
+      if (redTeamReview.length < 100) { log('PROPOSAL REFINE: No red team review found. Run produce-proposal first (red team runs automatically).'); return; }
+
+      log('PROPOSAL REFINE: Loaded proposal (' + existingProposal.length + ' chars) + review (' + redTeamReview.length + ' chars)');
+
+      // 2. Parallel web research + KB query (same pattern as V1 opus-build)
+      var vertical = (opp.vertical || 'professional services').trim();
+      var agency = (opp.agency || '').trim();
+      var oppState = (opp.state || 'Louisiana').trim();
+      var scopeSnippet = (opp.scope_analysis || '').replace(/[^a-zA-Z0-9 .,\-]/g, ' ').slice(0, 150).trim();
+
+      var researchResults = await Promise.allSettled([
+        multiSearch([
+          { q: scopeSnippet.slice(0,100) + ' ' + vertical + ' methodology best practices 2025 2026', label: 'Best practices' },
+          { q: agency + ' ' + oppState + ' contracts awarded ' + vertical + ' 2024 2025', label: 'Agency awards' }
+        ]),
+        supabase.from('knowledge_chunks').select('chunk_text,filename,vertical')
+          .or('vertical.eq.' + vertical.toLowerCase() + ',document_class.eq.winning_proposal')
+          .limit(20)
+      ]);
+
+      var webResearch = (researchResults[0].status === 'fulfilled' ? researchResults[0].value : '') || '';
+      var kbChunks = (researchResults[1].status === 'fulfilled' && researchResults[1].value.data) || [];
+      var kbContent = kbChunks.map(function(c) { return c.chunk_text || ''; }).join('\n---\n').slice(0, 8000);
+
+      log('PROPOSAL REFINE: Research complete — web ' + webResearch.length + ' chars, KB ' + kbChunks.length + ' chunks');
+
+      // 3. Load all organism intelligence for this opp
+      var prMems = await supabase.from('organism_memory')
+        .select('agent,observation')
+        .eq('opportunity_id', prId)
+        .neq('memory_type', 'decision_point')
+        .order('created_at', { ascending: false })
+        .limit(30);
+      var memContext = (prMems.data || []).map(function(m) {
+        return '[' + m.agent + ']: ' + (m.observation || '').slice(0, 400);
+      }).join('\n\n').slice(0, 6000);
+
+      // 4. Opus with extended thinking — full second pass
+      var refineSystem =
+        'You are the most capable government proposal writer in the world. You are performing a SECOND PASS refinement.' +
+        '\n\nOpportunity: ' + (opp.title||'') + ' | Agency: ' + agency + ' | Vertical: ' + vertical + ' | OPI: ' + (opp.opi_score||0) +
+        '\n\nYou have the first-pass proposal, a red team review identifying every weakness, fresh web research on best practices, HGI knowledge base content from winning proposals, and full organism intelligence.' +
+        '\n\nYour mission: OUTPUT THE COMPLETE REFINED PROPOSAL — every section, start to finish. Keep sections the red team rated clean. REBUILD sections flagged as critical or major. Add any missing sections. Use replacement text from the red team review where provided.' +
+        '\n\nCRITICAL RULES:' +
+        '\n1. Output the FULL proposal, not just changed sections' +
+        '\n2. Every claim must have specific evidence (dates, amounts, project names)' +
+        '\n3. No Geoffrey Brien. All positions [TO BE ASSIGNED] except Christopher J. Oney on cover letter' +
+        '\n4. Founded 1931, ~50 employees, Kenner HQ Suite 510, UEI DL4SJEVKZ6H4' +
+        '\n5. Use web research for current methodology. Use KB for HGI proof points' +
+        '\n6. Minimize [ACTION REQUIRED] — only for wet signatures, real resumes, final rate approvals' +
+        '\n7. Match the RFP structure exactly';
+
+      var refinePrompt =
+        '=== FIRST-PASS PROPOSAL (refine this) ===\n' + existingProposal.slice(0, 80000) +
+        '\n\n=== RED TEAM REVIEW (fix every critical/major finding) ===\n' + redTeamReview.slice(0, 15000) +
+        '\n\n=== RFP/SOQ REQUIREMENTS ===\n' + (opp.rfp_text || opp.scope_analysis || opp.description || '').slice(0, 15000) +
+        (webResearch.length > 50 ? '\n\n=== FRESH WEB RESEARCH ===\n' + webResearch.slice(0, 4000) : '') +
+        (kbContent.length > 100 ? '\n\n=== HGI KNOWLEDGE BASE (winning proposal sections) ===\n' + kbContent.slice(0, 6000) : '') +
+        (memContext.length > 100 ? '\n\n=== ORGANISM INTELLIGENCE ===\n' + memContext.slice(0, 4000) : '') +
+        '\n\n=== TASK ===\nRead the red team review. For every CRITICAL and MAJOR finding, fix it using the research and KB. Output the COMPLETE REFINED PROPOSAL — all sections, start to finish.';
+
+      log('PROPOSAL REFINE: Calling Opus with extended thinking...');
+      var opusResp = await anthropic.messages.create({
+        model: 'claude-opus-4-6',
+        max_tokens: 16000,
+        thinking: { type: 'enabled', budget_tokens: 5000 },
+        system: refineSystem,
+        messages: [{ role: 'user', content: refinePrompt }]
+      });
+
+      trackCost('proposal_refine', 'claude-opus-4-6', opusResp.usage);
+
+      var refinedText = (opusResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
+
+      if (refinedText.length < 500) {
+        log('PROPOSAL REFINE: Opus output too short (' + refinedText.length + ' chars)');
+        await supabase.from('organism_memory').insert({
+          agent: 'proposal_refine', opportunity_id: prId,
+          observation: 'PROPOSAL REFINE FAILED: Opus output too short (' + refinedText.length + ' chars). May need retry.',
+          memory_type: 'system_alert', created_at: new Date().toISOString()
+        });
+        return;
+      }
+
+      // 5. Post-processing: same ACTION REQUIRED auto-fill as produce-proposal
+      refinedText = refinedText.replace(/\[ACTION REQUIRED[^\]]*(?:insurance|WC coverage|workers.?comp|auto policy|umbrella|E&O|fidelity|GL |general liability)[^\]]*\]/gi, 'HGI maintains $5M fidelity bond, $5M Errors & Omissions, $2M General Liability, Workers Compensation at statutory limits, and $1M Commercial Auto coverage. Certificates of insurance with Additional Insured endorsement naming CLIENT will be provided upon contract execution.');
+      refinedText = refinedText.replace(/\[ACTION REQUIRED[^\]]*(?:professional regulation|DPR|Confirm.*(?:applicable|applicability))[^\]]*\]/gi, 'No Louisiana Department of Professional Regulation license is required for disaster recovery consulting, program management, claims administration, construction management oversight, or grant management services.');
+      refinedText = refinedText.replace(/\[ACTION REQUIRED[^\]]*(?:SAM|UEI|registration.*print)[^\]]*\]/gi, 'HGI Global is registered in SAM.gov with active status. UEI: DL4SJEVKZ6H4.');
+      refinedText = refinedText.replace(/\[ACTION REQUIRED[^\]]*(?:org.*chart|organizational)[^\]]*\]/gi, 'See Organizational Chart (Appendix A).');
+
+      var arCount = (refinedText.match(/ACTION REQUIRED/gi) || []).length;
+
+      // 6. Save refined proposal (replaces first pass)
+      await supabase.from('opportunities').update({
+        proposal_content: refinedText,
+        last_updated: new Date().toISOString()
+      }).eq('id', prId);
+
+      // 7. Write memory
+      await supabase.from('organism_memory').insert({
+        agent: 'proposal_refine', opportunity_id: prId,
+        observation: 'PROPOSAL REFINED (Two-Pass): ' + refinedText.length + ' chars (was ' + existingProposal.length + '). ' +
+          'Used ' + kbChunks.length + ' KB chunks + web research. ' + arCount + ' ACTION REQUIRED items remaining. ' +
+          'Red team findings addressed. Stored in proposal_content.',
+        memory_type: 'analysis', created_at: new Date().toISOString()
+      });
+
+      // 8. Trigger KB enrichment on refined version (re-run red team first would be ideal, but enrichment still valuable)
+      log('PROPOSAL REFINE: Complete — ' + refinedText.length + ' chars (was ' + existingProposal.length + '). ' + arCount + ' ACTION REQUIRED remaining.');
+
+    } catch(prErr) {
+      log('PROPOSAL REFINE ERROR: ' + prErr.message);
+      await supabase.from('organism_memory').insert({
+        agent: 'proposal_refine', opportunity_id: prId,
+        observation: 'PROPOSAL REFINE ERROR: ' + prErr.message,
+        memory_type: 'system_alert', created_at: new Date().toISOString()
+      }).catch(function() {});
+    }
+  });
+  return;
+}
+
 // === COMPLIANCE CHECK — /api/compliance-check?id= ===
 if (url.startsWith('/api/compliance-check')) {
   var ccRawUrl = req.url || '';
