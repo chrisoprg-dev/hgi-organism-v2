@@ -507,20 +507,48 @@ if (url === '/api/chat' && req.method === 'POST') {
 
   let chatBody = '';
   for await (const chunk of req) chatBody += chunk;
-  const { message: chatMsg } = JSON.parse(chatBody || '{}');
+  const { message: chatMsg, opportunityId: chatOppId } = JSON.parse(chatBody || '{}');
   if (!chatMsg) { res.writeHead(400); res.end(JSON.stringify({error:'message required'})); return; }
 
+  // Rich context: recent memories
   const ctxR = await supabase.from('organism_memory').select('agent,observation,memory_type,created_at').order('created_at',{ascending:false}).limit(30);
-  const ctxText = (ctxR.data||[]).map(m => m.agent+': '+m.observation.slice(0,200)).join('\n');
+  var chatCtx = (ctxR.data||[]).map(m => m.agent+': '+m.observation.slice(0,200)).join('\n');
+
+  // Focused opportunity context if provided
+  var chatOppCtx = '';
+  if (chatOppId) {
+    var chatOpp = await supabase.from('opportunities').select('title,agency,vertical,opi_score,stage,capture_action,scope_analysis,research_brief,financial_analysis,description,due_date,estimated_value').eq('id', chatOppId).single();
+    if (chatOpp.data) {
+      var co = chatOpp.data;
+      chatOppCtx = '\n\nFOCUSED OPPORTUNITY:\nTitle: ' + (co.title||'') + '\nAgency: ' + (co.agency||'') + '\nVertical: ' + (co.vertical||'') + '\nOPI: ' + (co.opi_score||0) + '\nStage: ' + (co.stage||'') + '\nDeadline: ' + (co.due_date||'') + '\nValue: ' + (co.estimated_value||'') + '\nDecision: ' + (co.capture_action||'').slice(0,500) + '\nScope: ' + (co.scope_analysis||'').slice(0,500) + '\nResearch: ' + (co.research_brief||'').slice(0,500) + '\nFinancial: ' + (co.financial_analysis||'').slice(0,500);
+      // Per-opp memories
+      var chatOppMem = await supabase.from('organism_memory').select('agent,observation').ilike('opp_id', '%' + chatOppId + '%').order('created_at', { ascending: false }).limit(10);
+      if (chatOppMem.data && chatOppMem.data.length > 0) {
+        chatOppCtx += '\n\nOPP MEMORIES:\n' + chatOppMem.data.map(function(m) { return m.agent + ': ' + m.observation.slice(0, 300); }).join('\n');
+      }
+    }
+  }
+
+  // Pipeline summary
+  var chatPipeline = await supabase.from('opportunities').select('title,agency,opi_score,stage,vertical').eq('status', 'active').order('opi_score', { ascending: false }).limit(20);
+  var chatPipeCtx = '\n\nPIPELINE (' + (chatPipeline.data||[]).length + ' active):\n' + (chatPipeline.data||[]).map(function(o) { return (o.opi_score||0) + ' | ' + (o.stage||'') + ' | ' + (o.title||'').slice(0,50) + ' (' + (o.agency||'') + ')'; }).join('\n');
 
   const chatResp = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 1024,
-    system: 'You are the HGI Business Development Organism. Answer questions about the HGI pipeline, opportunities, competitive intel, and BD strategy. Be concise and direct.\nRecent organism memories:\n'+ctxText,
+    model: SONNET,
+    max_tokens: 2048,
+    system: 'You are the HGI Business Development Organism — a 95-year-old minority-owned firm specializing in disaster recovery, TPA/claims, workforce, construction management, grant management, housing, property tax appeals, and program administration. Answer questions about the HGI pipeline, opportunities, competitive intel, and BD strategy. Be concise, direct, and strategic. You have access to all organism intelligence below.\n\n' + HGI.substring(0, 1500) + '\n\nRecent organism memories:\n' + chatCtx + chatOppCtx + chatPipeCtx,
     messages: [{role:'user',content:chatMsg}]
   });
 
   const chatReply = chatResp.content[0].text;
+
+  // Store meaningful interactions as organism memory
+  if (chatMsg.length > 30 && chatReply.length > 100) {
+    try {
+      await storeMemory('chat_agent', chatOppId || null, 'chat,interaction', 'User asked: ' + chatMsg.slice(0, 200) + '\nOrganism responded: ' + chatReply.slice(0, 300), 'scratch', null, 'medium');
+    } catch(ce) {}
+  }
+
   res.writeHead(200, {'Content-Type':'application/json'});
   res.end(JSON.stringify({response:chatReply}));
   return;
@@ -1897,6 +1925,45 @@ if (url.startsWith('/api/recompetes')) {
   return;
 }
 
+// === KB DOCTRINE/DNA EXTRACTION — /api/kb-extract ===
+if (url.startsWith('/api/kb-extract')) {
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+  try {
+    var kbParams = new URLSearchParams(url.split('?')[1] || '');
+    var kbDocId = kbParams.get('doc_id') || '';
+    var kbReprocess = kbParams.get('reprocess') === 'true';
+    var kbQuery = 'doctrine=is.null';
+    if (kbDocId) kbQuery = 'id=eq.' + kbDocId;
+    else if (kbReprocess) kbQuery = 'order=uploaded_at.asc';
+    var kbDocs = await supabase.from('knowledge_documents').select('id,filename,document_class,vertical,status,chunk_count').or(kbQuery).limit(20);
+    var kbDocList = kbDocs.data || [];
+    if (kbDocList.length === 0) { res.end(JSON.stringify({ message: 'All documents already extracted. Use ?reprocess=true to re-extract.', processed: 0 })); return; }
+    var kbProcessed = 0; var kbErrors = [];
+    for (var ki = 0; ki < kbDocList.length; ki++) {
+      var kDoc = kbDocList[ki];
+      try {
+        var kChunks = await supabase.from('knowledge_chunks').select('chunk_text').eq('document_id', kDoc.id).order('chunk_index', { ascending: true });
+        if (!kChunks.data || kChunks.data.length === 0) { kbErrors.push(kDoc.filename + ': no chunks'); continue; }
+        var kFullText = kChunks.data.map(function(c) { return c.chunk_text; }).join('\n\n');
+        var kExtractPrompt = 'You are extracting structured institutional knowledge from an HGI proposal or corporate document.\nDocument: "' + (kDoc.filename || '') + '"\nType: "' + (kDoc.document_class || 'unknown') + '"\n\nExtract ALL of the following. Return ONLY valid JSON.\n{\n  "client": "client/agency name",\n  "contract_name": "contract or program name",\n  "vertical": "disaster_recovery|tpa_claims|property_tax|workforce|construction|housing|grant|federal|general",\n  "summary": "2-3 sentence summary",\n  "doctrine": {\n    "past_performance": [{"program":"","client":"","scope":"","scale":"","period":"","outcome":"","geography":""}],\n    "win_themes": [""],\n    "methodology": [""],\n    "differentiators": [""]\n  },\n  "winning_dna": {\n    "staff": [{"name":"","title":"","credentials":"","experience":"","years":"","historical":true,"availability_note":"Historical — confirm current availability"}],\n    "rates": [{"role":"","rate":"","rate_type":"hourly","historical":true,"rate_note":"Historical — confirm current rates"}],\n    "references": [{"name":"","title":"","organization":"","email":"","phone":""}],\n    "staffing_patterns": [{"role":"","qualifications":"","responsibilities":""}]\n  }\n}\nIf no data for a field, use null or []. Flag all staff/rates as historical.\n\nDOCUMENT TEXT:\n' + kFullText.substring(0, 12000);
+        var kResult = await claudeCall('Extract KB doctrine from ' + (kDoc.filename || '').slice(0, 40), kExtractPrompt, 4000, { model: SONNET });
+        var kClean = (kResult || '').replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+        var kJson = JSON.parse(kClean.match(/\{[\s\S]*\}/)[0]);
+        await supabase.from('knowledge_documents').update({
+          client: kJson.client || null, contract_name: kJson.contract_name || null,
+          vertical: kJson.vertical || kDoc.vertical || 'general', summary: kJson.summary || null,
+          doctrine: kJson.doctrine || null, winning_dna: kJson.winning_dna || null,
+          status: 'extracted', processed_at: new Date().toISOString()
+        }).eq('id', kDoc.id);
+        kbProcessed++;
+        log('KB EXTRACT: ' + kDoc.filename);
+      } catch (ke) { kbErrors.push((kDoc.filename || kDoc.id) + ': ' + ke.message); }
+    }
+    res.end(JSON.stringify({ success: true, processed: kbProcessed, total: kbDocList.length, errors: kbErrors }));
+  } catch (e) { res.end(JSON.stringify({ error: e.message })); }
+  return;
+}
+
 // === EXTRACT PIPELINE ANALYTICS — /api/extract-analytics ===
 if (url.startsWith('/api/extract-analytics')) {
   res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -2360,6 +2427,44 @@ if (url === '/api/disaster-check') {
   return;
 }
 
+// === DISASTER RESPONSE PROTOCOL — /api/disaster-response ===
+if (url.startsWith('/api/disaster-response')) {
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+  try {
+    if (method === 'POST') {
+      var drBody = '';
+      await new Promise(function(resolve) { req.on('data', function(c) { drBody += c; }); req.on('end', resolve); });
+      var drData = JSON.parse(drBody || '{}');
+      var drName = drData.disaster_name || '';
+      var drState = drData.state || '';
+      if (!drName || !drState) { res.end(JSON.stringify({ error: 'disaster_name and state required' })); return; }
+      var drType = drData.incident_type || 'unknown';
+      var drDate = drData.declaration_date || 'pending';
+      var drDamage = drData.estimated_damage || 'unknown';
+      var drNumber = drData.fema_declaration_number || '';
+      var drSystem = 'You are HGI disaster response strategist. ' + HGI.substring(0, 2000);
+      log('DISASTER RESPONSE PROTOCOL: Generating capture package for ' + drName + ' (' + drState + ')');
+      var drPromptBase = 'Disaster: ' + drName + ' in ' + drState + '. Incident: ' + drType + '. Declaration: ' + drDate + '. Estimated damage: ' + drDamage + '. FEMA #: ' + drNumber + '.';
+      var drResults = await Promise.all([
+        claudeCall('Generate 48-hour disaster response brief', drPromptBase + ' Generate a 48-hour disaster response brief for HGI. Cover: immediate HGI positioning, which agencies will issue RFPs, estimated contract values, HGI past performance most relevant, immediate actions in next 48 hours.', 2000, { model: SONNET, system: drSystem }),
+        claudeCall('Draft outreach letter', drPromptBase + ' Draft a capability outreach letter from HGI to the Governor Office and state emergency management agency. Professional, specific, offers concrete HGI capabilities. Reference Road Home and relevant past performance.', 2000, { model: SONNET, system: drSystem }),
+        claudeCall('List procurement opportunities', drPromptBase + ' List every procurement opportunity that will emerge over the next 6-18 months. For each: agency, contract type, estimated value, timeline, HGI fit score 1-10, and specific HGI win strategy.', 2000, { model: SONNET, system: drSystem }),
+        claudeCall('Build 90-day capture timeline', drPromptBase + ' Build a 90-day capture timeline for HGI. Week by week: what to do, who to contact, what to submit, what intelligence to gather.', 2000, { model: SONNET, system: drSystem })
+      ]);
+      var drPackage = { disaster_name: drName, state: drState, fema_number: drNumber, brief_48hr: drResults[0] || '', outreach_letter: drResults[1] || '', opportunity_forecast: drResults[2] || '', capture_timeline_90day: drResults[3] || '', generated_at: new Date().toISOString() };
+      await storeMemory('disaster_response', null, 'disaster,capture_package,' + drState.toLowerCase(), 'CAPTURE PACKAGE generated for ' + drName + ' (' + drState + '). 48hr brief: ' + (drResults[0]||'').length + ' chars, outreach: ' + (drResults[1]||'').length + ' chars, forecast: ' + (drResults[2]||'').length + ' chars, timeline: ' + (drResults[3]||'').length + ' chars.', 'analysis', null, 'high');
+      log('DISASTER RESPONSE: Package generated — ' + [drResults[0],drResults[1],drResults[2],drResults[3]].reduce(function(s,r){return s+(r||'').length;},0) + ' total chars');
+      res.end(JSON.stringify({ success: true, package: drPackage }));
+    } else {
+      var recentDA = await supabase.from('disaster_alerts').select('*').order('created_at', { ascending: false }).limit(10);
+      res.end(JSON.stringify({ recent_alerts: recentDA.data || [], message: 'POST with {disaster_name, state, incident_type, declaration_date, estimated_damage, fema_declaration_number} to generate full capture package' }));
+    }
+  } catch (e) {
+    res.end(JSON.stringify({ error: e.message }));
+  }
+  return;
+}
+
 // === LOSS ANALYSIS — /api/loss-analysis ===
 if (url === '/api/loss-analysis') {
   res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
@@ -2807,6 +2912,33 @@ if (url.startsWith('/api/proposal-review')) {
       }
     }
   } catch(e) { res.end(JSON.stringify({ error: e.message })); }
+  return;
+}
+
+// === INTERACTIVE SECTION IMPROVE/RED TEAM — /api/proposal-improve ===
+if (url.startsWith('/api/proposal-improve') && method === 'POST') {
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+  try {
+    var piBody = '';
+    await new Promise(function(resolve) { req.on('data', function(c) { piBody += c; }); req.on('end', resolve); });
+    var piData = JSON.parse(piBody || '{}');
+    var piSection = piData.section_content || '';
+    var piAction = piData.action || 'improve';
+    if (!piSection) { res.end(JSON.stringify({ error: 'section_content required' })); return; }
+    var piCtx = 'RFP: ' + (piData.rfp_context || '').slice(0, 1000) + '\nAgency: ' + (piData.agency || '') + '\nVertical: ' + (piData.vertical || '') + '\nSection: ' + (piData.section_name || '');
+    var piResult = {};
+    if (piAction === 'improve' || piAction === 'both') {
+      var piImproved = await claudeCall('Improve proposal section', piCtx + '\n\nSection to improve:\n' + piSection, 2000, { model: SONNET, system: 'You are a senior proposal writer for HGI. Improve this section: more specific, more compelling, evaluator-aligned. Use real HGI past performance. Remove generic language. Add metrics and outcomes. Return only the improved section text.' });
+      piResult.improved = piImproved;
+      if (piAction === 'both') piSection = piImproved;
+    }
+    if (piAction === 'redteam' || piAction === 'both') {
+      var piFindings = await claudeCall('Red team proposal section', piCtx + '\n\nSection to red team:\n' + piSection, 2000, { model: SONNET, system: 'You are a ruthless proposal evaluator. Find every weakness, vague claim, gap, and missing requirement. Return a numbered list of specific issues with fixes.' });
+      piResult.redteam_findings = piFindings;
+    }
+    if (!piResult.improved && !piResult.redteam_findings) { res.end(JSON.stringify({ error: 'action must be improve, redteam, or both' })); return; }
+    res.end(JSON.stringify({ success: true, result: piResult }));
+  } catch (e) { res.end(JSON.stringify({ error: e.message })); }
   return;
 }
 
@@ -3681,6 +3813,108 @@ if (url.startsWith('/api/proposal-doc')) {
   }
   return;
 }
+// === EXPORT OPPORTUNITY DECISION BRIEF — /api/export-opportunity ===
+if (url.startsWith('/api/export-opportunity') && method === 'POST') {
+  try {
+    var eoBody = '';
+    await new Promise(function(resolve) { req.on('data', function(c) { eoBody += c; }); req.on('end', resolve); });
+    var eoData = JSON.parse(eoBody || '{}');
+    var eoId = eoData.opportunityId || eoData.id || '';
+    if (!eoId) { res.writeHead(400); res.end(JSON.stringify({ error: 'opportunityId required' })); return; }
+    var eoOpp = await supabase.from('opportunities').select('*').eq('id', eoId).single();
+    if (!eoOpp.data) { res.writeHead(404); res.end(JSON.stringify({ error: 'Opportunity not found' })); return; }
+    var eo = eoOpp.data;
+    var eoDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    var eoTitle = eo.title || 'Unnamed Opportunity';
+    var eoAgency = eo.agency || 'Unknown Agency';
+    var eoOpi = eo.opi_score || 0;
+    var eoRec = 'PENDING'; var eoRecColor = '888888';
+    if (eo.capture_action) {
+      if (/NO-BID/i.test(eo.capture_action)) { eoRec = 'NO-BID'; eoRecColor = 'CC0000'; }
+      else if (/\bGO\b/i.test(eo.capture_action)) { eoRec = 'GO'; eoRecColor = '1E7C34'; }
+    }
+    var eoTier = eoOpi >= 90 ? 'Tier 1' : eoOpi >= 75 ? 'Tier 1 — Pursue' : eoOpi >= 60 ? 'Tier 2' : 'Tier 3';
+    // Build sections from opportunity data
+    var eoSections = [];
+    eoSections.push({ heading: 'OPPORTUNITY AT A GLANCE', text: 'Title: ' + eoTitle + '\nAgency: ' + eoAgency + '\nVertical: ' + (eo.vertical || '') + '\nOPI: ' + eoOpi + '/100 (' + eoTier + ')\nRecommendation: ' + eoRec + '\nDeadline: ' + (eo.due_date || 'Not specified') + '\nEstimated Value: ' + (eo.estimated_value || 'Not specified') + '\nStage: ' + (eo.stage || 'identified') });
+    if (eo.capture_action) eoSections.push({ heading: 'BID / NO-BID DECISION', text: eo.capture_action });
+    if (eo.scope_analysis) eoSections.push({ heading: 'SCOPE ANALYSIS', text: eo.scope_analysis.substring(0, 3000) });
+    if (eo.financial_analysis) eoSections.push({ heading: 'FINANCIAL ANALYSIS', text: eo.financial_analysis.substring(0, 3000) });
+    if (eo.research_brief) eoSections.push({ heading: 'COMPETITIVE INTELLIGENCE', text: eo.research_brief.substring(0, 3000) });
+    if (eo.staffing_plan) eoSections.push({ heading: 'STAFFING PLAN', text: eo.staffing_plan.substring(0, 2000) });
+    eoSections.push({ heading: 'SYSTEM INTELLIGENCE STATUS', text: 'Scope: ' + (eo.scope_analysis ? 'COMPLETE' : 'NOT RUN') + '\nFinancial: ' + (eo.financial_analysis ? 'COMPLETE' : 'NOT RUN') + '\nResearch: ' + (eo.research_brief ? 'COMPLETE' : 'NOT RUN') + '\nWinnability: ' + (eo.capture_action ? 'COMPLETE' : 'NOT RUN') + '\nStaffing: ' + (eo.staffing_plan ? 'COMPLETE' : 'NOT RUN') });
+    // Build Word doc
+    var eoChildren = [];
+    eoChildren.push(new Paragraph({ children: [new TextRun({ text: 'HAMMERMAN & GAINER LLC', font: 'Arial', size: 56, bold: true, color: 'C9A84C' })], alignment: AlignmentType.CENTER, spacing: { before: 1440, after: 200 } }));
+    eoChildren.push(new Paragraph({ children: [new TextRun({ text: 'OPPORTUNITY DECISION BRIEF', font: 'Arial', size: 32, bold: true, color: '1F3864' })], alignment: AlignmentType.CENTER, spacing: { after: 80 } }));
+    eoChildren.push(new Paragraph({ children: [new TextRun({ text: eoTitle, font: 'Arial', size: 28, bold: true, color: '1F3864' })], alignment: AlignmentType.CENTER, spacing: { before: 400, after: 200 } }));
+    eoChildren.push(new Paragraph({ children: [new TextRun({ text: eoAgency, font: 'Arial', size: 24, color: '444444' })], alignment: AlignmentType.CENTER, spacing: { after: 200 } }));
+    eoChildren.push(new Paragraph({ children: [new TextRun({ text: 'RECOMMENDATION: ' + eoRec, font: 'Arial', size: 40, bold: true, color: eoRecColor })], alignment: AlignmentType.CENTER, spacing: { after: 400 } }));
+    eoChildren.push(new Paragraph({ children: [new TextRun({ text: eoDate, font: 'Arial', size: 20, color: '888888' })], alignment: AlignmentType.CENTER, spacing: { after: 200 } }));
+    eoChildren.push(new Paragraph({ children: [new PageBreak()] }));
+    for (var esi = 0; esi < eoSections.length; esi++) {
+      var es = eoSections[esi];
+      eoChildren.push(new Paragraph({ children: [new TextRun({ text: es.heading, font: 'Arial', size: 28, bold: true, color: '1F3864' })], spacing: { before: 320, after: 200 }, border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: 'C9A84C', space: 1 } } }));
+      var esLines = (es.text || '').split('\n');
+      for (var eli = 0; eli < esLines.length; eli++) {
+        var el = esLines[eli].trim();
+        if (!el) continue;
+        if (el.startsWith('- ') || el.startsWith('* ')) {
+          eoChildren.push(new Paragraph({ children: [new TextRun({ text: el.substring(2), font: 'Arial', size: 22 })], spacing: { after: 100 }, indent: { left: 720 } }));
+        } else {
+          eoChildren.push(new Paragraph({ children: [new TextRun({ text: el.replace(/\*\*/g, ''), font: 'Arial', size: 22 })], spacing: { after: 140 } }));
+        }
+      }
+    }
+    var eoDoc = new Document({ sections: [{ properties: { page: { size: { width: 12240, height: 15840 }, margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 } } }, children: eoChildren }] });
+    var eoBuf = await Packer.toBuffer(eoDoc);
+    var eoFn = 'HGI_Decision_Brief_' + eoAgency.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 30) + '.docx';
+    res.writeHead(200, { 'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'Content-Disposition': 'attachment; filename="' + eoFn + '"', 'Access-Control-Allow-Origin': '*' });
+    res.end(eoBuf);
+  } catch (e) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); }
+  return;
+}
+
+// === EXPORT MODULE OUTPUT — /api/export-module ===
+if (url.startsWith('/api/export-module') && method === 'POST') {
+  try {
+    var emBody = '';
+    await new Promise(function(resolve) { req.on('data', function(c) { emBody += c; }); req.on('end', resolve); });
+    var emData = JSON.parse(emBody || '{}');
+    var emModule = emData.module || 'report';
+    var emContent = emData.content || '';
+    var emTitle = emData.title || emModule;
+    var emAgency = emData.agency || 'HGI Pipeline';
+    if (!emContent) { res.writeHead(400); res.end(JSON.stringify({ error: 'content required' })); return; }
+    var emDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    var emLabels = { research: 'Capture Intelligence Brief', winnability: 'Winnability Assessment', financial: 'Financial & Pricing Analysis', digest: 'Weekly Intelligence Digest' };
+    var emLabel = emLabels[emModule] || emModule;
+    var emChildren = [];
+    emChildren.push(new Paragraph({ children: [new TextRun({ text: 'HAMMERMAN & GAINER LLC', font: 'Arial', size: 56, bold: true, color: 'C9A84C' })], alignment: AlignmentType.CENTER, spacing: { before: 1440, after: 200 } }));
+    emChildren.push(new Paragraph({ children: [new TextRun({ text: emLabel.toUpperCase(), font: 'Arial', size: 36, bold: true, color: '1F3864' })], alignment: AlignmentType.CENTER, spacing: { after: 160 } }));
+    emChildren.push(new Paragraph({ children: [new TextRun({ text: emTitle, font: 'Arial', size: 28, bold: true, color: '1F3864' })], alignment: AlignmentType.CENTER, spacing: { after: 200 } }));
+    emChildren.push(new Paragraph({ children: [new TextRun({ text: emAgency, font: 'Arial', size: 24, color: '444444' })], alignment: AlignmentType.CENTER, spacing: { after: 200 } }));
+    emChildren.push(new Paragraph({ children: [new TextRun({ text: emDate, font: 'Arial', size: 20, color: '888888' })], alignment: AlignmentType.CENTER, spacing: { after: 200 } }));
+    emChildren.push(new Paragraph({ children: [new PageBreak()] }));
+    emChildren.push(new Paragraph({ children: [new TextRun({ text: emLabel.toUpperCase(), font: 'Arial', size: 28, bold: true, color: '1F3864' })], spacing: { before: 240, after: 240 }, border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: '1F3864', space: 1 } } }));
+    var emLines = emContent.split('\n');
+    for (var mli = 0; mli < emLines.length; mli++) {
+      var ml = emLines[mli].trim();
+      if (!ml) { emChildren.push(new Paragraph({ children: [], spacing: { after: 80 } })); continue; }
+      if (ml.startsWith('## ')) { emChildren.push(new Paragraph({ children: [new TextRun({ text: ml.substring(3), font: 'Arial', size: 28, bold: true, color: '1F3864' })], heading: HeadingLevel.HEADING_2, spacing: { before: 320, after: 140 } })); continue; }
+      if (ml.startsWith('### ')) { emChildren.push(new Paragraph({ children: [new TextRun({ text: ml.substring(4), font: 'Arial', size: 24, bold: true, color: '2E5DA6' })], heading: HeadingLevel.HEADING_3, spacing: { before: 240, after: 100 } })); continue; }
+      if (ml.startsWith('- ') || ml.startsWith('* ')) { emChildren.push(new Paragraph({ children: [new TextRun({ text: ml.substring(2).replace(/\*\*/g, ''), font: 'Arial', size: 22 })], spacing: { after: 100 }, indent: { left: 720 } })); continue; }
+      emChildren.push(new Paragraph({ children: [new TextRun({ text: ml.replace(/\*\*/g, ''), font: 'Arial', size: 22 })], spacing: { after: 140 } }));
+    }
+    var emDoc = new Document({ sections: [{ properties: { page: { size: { width: 12240, height: 15840 }, margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 } } }, children: emChildren }] });
+    var emBuf = await Packer.toBuffer(emDoc);
+    var emFn = 'HGI_' + emLabel.replace(/[^a-zA-Z0-9]/g, '_') + '_' + emAgency.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 30) + '.docx';
+    res.writeHead(200, { 'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'Content-Disposition': 'attachment; filename="' + emFn + '"', 'Access-Control-Allow-Origin': '*' });
+    res.end(emBuf);
+  } catch (e) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); }
+  return;
+}
+
 // === COMPLIANCE MATRIX GENERATOR — /api/compliance-matrix ===
 if (url.startsWith('/api/compliance-matrix')) {
   var cmId = (req.url.split('?id=')[1]||'').split('&')[0];
@@ -4768,6 +5002,17 @@ async function agentDisasterMonitor(state) {
           });
           autoIntaked++;
           log('AUTO-INTAKE: DR-' + nd.disaster_number + ' ' + nd.state + ' added (OPI 75)');
+          // Create disaster alert notification
+          try {
+            await supabase.from('hunt_runs').insert({
+              id: 'notify-dr-' + nd.disaster_number + '-' + Date.now(),
+              source: 'notify:disaster_alert',
+              status: 'completed',
+              run_at: new Date().toISOString(),
+              opportunities_found: 1,
+              notes: JSON.stringify({ title: 'DR-' + nd.disaster_number + ' ' + nd.state + ': ' + nd.title, message: 'New PA disaster declared. Auto-intaked at OPI 75. Generate capture package at /api/disaster-response.', priority: 'high', read: false, disaster_name: nd.title, state: nd.state, fema_number: nd.disaster_number })
+            });
+          } catch (ne) { log('Notify err: ' + ne.message); }
         } catch (e) { log('Auto-intake err: ' + e.message); }
       }
     }
