@@ -1058,48 +1058,129 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         created_at: new Date().toISOString()
       });
 
-      // 8. RED TEAM AUTO-REVIEW — Haiku reads proposal against RFP and flags gaps
+      // 8. RED TEAM AUTO-REVIEW — Structured JSON with PWIN, scoring matrix, replacement text
+      // Upgraded Session 95: port from V1 quality-gate.js structured output + enhanced
       try {
-        log('RED TEAM: Starting auto-review for ' + (opp.title||'').slice(0,40));
+        log('RED TEAM: Starting structured auto-review for ' + (opp.title||'').slice(0,40));
         var rfpRef = (opp.rfp_text && opp.rfp_text.trim().length > 200) ? opp.rfp_text.slice(0, 20000) : (opp.scope_analysis || opp.description || '');
-        var reviewPrompt = 'You are a ruthless government proposal red team reviewer. Your job is to find every weakness, gap, and compliance failure BEFORE the proposal reaches evaluators.\n\n' +
+        var rtVertical = (opp.vertical || 'disaster recovery').toLowerCase();
+
+        // Load competitive intel for this opp's vertical/agency
+        var rtCI = [];
+        try {
+          var ciR = await supabase.from('competitive_intelligence')
+            .select('competitor_name,strengths,weaknesses')
+            .or('vertical.ilike.%' + rtVertical + '%,agency.ilike.%' + (opp.agency||'').slice(0,30) + '%')
+            .limit(10);
+          rtCI = ciR.data || [];
+        } catch(e) {}
+        var competitorContext = rtCI.length > 0 ?
+          '\n\nKNOWN COMPETITORS IN THIS VERTICAL:\n' + rtCI.map(function(c) {
+            return '- ' + c.competitor_name + ': Strengths=' + (c.strengths||'unknown').slice(0,150) + ' | Weaknesses=' + (c.weaknesses||'unknown').slice(0,150);
+          }).join('\n') : '';
+
+        var reviewPrompt = 'You are a ruthless government proposal red team reviewer and PWIN estimator. Review this proposal against the RFP and return ONLY valid JSON.\n\n' +
           '## RFP/SOQ REQUIREMENTS\n' + rfpRef.slice(0, 20000) + '\n\n' +
-          '## PROPOSAL TEXT\n' + proposalText.slice(0, 80000) + '\n\n' +
-          '## REVIEW CHECKLIST — Flag every issue you find:\n\n' +
-          '1. COMPLIANCE GAPS: Does the proposal address every section the RFP requires? List any missing sections or exhibits.\n' +
-          '2. PERSONNEL: Is Geoffrey Brien mentioned anywhere? (He should NOT be — he left HGI.) Are HGI leadership names (Lou Resweber, Dillon Truax, Candy Dottolo, Chris Feduccia, Vanessa James) auto-assigned to project roles? They should NOT be — all positions should be listed as [TO BE ASSIGNED] with role requirements. The only name that should appear is Christopher J. Oney on the cover letter signature.\n' +
-          '3. EVIDENCE: Does every capability claim have specific backing data (dollar amounts, dates, project names)? Flag any "extensive experience" or "proven track record" without specifics.\n' +
-          '4. WIN THEMES: Are there clear win themes? Are they repeated excessively across sections? (Should appear once each, where they naturally belong.)\n' +
-          '5. FILLER: Flag any sentences that add no evaluator value — vague commitments, generic language, or padding.\n' +
-          '6. FORMAT: Does the proposal match the RFP structure? Wrong section order? Missing page numbers or headers the RFP requires?\n' +
-          '7. FACTS: Any incorrect HGI data? (Founded 1931, ~50 employees, Kenner HQ, UEI DL4SJEVKZ6H4, phone (504) 681-6135)\n' +
-          '8. ACTION ITEMS: List specific items that need human attention before submission (forms to sign, refs to confirm, etc.)\n' +
-          '9. SCORING RISK: Which sections would lose the most points with evaluators as written? What specific improvements would close the gap?\n\n' +
-          'Be specific. Cite section names and page references. Do not praise — only identify problems and specific fixes.\n' +
-          'Format: For each issue, write CATEGORY | SEVERITY (critical/major/minor) | DESCRIPTION | FIX';
-        var reviewResp = await claudeCall('Red team proposal review', reviewPrompt, 12000, { model: 'claude-sonnet-4-6' });
-        
-        // Count issues by severity
-        var critCount = (reviewResp.match(/critical/gi) || []).length;
-        var majCount = (reviewResp.match(/major/gi) || []).length;
-        var minCount = (reviewResp.match(/minor/gi) || []).length;
-        var summary = 'RED TEAM REVIEW: ' + critCount + ' critical, ' + majCount + ' major, ' + minCount + ' minor issues found.';
-        
-        // Store review
+          '## PROPOSAL TEXT\n' + proposalText.slice(0, 60000) + competitorContext + '\n\n' +
+          '## REVIEW CHECKLIST:\n' +
+          '1. COMPLIANCE: Missing required sections, exhibits, forms, certifications\n' +
+          '2. PERSONNEL: Geoffrey Brien mentioned (MUST NOT be), staff auto-assigned to roles (MUST be [TO BE ASSIGNED]), only Christopher J. Oney on cover letter\n' +
+          '3. EVIDENCE: Unsubstantiated claims without specific data (dates, amounts, project names)\n' +
+          '4. WIN THEMES: Missing, forced, or excessively repeated\n' +
+          '5. FILLER: Vague commitments, generic language, padding with no evaluator value\n' +
+          '6. FORMAT: Wrong section order, missing required headers, structure mismatch\n' +
+          '7. FACTS: Incorrect HGI data (Founded 1931, ~50 employees, Kenner HQ Suite 510, UEI DL4SJEVKZ6H4)\n' +
+          '8. SCORING RISK: Sections that would lose the most evaluator points as-written\n\n' +
+          'Return ONLY this JSON structure (no markdown, no preamble):\n' +
+          '{\n' +
+          '  "overall_status": "PASS or CONDITIONAL or FAIL",\n' +
+          '  "pwin_estimate": 0-100,\n' +
+          '  "pwin_rationale": "One paragraph explaining the PWIN estimate based on proposal quality, compliance, and competitive position",\n' +
+          '  "scoring_matrix": [\n' +
+          '    {"section": "section name", "max_points": 0, "estimated_score": 0, "pct": 0, "risk_level": "high/medium/low", "note": "why"}\n' +
+          '  ],\n' +
+          '  "findings": [\n' +
+          '    {\n' +
+          '      "severity": "DISQUALIFYING or CRITICAL or MAJOR or MINOR",\n' +
+          '      "category": "Compliance/Personnel/Evidence/Win Themes/Filler/Format/Facts/Scoring Risk",\n' +
+          '      "section": "which proposal section",\n' +
+          '      "issue": "brief title",\n' +
+          '      "detail": "specific description",\n' +
+          '      "fix": "exactly what to change",\n' +
+          '      "replacement_text": "if applicable, the corrected text to substitute (or null)"\n' +
+          '    }\n' +
+          '  ],\n' +
+          '  "strengths": ["things the proposal does well"],\n' +
+          '  "competitive_vulnerabilities": ["where known competitors would beat this proposal"],\n' +
+          '  "top_3_improvements": ["the 3 changes that would most increase PWIN"]\n' +
+          '}';
+
+        var reviewResp = await claudeCall('Red team proposal review', reviewPrompt, 12000, { model: 'claude-sonnet-4-6', agent: 'red_team_reviewer' });
+
+        // Parse structured JSON
+        var rtReport = null;
+        var rtRaw = reviewResp;
+        try {
+          var rtClean = reviewResp.replace(/```json|```/g, '').trim();
+          var rtStart = rtClean.indexOf('{');
+          var rtEnd = rtClean.lastIndexOf('}');
+          if (rtStart >= 0 && rtEnd > rtStart) {
+            rtReport = JSON.parse(rtClean.slice(rtStart, rtEnd + 1));
+          }
+        } catch(parseErr) {
+          log('RED TEAM: JSON parse failed, falling back to text analysis');
+        }
+
+        // Build summary from structured or text
+        var critCount, majCount, minCount, summary, pwinEst;
+        if (rtReport && rtReport.findings) {
+          critCount = rtReport.findings.filter(function(f) { return f.severity === 'DISQUALIFYING' || f.severity === 'CRITICAL'; }).length;
+          majCount = rtReport.findings.filter(function(f) { return f.severity === 'MAJOR'; }).length;
+          minCount = rtReport.findings.filter(function(f) { return f.severity === 'MINOR'; }).length;
+          pwinEst = rtReport.pwin_estimate || 0;
+          summary = 'RED TEAM REVIEW [STRUCTURED]: ' + rtReport.overall_status + ' | PWIN ' + pwinEst + '% | ' +
+            critCount + ' critical, ' + majCount + ' major, ' + minCount + ' minor | ' +
+            (rtReport.scoring_matrix || []).length + ' sections scored | ' +
+            (rtReport.findings || []).filter(function(f) { return f.replacement_text; }).length + ' replacement texts provided';
+        } else {
+          critCount = (reviewResp.match(/critical/gi) || []).length;
+          majCount = (reviewResp.match(/major/gi) || []).length;
+          minCount = (reviewResp.match(/minor/gi) || []).length;
+          pwinEst = 0;
+          summary = 'RED TEAM REVIEW [TEXT]: ' + critCount + ' critical, ' + majCount + ' major, ' + minCount + ' minor issues found.';
+        }
+
+        // Store review — structured JSON if available, text fallback otherwise
+        var reviewStorage = rtReport ?
+          summary + '\n\n' + JSON.stringify(rtReport, null, 2) :
+          summary + '\n\n' + reviewResp;
+
         await supabase.from('opportunities').update({
-          proposal_review: summary + '\n\n' + reviewResp,
+          proposal_review: reviewStorage,
           last_updated: new Date().toISOString()
         }).eq('id', ppId);
-        
-        // Write memory
+
+        // Write memory with key findings
+        var memObs = summary;
+        if (rtReport) {
+          if (rtReport.top_3_improvements) memObs += '\n\nTop improvements: ' + rtReport.top_3_improvements.join(' | ');
+          if (rtReport.competitive_vulnerabilities && rtReport.competitive_vulnerabilities.length > 0) memObs += '\n\nCompetitive vulnerabilities: ' + rtReport.competitive_vulnerabilities.join(' | ');
+          if (rtReport.findings) {
+            var topFindings = rtReport.findings.filter(function(f) { return f.severity === 'DISQUALIFYING' || f.severity === 'CRITICAL'; }).slice(0, 5);
+            if (topFindings.length > 0) memObs += '\n\nCritical findings:\n' + topFindings.map(function(f) { return '- [' + f.category + '] ' + f.issue + ': ' + f.fix; }).join('\n');
+          }
+        } else {
+          memObs += '\n\nTop issues:\n' + reviewResp.slice(0, 2000);
+        }
+
         await supabase.from('organism_memory').insert({
           agent: 'red_team_reviewer',
           opportunity_id: ppId,
-          observation: summary + '\n\nTop issues:\n' + reviewResp.slice(0, 2000),
+          observation: memObs.slice(0, 4000),
           memory_type: 'analysis',
           created_at: new Date().toISOString()
         });
-        
+
         log('RED TEAM: ' + summary);
       } catch(rtErr) {
         log('RED TEAM ERROR: ' + rtErr.message);
@@ -2445,10 +2526,40 @@ if (url.startsWith('/api/proposal-review')) {
       res.end(JSON.stringify({ id: rvId, review: null, message: 'No review found. Run produce-proposal first — red team review runs automatically after generation.' }));
     } else {
       var rv = rvOpp.data.proposal_review;
-      var critC = (rv.match(/critical/gi) || []).length;
-      var majC = (rv.match(/major/gi) || []).length;
-      var minC = (rv.match(/minor/gi) || []).length;
-      res.end(JSON.stringify({ id: rvId, title: rvOpp.data.title, summary: { critical: critC, major: majC, minor: minC }, review: rv }));
+      // Try to extract structured JSON from review
+      var structured = null;
+      try {
+        var jsonStart = rv.indexOf('{');
+        var jsonEnd = rv.lastIndexOf('}');
+        if (jsonStart >= 0 && jsonEnd > jsonStart) {
+          structured = JSON.parse(rv.slice(jsonStart, jsonEnd + 1));
+        }
+      } catch(e) {}
+
+      if (structured && structured.findings) {
+        res.end(JSON.stringify({
+          id: rvId, title: rvOpp.data.title, format: 'structured',
+          overall_status: structured.overall_status,
+          pwin_estimate: structured.pwin_estimate,
+          pwin_rationale: structured.pwin_rationale,
+          scoring_matrix: structured.scoring_matrix || [],
+          summary: {
+            disqualifying: structured.findings.filter(function(f) { return f.severity === 'DISQUALIFYING'; }).length,
+            critical: structured.findings.filter(function(f) { return f.severity === 'CRITICAL'; }).length,
+            major: structured.findings.filter(function(f) { return f.severity === 'MAJOR'; }).length,
+            minor: structured.findings.filter(function(f) { return f.severity === 'MINOR'; }).length
+          },
+          findings: structured.findings,
+          strengths: structured.strengths || [],
+          competitive_vulnerabilities: structured.competitive_vulnerabilities || [],
+          top_3_improvements: structured.top_3_improvements || []
+        }));
+      } else {
+        var critC = (rv.match(/critical/gi) || []).length;
+        var majC = (rv.match(/major/gi) || []).length;
+        var minC = (rv.match(/minor/gi) || []).length;
+        res.end(JSON.stringify({ id: rvId, title: rvOpp.data.title, format: 'text', summary: { critical: critC, major: majC, minor: minC }, review: rv }));
+      }
     }
   } catch(e) { res.end(JSON.stringify({ error: e.message })); }
   return;
