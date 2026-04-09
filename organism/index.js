@@ -55,7 +55,22 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url === '/api/pipeline') {
-      const r = await supabase.from('opportunities').select('id,title,agency,vertical,opi_score,stage,status,due_date,estimated_value,capture_action,scope_analysis,research_brief,staffing_plan,financial_analysis,proposal_content,source_url,outcome,rfp_document_retrieved').eq('status','active').order('opi_score', { ascending: false }).limit(20);
+      const r = await supabase.from('opportunities').select('id,title,agency,vertical,opi_score,stage,status,due_date,estimated_value,source_url,outcome,rfp_document_retrieved').eq('status','active').order('opi_score', { ascending: false }).limit(20);
+      // Add lightweight flags for completeness indicators without sending full text
+      if (r.data) {
+        var fullR = await supabase.from('opportunities').select('id,capture_action,scope_analysis,research_brief,staffing_plan,financial_analysis,proposal_content').eq('status','active');
+        var fullMap = {};
+        (fullR.data || []).forEach(function(o) { fullMap[o.id] = o; });
+        r.data.forEach(function(o) {
+          var f = fullMap[o.id] || {};
+          o.has_scope = !!(f.scope_analysis && f.scope_analysis.length > 100);
+          o.has_intel = !!(f.research_brief && f.research_brief.length > 100);
+          o.has_financial = !!(f.financial_analysis && f.financial_analysis.length > 100);
+          o.has_staffing = !!(f.staffing_plan && f.staffing_plan.length > 100);
+          o.has_proposal = !!(f.proposal_content && f.proposal_content.length > 100);
+          o.has_capture = !!(f.capture_action && f.capture_action.length > 100);
+        });
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(r.data || []));
       return;
