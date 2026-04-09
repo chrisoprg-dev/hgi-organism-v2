@@ -1090,6 +1090,107 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         log('RED TEAM ERROR: ' + rtErr.message);
       }
 
+
+      // 9. KB ENRICHMENT LEARNING LOOP — Feed high-quality proposal sections back into KB
+      // Port from V1 kb-enrich.js (92 lines). Uses red team review as quality signal.
+      try {
+        var reviewText = '';
+        var reviewR = await supabase.from('opportunities').select('proposal_review').eq('id', ppId).single();
+        reviewText = (reviewR.data || {}).proposal_review || '';
+        
+        if (proposalText.length >= 500 && reviewText.length >= 100) {
+          log('KB ENRICHMENT: Starting for ' + (opp.title||'').slice(0,40));
+          
+          // Use Haiku to extract sections NOT flagged critical/major by red team
+          var extractResult = await claudeCall(
+            'You extract high-quality proposal sections for reuse in future government proposals. ' +
+            'You receive a proposal and a red team review. Your job: identify sections that were NOT flagged as critical or major issues by the red team. ' +
+            'Extract those clean sections verbatim. Format: start each with === SECTION: [section name] === then full text. ' +
+            'If the red team found issues everywhere, extract the 2 strongest sections regardless. Only include substantive content (500+ chars per section).',
+            '=== RED TEAM REVIEW (sections with critical/major issues should be EXCLUDED) ===\n' + reviewText.slice(0, 3000) +
+            '\n\n=== FULL PROPOSAL ===\n' + proposalText.slice(0, 20000) +
+            '\n\nExtract every section that passed red team review without critical/major issues. Include full text. Start each with === SECTION: [name] ===',
+            6000,
+            { model: 'claude-haiku-4-5-20251001' }
+          );
+          
+          if (extractResult && extractResult.length >= 200) {
+            var kbVerticalMap = { disaster: 'disaster', tpa: 'tpa', appeals: 'appeals', workforce: 'workforce', construction: 'construction', housing: 'housing', grant: 'grant', federal: 'federal' };
+            var kbVertical = kbVerticalMap[(opp.vertical||'').toLowerCase()] || 'general';
+            var kbNow = new Date().toISOString();
+            var kbAgency = (opp.agency||'').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 40);
+            var kbFilename = 'proposal_sections_' + kbAgency + '_' + Date.now() + '.txt';
+            var kbDocContent = 'SOURCE: HGI Proposal — ' + (opp.title||'Unknown') + ' | ' + (opp.agency||'') +
+              '\nDATE: ' + kbNow.slice(0,10) +
+              '\nVERTICAL: ' + (opp.vertical||'general') +
+              '\nQUALITY: Sections passed red team review — high-confidence reuse material\n---\n\n' + extractResult;
+            
+            // Insert knowledge_documents record
+            var docId = 'kbenrich-' + ppId.slice(0,20) + '-' + Date.now();
+            await supabase.from('knowledge_documents').insert({
+              id: docId,
+              filename: kbFilename,
+              file_type: 'txt',
+              document_class: 'winning_proposal',
+              vertical: kbVertical,
+              client: opp.agency || '',
+              contract_name: opp.title || '',
+              summary: 'Auto-extracted high-quality sections from proposal for ' + (opp.title||'').slice(0,60),
+              raw_text: kbDocContent,
+              char_count: kbDocContent.length,
+              status: 'extracted',
+              uploaded_at: kbNow,
+              processed_at: kbNow
+            });
+            
+            // Chunk the extracted text (~2000 chars per chunk)
+            var chunkSize = 2000;
+            var chunkTexts = [];
+            for (var ci = 0; ci < kbDocContent.length; ci += chunkSize) {
+              chunkTexts.push(kbDocContent.slice(ci, ci + chunkSize));
+            }
+            
+            var chunkInserts = chunkTexts.map(function(ct, idx) {
+              return {
+                id: docId + '-chunk-' + idx,
+                document_id: docId,
+                chunk_index: idx,
+                chunk_text: ct,
+                char_start: idx * chunkSize,
+                char_end: Math.min((idx + 1) * chunkSize, kbDocContent.length),
+                vertical: kbVertical,
+                document_class: 'winning_proposal',
+                filename: kbFilename
+              };
+            });
+            
+            await supabase.from('knowledge_chunks').insert(chunkInserts);
+            
+            // Update document with chunk count
+            await supabase.from('knowledge_documents').update({
+              chunk_count: chunkInserts.length
+            }).eq('id', docId);
+            
+            // Write memory
+            await supabase.from('organism_memory').insert({
+              agent: 'kb_enrichment',
+              opportunity_id: ppId,
+              observation: 'KB ENRICHMENT: Extracted ' + extractResult.length + ' chars of high-quality proposal sections into ' + chunkInserts.length + ' KB chunks. Doc: ' + kbFilename + '. Vertical: ' + kbVertical + '. These sections passed red team review and are available for future proposals.',
+              memory_type: 'learning',
+              created_at: kbNow
+            });
+            
+            log('KB ENRICHMENT: Success — ' + chunkInserts.length + ' chunks, ' + extractResult.length + ' chars stored as ' + kbFilename);
+          } else {
+            log('KB ENRICHMENT: Skipped — extraction too short (' + (extractResult||'').length + ' chars)');
+          }
+        } else {
+          log('KB ENRICHMENT: Skipped — proposal ' + proposalText.length + ' chars, review ' + reviewText.length + ' chars (need 500/100 min)');
+        }
+      } catch(kbErr) {
+        log('KB ENRICHMENT ERROR: ' + kbErr.message);
+      }
+
       log('PROPOSAL ENGINE: Complete for ' + (opp.title||'').slice(0,40));
 
     } catch(e) {
