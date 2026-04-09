@@ -1934,6 +1934,132 @@ if (url === '/api/system-status') {
   return;
 }
 
+
+// === HEALTH MONITOR — /api/health-monitor ===
+// Port from V1 health-monitor.js (155 lines). Zero Claude calls.
+// Checks: API credits, cron/session activity, scraper health, pipeline anomalies.
+if (url === '/api/health-monitor') {
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+  try {
+    var hmResult = { ts: new Date().toISOString(), checks: [], alerts: [] };
+    var hmToday = new Date().toISOString().slice(0, 10);
+    var hmTodayStart = hmToday + 'T00:00:00';
+
+    // CHECK 1: Anthropic API credit health (minimal test call)
+    try {
+      var testResp = await anthropic.messages.create({
+        model: 'claude-haiku-4-5-20251001', max_tokens: 1,
+        messages: [{ role: 'user', content: 'ok' }]
+      });
+      hmResult.checks.push({ name: 'api_credits', status: 'OK', detail: 'API responding, credits available' });
+    } catch(apiErr) {
+      var errMsg = apiErr.message || '';
+      if (errMsg.indexOf('credit') !== -1 || errMsg.indexOf('balance') !== -1) {
+        hmResult.checks.push({ name: 'api_credits', status: 'CRITICAL', detail: 'Credit balance too low' });
+        hmResult.alerts.push('CRITICAL: API credits depleted');
+        await supabase.from('organism_memory').insert({
+          agent: 'health_monitor', opportunity_id: null,
+          entity_tags: 'system,health,CRITICAL',
+          observation: 'SYSTEM ALERT [CRITICAL]: API Credits Depleted\nAnthropic API returning credit balance error. ALL Claude-powered features are down. Add credits immediately.',
+          memory_type: 'system_alert', created_at: new Date().toISOString()
+        });
+      } else {
+        hmResult.checks.push({ name: 'api_credits', status: 'WARNING', detail: 'API error: ' + errMsg.slice(0, 200) });
+      }
+    }
+
+    // CHECK 2: Session activity today (V2 runs sessions, not individual crons)
+    var sessionMems = await supabase.from('organism_memory')
+      .select('agent,created_at')
+      .gte('created_at', hmTodayStart)
+      .order('created_at', { ascending: false })
+      .limit(100);
+    var todayAgents = {};
+    (sessionMems.data || []).forEach(function(m) { todayAgents[m.agent] = true; });
+    var activeAgentCount = Object.keys(todayAgents).length;
+
+    if (activeAgentCount >= 5) {
+      hmResult.checks.push({ name: 'session_activity', status: 'OK', detail: activeAgentCount + ' agents active today: ' + Object.keys(todayAgents).slice(0, 10).join(', ') });
+    } else if (activeAgentCount > 0) {
+      hmResult.checks.push({ name: 'session_activity', status: 'WARNING', detail: 'Only ' + activeAgentCount + ' agents active today (expected 5+)' });
+      hmResult.alerts.push('WARNING: Low agent activity — only ' + activeAgentCount + ' agents fired today');
+    } else {
+      hmResult.checks.push({ name: 'session_activity', status: 'MISSED', detail: 'No agent activity today' });
+      hmResult.alerts.push('MISSED: No agent sessions fired today');
+      await supabase.from('organism_memory').insert({
+        agent: 'health_monitor', opportunity_id: null,
+        entity_tags: 'system,health,WARNING',
+        observation: 'SYSTEM ALERT [WARNING]: No Agent Activity Today\nNo organism sessions have fired today. Check V1 cron triggers and V2 Railway health.',
+        memory_type: 'system_alert', created_at: new Date().toISOString()
+      });
+    }
+
+    // CHECK 3: Scraper health — hunt_runs today
+    var scraperSources = ['central_bidding', 'sam_gov', 'grants_gov', 'openfema', 'usaspending', 'federal_register'];
+    var huntRuns = await supabase.from('hunt_runs')
+      .select('source,run_at,status')
+      .gte('run_at', hmTodayStart)
+      .order('run_at', { ascending: false });
+    var runsBySource = {};
+    (huntRuns.data || []).forEach(function(r) { runsBySource[r.source] = (runsBySource[r.source] || 0) + 1; });
+
+    for (var si = 0; si < scraperSources.length; si++) {
+      var src = scraperSources[si];
+      if (runsBySource[src]) {
+        hmResult.checks.push({ name: 'scraper_' + src, status: 'OK', detail: runsBySource[src] + ' runs today' });
+      } else {
+        hmResult.checks.push({ name: 'scraper_' + src, status: 'WARNING', detail: 'No runs today' });
+        hmResult.alerts.push('WARNING: ' + src + ' scraper has not run today');
+      }
+    }
+
+    // CHECK 4: Pipeline anomalies — stale opps, missing data
+    var state = await loadState();
+    var staleCount = 0;
+    var missingData = 0;
+    var now = Date.now();
+    state.pipeline.forEach(function(o) {
+      if (o.stage === 'pursuing' || o.stage === 'proposal') {
+        var updated = new Date(o.last_updated || o.discovered_at || 0).getTime();
+        if (now - updated > 7 * 86400000) staleCount++;
+        if (!o.scope_analysis && !o.research_brief) missingData++;
+      }
+    });
+    if (staleCount > 0) {
+      hmResult.checks.push({ name: 'stale_opps', status: 'WARNING', detail: staleCount + ' pursuing/proposal opps not updated in 7+ days' });
+      hmResult.alerts.push('WARNING: ' + staleCount + ' stale opportunities need attention');
+    } else {
+      hmResult.checks.push({ name: 'stale_opps', status: 'OK', detail: 'No stale pursuing/proposal opps' });
+    }
+    if (missingData > 0) {
+      hmResult.checks.push({ name: 'missing_intel', status: 'WARNING', detail: missingData + ' pursuing/proposal opps missing scope and research' });
+    }
+
+    // CHECK 5: Uptime and memory
+    hmResult.checks.push({ name: 'v2_uptime', status: 'OK', detail: Math.floor(process.uptime()) + ' seconds' });
+    hmResult.checks.push({ name: 'v2_memory', status: 'OK', detail: Math.round(process.memoryUsage().heapUsed / 1048576) + 'MB heap used' });
+
+    // SUMMARY
+    var hmCriticals = hmResult.alerts.filter(function(a) { return a.indexOf('CRITICAL') !== -1; }).length;
+    var hmWarnings = hmResult.alerts.filter(function(a) { return a.indexOf('CRITICAL') === -1; }).length;
+    hmResult.summary = hmCriticals > 0 ? 'CRITICAL — ' + hmCriticals + ' critical alert(s)' :
+      hmWarnings > 0 ? 'WARNING — ' + hmWarnings + ' warning(s)' : 'ALL SYSTEMS OK';
+
+    // Log to hunt_runs for tracking
+    await supabase.from('hunt_runs').insert({
+      id: 'hr-health-' + Date.now(), source: 'health_monitor',
+      status: hmResult.summary + ' | ' + hmResult.checks.length + ' checks | ' + hmResult.alerts.length + ' alerts',
+      run_at: new Date().toISOString(), opportunities_found: 0
+    });
+
+    log('HEALTH MONITOR: ' + hmResult.summary);
+    res.end(JSON.stringify(hmResult));
+  } catch(hmErr) {
+    res.end(JSON.stringify({ error: hmErr.message }));
+  }
+  return;
+}
+
 // === DISASTER MONITOR MANUAL TRIGGER — /api/disaster-check ===
 if (url === '/api/disaster-check') {
   res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
