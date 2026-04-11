@@ -3975,12 +3975,57 @@ if (url.startsWith('/api/export-opportunity')) {
   return;
 }
 
+// === ORCHESTRATE — /api/orchestrate ===
+if (url === '/api/orchestrate' && req.method === 'POST') {
+  var body = '';
+  for await (const chunk of req) body += chunk;
+  var orchId = '';
+  try { orchId = JSON.parse(body || '{}').id || ''; } catch(e) {}
+  if (!orchId) { res.writeHead(400); res.end(JSON.stringify({error:'id required'})); return; }
+  log('ORCHESTRATE API: Starting for ' + orchId);
+  res.writeHead(200, {'Content-Type':'application/json'});
+  res.end(JSON.stringify({started:true, id:orchId}));
+  // Run async
+  (async function(){
+    try {
+      var orchOpp = await supabase.from('opportunities').select('*').eq('id', orchId).single();
+      if (orchOpp.data) await orchestrateOpp(orchOpp.data);
+    } catch(e) { log('ORCHESTRATE API ERROR: ' + e.message); }
+  })();
+  return;
+}
+
 // === EXPORT MODULE OUTPUT — /api/export-module ===
-if (url.startsWith('/api/export-module') && method === 'POST') {
+// GET: /api/export-module?type=research&id=OPPID (looks up content from DB)
+// POST: {module, content, title, agency} (direct content)
+if (url.startsWith('/api/export-module')) {
+  // GET handler: fetch content from opportunity
+  if (req.method === 'GET') {
+    try {
+      var emQType = (req.url.match(/[?&]type=([^&]*)/)||[])[1] || 'research';
+      var emQId = (req.url.match(/[?&]id=([^&]*)/)||[])[1] || '';
+      if (!emQId) { res.writeHead(400); res.end(JSON.stringify({error:'id required'})); return; }
+      var emQOpp = await supabase.from('opportunities').select('*').eq('id', decodeURIComponent(emQId)).single();
+      if (!emQOpp.data) { res.writeHead(404); res.end(JSON.stringify({error:'not found'})); return; }
+      var emQo = emQOpp.data;
+      var emFieldMap = {research:'research_brief',winnability:'capture_action',financial:'financial_analysis',scope:'scope_analysis',staffing:'staffing_plan'};
+      var emQContent = emQo[emFieldMap[emQType]||'research_brief'] || '';
+      if (!emQContent) { res.writeHead(400); res.end(JSON.stringify({error:'No '+emQType+' content found for this opportunity'})); return; }
+      var emQModule = emQType;
+      var emQTitle = emQo.title || 'Opportunity';
+      var emQAgency = emQo.agency || 'HGI Pipeline';
+      // Fall through to doc generation below with these vars set
+      var emData = {module:emQModule, content:emQContent, title:emQTitle, agency:emQAgency};
+    } catch(e) { res.writeHead(500); res.end(JSON.stringify({error:e.message})); return; }
+  } else if (req.method === 'POST') {
+    try {
+      var emBody = '';
+      await new Promise(function(resolve) { req.on('data', function(c) { emBody += c; }); req.on('end', resolve); });
+      var emData = JSON.parse(emBody || '{}');
+    } catch(e) { res.writeHead(400); res.end(JSON.stringify({error:'Invalid JSON'})); return; }
+  } else { res.writeHead(405); res.end(JSON.stringify({error:'Method not allowed'})); return; }
+
   try {
-    var emBody = '';
-    await new Promise(function(resolve) { req.on('data', function(c) { emBody += c; }); req.on('end', resolve); });
-    var emData = JSON.parse(emBody || '{}');
     var emModule = emData.module || 'report';
     var emContent = emData.content || '';
     var emTitle = emData.title || emModule;
