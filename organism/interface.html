@@ -1595,30 +1595,78 @@ function OpportunityBriefModule(p){
   var st2=useState(false),loading=st2[0],setLoading=st2[1];
   var st3=useState(false),orchLoading=st3[0],setOrchLoading=st3[1];
   var st4=useState(null),orchResult=st4[0],setOrchResult=st4[1];
+  var st5=useState(null),detail=st5[0],setDetail=st5[1];
+  var st6=useState(null),fitAnalysis=st6[0],setFitAnalysis=st6[1];
+  var st7=useState(false),fitLoading=st7[0],setFitLoading=st7[1];
+  var st8=useState({}),expanded=st8[0],setExpanded=st8[1];
+
+  // Fetch detail when opp selected
+  useEffect(function(){
+    if(pl.selected){
+      fetch('/api/opportunity-detail?id='+encodeURIComponent(pl.selected.id)).then(function(r){return r.json()}).then(function(d){setDetail(d)}).catch(function(){});
+    }
+  },[pl.selected?pl.selected.id:null]);
 
   if(!pl.selected)return e('div',{style:{padding:'24px 32px'}},
     e('h2',{style:{color:GOLD}},'Opportunity Brief'),
     e('div',{style:{fontSize:12,color:TEXT_D,marginBottom:16}},'Select an opportunity from the pipeline for a deep-dive analysis.'),
     pl.pipeline.length>0?e(OpportunitySelector,{pipeline:pl.pipeline,selected:pl.selected,onSelect:pl.select,loading:pl.loading}):
-    e(Card,null,e('div',{style:{color:TEXT_D,textAlign:'center',padding:20}},'No active opportunities in pipeline yet. The scraper is running — check back soon.'))
+    e(Card,null,e('div',{style:{color:TEXT_D,textAlign:'center',padding:20}},'No active opportunities in pipeline yet.'))
   );
 
   var o=pl.selected;
+  var det=detail||o;
   var sc=o.opi_score||0;
   var daysLeft=o.deadline?Math.ceil((new Date(o.deadline)-new Date())/(1000*60*60*24)):null;
+
+  function toggleSection(key){var c=Object.assign({},expanded);c[key]=!c[key];setExpanded(c)}
 
   function runOrchestration(){
     setOrchLoading(true);
     fetch('/api/orchestrate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:o.id})})
-      .then(function(r){return r.json()}).then(function(d){setOrchResult(d);setOrchLoading(false);pl.refresh()})
-      .catch(function(){setOrchLoading(false)});
+      .then(function(r){return r.json()}).then(function(d){
+        setOrchResult(d);setOrchLoading(false);
+        // Refresh detail after orchestration triggers
+        setTimeout(function(){
+          fetch('/api/opportunity-detail?id='+encodeURIComponent(o.id)).then(function(r){return r.json()}).then(function(d2){setDetail(d2)});
+          pl.refresh();
+        },15000);
+      }).catch(function(){setOrchLoading(false)});
   }
 
   function runResearch(){
     setLoading(true);
     callClaude('Generate a comprehensive research and competitive intelligence brief for: '+o.title+' ('+o.agency+', '+(o.vertical||'')+').'+
-      (o.scope_analysis?'\n\nScope: '+o.scope_analysis.substring(0,2000):'')
-    ).then(function(r){setAnalysis(r);setLoading(false)});
+      (det.scope_analysis?'\n\nScope: '+det.scope_analysis.substring(0,2000):''),
+      null,6000
+    ).then(function(r){setAnalysis(r);setLoading(false);pl.writeBack(o.id,{research_brief:r})});
+  }
+
+  function runFitAnalysis(){
+    setFitLoading(true);
+    callClaude('Analyze HGI\'s fit for this opportunity. Include: Why HGI Wins (specific past performance matches), Key Requirements we meet, Gaps/Risks, Teaming needs, GO/NO-GO recommendation.\n\n'+
+      'Title: '+o.title+'\nAgency: '+(o.agency||'')+'\nVertical: '+(o.vertical||'')+'\nValue: '+(o.estimated_value||'Unknown')+
+      (det.scope_analysis?'\nScope: '+det.scope_analysis.substring(0,2000):'')+
+      (det.research_brief?'\nResearch: '+det.research_brief.substring(0,1500):''),
+      null,4000
+    ).then(function(r){setFitAnalysis(r);setFitLoading(false)});
+  }
+
+  // Expandable section helper
+  function Section(sp){
+    var content=sp.content;var label=sp.label;var key=sp.skey;
+    if(!content||content.length<50)return null;
+    var isOpen=expanded[key];
+    return e(Card,{style:{cursor:'pointer'}},
+      e('div',{onClick:function(){toggleSection(key)},style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
+        e('div',null,
+          e(Label,{text:label}),
+          e('span',{style:{fontSize:10,color:TEXT_D,marginLeft:8}},content.length.toLocaleString()+' chars')
+        ),
+        e('span',{style:{color:TEXT_D}},isOpen?'▼':'▶')
+      ),
+      isOpen?e('div',{style:{fontSize:12,whiteSpace:'pre-wrap',maxHeight:400,overflowY:'auto',lineHeight:1.6,marginTop:8,paddingTop:8,borderTop:'1px solid '+BORDER}},content.substring(0,5000)):null
+    );
   }
 
   return e('div',{style:{padding:'24px 32px',maxWidth:1100}},
@@ -1628,45 +1676,70 @@ function OpportunityBriefModule(p){
     // Hero card
     e(Card,{style:{borderLeft:'4px solid '+(sc>=90?GREEN:sc>=75?CYAN:GOLD),marginTop:12}},
       e('div',{style:{display:'flex',justifyContent:'space-between'}},
-        e('div',null,
+        e('div',{style:{flex:1}},
           e('div',{style:{fontSize:11,color:TEXT_D,marginBottom:4}},'OPI SCORE'),
           e('div',{style:{fontSize:36,fontWeight:'bold',color:sc>=90?GREEN:sc>=75?CYAN:GOLD,marginBottom:4}},sc),
           e('h3',{style:{margin:0}},o.title),
-          e('div',{style:{fontSize:12,color:TEXT_D,marginTop:4}},o.agency||'',' · ',o.vertical||'',daysLeft!==null?' · '+daysLeft+' days left':''),
-          o.source_url?e('a',{href:o.source_url,target:'_blank',style:{color:CYAN,fontSize:11,textDecoration:'none'}},'View Source →'):null
+          e('div',{style:{fontSize:12,color:TEXT_D,marginTop:4}},
+            o.agency||'',' · ',o.vertical||'',
+            daysLeft!==null?' · ':null,
+            daysLeft!==null?e('span',{style:{color:daysLeft<=5?RED:daysLeft<=10?ORANGE:TEXT_D}},daysLeft+' days left'):null
+          ),
+          o.source_url?e('a',{href:o.source_url,target:'_blank',style:{color:CYAN,fontSize:11,textDecoration:'none',marginTop:4,display:'inline-block'}},'View Source →'):null
         ),
         e('div',{style:{textAlign:'right'}},
           o.stage?e(Badge,{color:stageColor(o.stage)},o.stage):null,
-          o.estimated_value?e('div',{style:{fontSize:16,color:GOLD,marginTop:8}},o.estimated_value):null
+          o.estimated_value?e('div',{style:{fontSize:16,color:GOLD,marginTop:8}},o.estimated_value):null,
+          o.incumbent?e('div',{style:{fontSize:11,color:TEXT_D,marginTop:4}},'Incumbent: '+o.incumbent):null
         )
+      ),
+      // Completeness indicators
+      e('div',{style:{display:'flex',gap:12,marginTop:12,paddingTop:8,borderTop:'1px solid '+BORDER}},
+        [{k:'scope_analysis',l:'SCOPE'},{k:'research_brief',l:'INTEL'},{k:'financial_analysis',l:'FIN'},{k:'staffing_plan',l:'STAFF'},{k:'proposal_content',l:'PROP'}].map(function(f){
+          var has=det[f.k]&&det[f.k].length>50;
+          return e('span',{key:f.k,style:{fontSize:10,color:has?GREEN:TEXT_D,fontWeight:'bold',letterSpacing:1}},(has?'✓':'—')+' '+f.l);
+        })
       )
     ),
 
-    // Scope + Executive Summary
-    o.scope_analysis?e(Card,null,e(Label,{text:'SCOPE ANALYSIS'}),e('div',{style:{fontSize:12,whiteSpace:'pre-wrap',maxHeight:300,overflowY:'auto',lineHeight:1.6}},o.scope_analysis.substring(0,3000))):null,
-    o.description?e(Card,null,e(Label,{text:'EXECUTIVE SUMMARY'}),e('div',{style:{fontSize:12,whiteSpace:'pre-wrap',lineHeight:1.6}},o.description.substring(0,2000))):null,
+    // Embedded sections (expandable)
+    e(Section,{skey:'scope',label:'SCOPE ANALYSIS',content:det.scope_analysis}),
+    e(Section,{skey:'exec',label:'EXECUTIVE SUMMARY',content:det.description||det.capture_action}),
+    e(Section,{skey:'research',label:'RESEARCH & COMPETITIVE INTEL',content:det.research_brief}),
+    e(Section,{skey:'financial',label:'FINANCIAL ANALYSIS',content:det.financial_analysis}),
+    e(Section,{skey:'staffing',label:'STAFFING PLAN',content:det.staffing_plan}),
 
     // GO/NO-GO
-    (o.capture_action||o.why_hgi_wins)?e(Card,null,
+    (det.capture_action||det.why_hgi_wins)?e(Card,null,
       e(Label,{text:'GO / NO-GO ASSESSMENT'}),
-      o.why_hgi_wins?e('div',{style:{marginBottom:8}},e('strong',{style:{color:GREEN}},'WHY HGI WINS: '),o.why_hgi_wins):null,
-      o.key_requirements?e('div',{style:{marginBottom:8}},e('strong',{style:{color:ORANGE}},'KEY REQUIREMENTS: '),o.key_requirements):null,
-      o.capture_action?e('div',null,e('strong',{style:{color:CYAN}},'CAPTURE ACTION: '),o.capture_action):null
+      det.why_hgi_wins?e('div',{style:{marginBottom:8}},e('strong',{style:{color:GREEN}},'WHY HGI WINS: '),det.why_hgi_wins):null,
+      det.key_requirements?e('div',{style:{marginBottom:8}},e('strong',{style:{color:ORANGE}},'KEY REQUIREMENTS: '),det.key_requirements):null,
+      det.capture_action?e('div',null,e('strong',{style:{color:CYAN}},'CAPTURE ACTION: '),det.capture_action.substring(0,500)):null
     ):null,
+
+    // HGI Fit Analysis
+    fitAnalysis?e(AIOut,{content:fitAnalysis,loading:fitLoading,label:'HGI FIT ANALYSIS'}):null,
 
     // Actions
     e(Card,null,
       e(Label,{text:'ACTIONS'}),
       e('div',{style:{display:'flex',gap:8,flexWrap:'wrap'}},
-        e(Btn,{onClick:runOrchestration,disabled:orchLoading},'⚡ Re-Run Full Analysis'),
-        e(Btn,{onClick:runResearch,disabled:loading,variant:'ghost'},'◉ Run Full Research'),
+        e(Btn,{onClick:runOrchestration,disabled:orchLoading},orchLoading?'Running...':'⚡ Re-Run Full Analysis'),
+        e(Btn,{onClick:runResearch,disabled:loading,variant:'ghost'},loading?'Researching...':'◉ Run Full Research'),
+        e(Btn,{onClick:runFitAnalysis,disabled:fitLoading,variant:'ghost'},fitLoading?'Analyzing...':'🎯 HGI Fit Analysis'),
         e(Btn,{onClick:function(){p.nav('scoring');pl.select(o)},variant:'ghost'},'◆ Score Winnability'),
         e(Btn,{onClick:function(){p.nav('proposal');pl.select(o)},variant:'ghost'},'✦ Start Proposal'),
         o.source_url?e(Btn,{onClick:function(){window.open(o.source_url)},variant:'ghost'},'🔗 Source'):null
       )
     ),
 
-    orchResult?e(AIOut,{content:JSON.stringify(orchResult,null,2),label:'ORCHESTRATION RESULT'}):null,
+    // Orchestration result
+    orchResult?e(Card,{style:{background:GREEN+'11',borderColor:GREEN+'33'}},
+      e(Label,{text:'ORCHESTRATION TRIGGERED'}),
+      e('div',{style:{fontSize:12,color:GREEN}},'✓ Full analysis started. The organism will run scope→financial→research→winnability. Results will appear in the sections above within 1-2 minutes.'),
+      e('div',{style:{marginTop:8}},e(Btn,{onClick:function(){fetch('/api/opportunity-detail?id='+encodeURIComponent(o.id)).then(function(r){return r.json()}).then(function(d){setDetail(d)})},variant:'ghost',small:true},'⟳ Refresh Data'))
+    ):null,
+
     analysis?e(AIOut,{content:analysis,loading:loading,label:'RESEARCH BRIEF'}):null
   );
 }
@@ -1742,10 +1815,12 @@ function ResearchAnalysisModule(p){
 function WinnabilityScoringModule(p){
   var pl=p.pl;
   var st1=useState({title:'',agency:'',value:'$50M',type:'',incumbent:'',competitors:'',teaming:'',timeline:'near'}),form=st1[0],setForm=st1[1];
-  var st2=useState({pastPerf:5,budget:5,timeline:5}),factors=st2[0],setFactors=st2[1];
+  var st2=useState({pastPerf:5,relationship:5,technical:5}),factors=st2[0],setFactors=st2[1];
   var st3=useState(''),addContext=st3[0],setAddContext=st3[1];
   var st4=useState(null),result=st4[0],setResult=st4[1];
   var st5=useState(false),loading=st5[0],setLoading=st5[1];
+  var st6=useState(null),simulation=st6[0],setSimulation=st6[1];
+  var st7=useState(false),simLoading=st7[0],setSimLoading=st7[1];
 
   useEffect(function(){
     if(pl.selected){
@@ -1763,12 +1838,34 @@ function WinnabilityScoringModule(p){
       'Title: '+form.title+'\nAgency: '+form.agency+'\nValue: '+form.value+'\nType: '+form.type+
       '\nIncumbent: '+form.incumbent+'\nCompetitors: '+form.competitors+'\nTeaming: '+form.teaming+
       '\nTimeline: '+form.timeline+
-      '\nScoring Factors: Past Performance Match '+factors.pastPerf+'/10, Budget Certainty '+factors.budget+'/10, Timeline Feasibility '+factors.timeline+'/10'+
+      '\nScoring Factors: Past Performance Relevance '+factors.pastPerf+'/10, Relationship Strength '+factors.relationship+'/10, Technical Capability '+factors.technical+'/10'+
       '\nAdditional Context: '+addContext+
-      (pl.selected&&pl.selected.scope_analysis?'\n\nScope: '+pl.selected.scope_analysis.substring(0,1500):'');
+      (pl.selected&&pl.selected.scope_analysis?'\n\nScope: '+pl.selected.scope_analysis.substring(0,1500):'')+
+      '\n\nProvide: 1) Pwin percentage (0-100%), 2) Recommended OPI score (0-100), 3) GO/NO-GO recommendation, 4) Key win themes, 5) Risk factors, 6) Recommended next 3 actions. Be direct and specific to HGI.';
 
-    callClaude(prompt,'You are HGI\'s winnability analyst. Calculate Pwin (0-100%) and recommended OPI score. Include GO/NO-GO recommendation, key win themes, risk factors, and recommended next actions. Be direct and specific.',4000
-    ).then(function(r){setResult(r);setLoading(false)});
+    callClaude(prompt,'You are HGI\'s winnability analyst. Calculate Pwin and OPI based on the 6-factor model: KB match depth, competitive position, relationship strength, staff availability, strategic fit, eval criteria alignment. Be direct and specific.',4000
+    ).then(function(r){
+      setResult(r);setLoading(false);
+      // Extract OPI from response and write back
+      if(pl.selected){
+        var opiMatch=r.match(/OPI[:\s]*(\d{2,3})/i);
+        if(opiMatch){
+          var newOpi=parseInt(opiMatch[1]);
+          if(newOpi>=0&&newOpi<=100){
+            pl.writeBack(pl.selected.id,{opi_score:newOpi,capture_action:r.substring(0,2000)});
+          }
+        }
+      }
+    });
+  }
+
+  function runSimulation(){
+    setSimLoading(true);
+    callClaude('Run a competitive win simulation for: '+form.title+' ('+form.agency+').\n'+
+      'Competitors: '+form.competitors+'\nIncumbent: '+form.incumbent+'\nHGI factors: Past Performance '+factors.pastPerf+'/10, Relationship '+factors.relationship+'/10, Technical '+factors.technical+'/10'+
+      '\n\nSimulate 3 scenarios: 1) Best case (HGI strengths play out), 2) Base case (realistic), 3) Worst case (HGI weaknesses exploited). For each: Pwin %, key driver, what HGI must do differently. Then recommend the single most impactful action to move from base to best case.',
+      null,3000
+    ).then(function(r){setSimulation(r);setSimLoading(false)});
   }
 
   function exportDocx(){
@@ -1803,12 +1900,12 @@ function WinnabilityScoringModule(p){
 
       // RIGHT: Scoring Factors
       e(Card,null,
-        e(Label,{text:'SCORING FACTORS'}),
-        [{k:'pastPerf',l:'HGI PAST PERFORMANCE MATCH'},{k:'budget',l:'BUDGET CERTAINTY'},{k:'timeline',l:'TIMELINE FEASIBILITY'}].map(function(f){
+        e(Label,{text:'SCORING FACTORS (HGI 6-FACTOR MODEL)'}),
+        [{k:'pastPerf',l:'PAST PERFORMANCE RELEVANCE'},{k:'relationship',l:'RELATIONSHIP STRENGTH'},{k:'technical',l:'TECHNICAL CAPABILITY'}].map(function(f){
           return e('div',{key:f.k,style:{marginBottom:16}},
             e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:4}},
               e(Label,{text:f.l}),
-              e('span',{style:{color:GOLD,fontWeight:'bold',fontSize:13}},factors[f.k]+'/10')
+              e('span',{style:{color:factors[f.k]>=7?GREEN:factors[f.k]>=4?GOLD:RED,fontWeight:'bold',fontSize:13}},factors[f.k]+'/10')
             ),
             e('input',{type:'range',min:0,max:10,value:factors[f.k],onChange:function(ev){updateFactor(f.k,ev.target.value)},
               style:{width:'100%',accentColor:GOLD}})
@@ -1816,14 +1913,18 @@ function WinnabilityScoringModule(p){
         }),
         e('div',{style:{marginTop:8}},
           e(Label,{text:'ADDITIONAL CONTEXT'}),
-          e(Textarea,{value:addContext,onChange:function(ev){setAddContext(ev.target.value)},placeholder:'Agency relationships, political context...',rows:4})
+          e(Textarea,{value:addContext,onChange:function(ev){setAddContext(ev.target.value)},placeholder:'Agency relationships, political context, HGI advantages...',rows:4})
         ),
         e(Btn,{onClick:calculate,disabled:loading,style:{width:'100%',marginTop:12,padding:'12px 0'}},loading?'Calculating...':'Calculate Pwin + OPI'),
-        result?e(Btn,{onClick:exportDocx,variant:'ghost',style:{width:'100%',marginTop:8}},'📄 Export .docx'):null
+        e('div',{style:{display:'flex',gap:8,marginTop:8}},
+          result?e(Btn,{onClick:runSimulation,disabled:simLoading,variant:'ghost',style:{flex:1}},simLoading?'Simulating...':'🎲 Win Simulation'):null,
+          result?e(Btn,{onClick:exportDocx,variant:'ghost',style:{flex:1}},'📄 Export .docx'):null
+        )
       )
     ),
 
-    result?e(AIOut,{content:result,loading:loading,label:'WINNABILITY ASSESSMENT'}):null
+    result?e(AIOut,{content:result,loading:loading,label:'WINNABILITY ASSESSMENT'}):null,
+    simulation?e(AIOut,{content:simulation,loading:simLoading,label:'WIN SIMULATION — 3 SCENARIOS'}):null
   );
 }
 
