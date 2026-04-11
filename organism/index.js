@@ -112,7 +112,7 @@ const server = http.createServer(async (req, res) => {
         var urgency = days !== null && days <= 14 ? ' style="color:#d32f2f;font-weight:bold"' : '';
         return '<div style="padding:8px 0;border-bottom:1px solid #eee">' +
           '<div style="display:flex;justify-content:space-between">' +
-          '<strong>' + (o.title || '?').slice(0, 60) + '</strong>' +
+          '<strong>' + (o.title || '?') + '</strong>' +
           '<span style="background:#1a237e;color:#fff;border-radius:12px;padding:2px 8px;font-size:12px">OPI ' + (o.opi_score || '?') + '</span></div>' +
           '<div style="font-size:13px;color:#666;margin-top:2px">' +
           (o.stage || '?') + (days !== null ? ' <span' + urgency + '> | ' + days + ' days</span>' : '') +
@@ -120,7 +120,7 @@ const server = http.createServer(async (req, res) => {
       }).join('');
 
       var alertsHtml = alerts.map(function(a) {
-        return '<div style="padding:6px 0;border-bottom:1px solid #eee;font-size:13px"><strong>' + a.agent + ':</strong> ' + (a.observation || '').slice(0, 200) + '</div>';
+        return '<div style="padding:6px 0;border-bottom:1px solid #eee;font-size:13px"><strong>' + a.agent + ':</strong> ' + (a.observation || '') + '</div>';
       }).join('') || '<div style="color:#666;font-size:13px">No urgent alerts</div>';
 
       var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
@@ -135,8 +135,8 @@ const server = http.createServer(async (req, res) => {
         '<div class="card"><h2>Pipeline (' + pipeline.length + ' opportunities)</h2>' + pipelineHtml + '</div>' +
         '<div class="card"><h2>Alerts</h2>' + alertsHtml + '</div>' +
         '<div class="card"><h2>Dashboard Briefing</h2><pre>' + dashText.replace(/</g, '&lt;') + '</pre></div>' +
-        (execText ? '<div class="card"><h2>Executive Summary</h2><pre>' + execText.replace(/</g, '&lt;').slice(0, 2000) + '</pre></div>' : '') +
-        (huntText ? '<div class="card"><h2>Latest Hunting</h2><pre>' + huntText.replace(/</g, '&lt;').slice(0, 1000) + '</pre></div>' : '') +
+        (execText ? '<div class="card"><h2>Executive Summary</h2><pre>' + execText.replace(/</g, '&lt;') + '</pre></div>' : '') +
+        (huntText ? '<div class="card"><h2>Latest Hunting</h2><pre>' + huntText.replace(/</g, '&lt;') + '</pre></div>' : '') +
         '<div style="text-align:center;color:#999;font-size:11px;padding:12px">HGI Organism V3.4 | Refresh to update</div>' +
         '</body></html>';
 
@@ -290,7 +290,7 @@ const server = http.createServer(async (req, res) => {
           pipeline: { total_active: pipeline.length, by_stage: byStage, avg_opi: pipeline.length ? Math.round(pipeline.reduce(function(a,o){return a+(o.opi_score||0)},0)/pipeline.length) : 0 },
           memory: { total: totalMems, last_24h: recent24h.length, agents_active_24h: Object.keys(agentCounts).length, by_agent_24h: agentCounts },
           hunting: { recent_runs: recentHunts },
-          errors_24h: recentErrors.map(function(e){ return { agent: e.agent, excerpt: (e.observation||'').slice(0,200), time: e.created_at }; }),
+          errors_24h: recentErrors.map(function(e){ return { agent: e.agent, excerpt: (e.observation||''), time: e.created_at }; }),
           cost_estimate: { note: 'Approximate based on agent activity', memories_24h: recent24h.length, est_api_calls_24h: recent24h.length, est_cost_24h_usd: (recent24h.length * 0.015).toFixed(2) }
         }));
       } catch(de) {
@@ -337,14 +337,14 @@ const server = http.createServer(async (req, res) => {
           '<span class="badge" style="background:rgba(255,255,255,0.1);color:#fff">RFP: ' + (o.rfp_document_retrieved?'YES':'NO') + '</span>' +
           '</div></div>';
         sections.forEach(function(s) {
-          html += '<div class="section"><h2>' + s.title + '</h2><pre>' + (s.content||'').replace(/</g,'&lt;').slice(0,15000) + '</pre></div>';
+          html += '<div class="section"><h2>' + s.title + '</h2><pre>' + (s.content||'').replace(/</g,'&lt;') + '</pre></div>';
         });
         if (Object.keys(memsByAgent).length > 0) {
           html += '<div class="section"><h2>Agent Intelligence (' + mems.length + ' memories)</h2>';
           Object.keys(memsByAgent).forEach(function(agent) {
-            memsByAgent[agent].slice(0,3).forEach(function(m) {
+            memsByAgent[agent].forEach(function(m) {
               html += '<div class="mem-card"><div class="mem-agent">' + agent + ' &mdash; ' + (m.memory_type||'') + '</div>' +
-                '<div class="mem-obs">' + (m.observation||'').replace(/</g,'&lt;').slice(0,500) + '</div></div>';
+                '<div class="mem-obs">' + (m.observation||'').replace(/</g,'&lt;') + '</div></div>';
             });
           });
           html += '</div>';
@@ -508,45 +508,56 @@ if (url === '/api/chat' && req.method === 'POST') {
 
   let chatBody = '';
   for await (const chunk of req) chatBody += chunk;
-  const { message: chatMsg, opportunityId: chatOppId } = JSON.parse(chatBody || '{}');
+  const { message: chatMsg, opportunityId: chatOppId, history: chatHistory } = JSON.parse(chatBody || '{}');
   if (!chatMsg) { res.writeHead(400); res.end(JSON.stringify({error:'message required'})); return; }
 
-  // Rich context: recent memories
+  // Rich context: recent memories — FULL observations, no truncation
   const ctxR = await supabase.from('organism_memory').select('agent,observation,memory_type,created_at').order('created_at',{ascending:false}).limit(30);
-  var chatCtx = (ctxR.data||[]).map(m => m.agent+': '+m.observation.slice(0,200)).join('\n');
+  var chatCtx = (ctxR.data||[]).map(m => m.agent+': '+m.observation).join('\n');
 
-  // Focused opportunity context if provided
+  // Focused opportunity context if provided — FULL fields, no truncation
   var chatOppCtx = '';
   if (chatOppId) {
-    var chatOpp = await supabase.from('opportunities').select('title,agency,vertical,opi_score,stage,capture_action,scope_analysis,research_brief,financial_analysis,description,due_date,estimated_value').eq('id', chatOppId).single();
+    var chatOpp = await supabase.from('opportunities').select('title,agency,vertical,opi_score,stage,capture_action,scope_analysis,research_brief,financial_analysis,description,due_date,estimated_value,rfp_text,proposal_content').eq('id', chatOppId).single();
     if (chatOpp.data) {
       var co = chatOpp.data;
-      chatOppCtx = '\n\nFOCUSED OPPORTUNITY:\nTitle: ' + (co.title||'') + '\nAgency: ' + (co.agency||'') + '\nVertical: ' + (co.vertical||'') + '\nOPI: ' + (co.opi_score||0) + '\nStage: ' + (co.stage||'') + '\nDeadline: ' + (co.due_date||'') + '\nValue: ' + (co.estimated_value||'') + '\nDecision: ' + (co.capture_action||'').slice(0,500) + '\nScope: ' + (co.scope_analysis||'').slice(0,500) + '\nResearch: ' + (co.research_brief||'').slice(0,500) + '\nFinancial: ' + (co.financial_analysis||'').slice(0,500);
-      // Per-opp memories
-      var chatOppMem = await supabase.from('organism_memory').select('agent,observation').ilike('opp_id', '%' + chatOppId + '%').order('created_at', { ascending: false }).limit(10);
+      chatOppCtx = '\n\nFOCUSED OPPORTUNITY:\nTitle: ' + (co.title||'') + '\nAgency: ' + (co.agency||'') + '\nVertical: ' + (co.vertical||'') + '\nOPI: ' + (co.opi_score||0) + '\nStage: ' + (co.stage||'') + '\nDeadline: ' + (co.due_date||'') + '\nValue: ' + (co.estimated_value||'') + '\nDecision: ' + (co.capture_action||'') + '\nScope: ' + (co.scope_analysis||'') + '\nResearch: ' + (co.research_brief||'') + '\nFinancial: ' + (co.financial_analysis||'');
+      // Per-opp memories — FULL observations
+      var chatOppMem = await supabase.from('organism_memory').select('agent,observation').eq('opportunity_id', chatOppId).order('created_at', { ascending: false }).limit(20);
       if (chatOppMem.data && chatOppMem.data.length > 0) {
-        chatOppCtx += '\n\nOPP MEMORIES:\n' + chatOppMem.data.map(function(m) { return m.agent + ': ' + m.observation.slice(0, 300); }).join('\n');
+        chatOppCtx += '\n\nOPP MEMORIES:\n' + chatOppMem.data.map(function(m) { return m.agent + ': ' + m.observation; }).join('\n');
       }
     }
   }
 
-  // Pipeline summary
-  var chatPipeline = await supabase.from('opportunities').select('title,agency,opi_score,stage,vertical').eq('status', 'active').order('opi_score', { ascending: false }).limit(20);
-  var chatPipeCtx = '\n\nPIPELINE (' + (chatPipeline.data||[]).length + ' active):\n' + (chatPipeline.data||[]).map(function(o) { return (o.opi_score||0) + ' | ' + (o.stage||'') + ' | ' + (o.title||'').slice(0,50) + ' (' + (o.agency||'') + ')'; }).join('\n');
+  // Pipeline summary — full titles
+  var chatPipeline = await supabase.from('opportunities').select('title,agency,opi_score,stage,vertical,due_date,estimated_value').eq('status', 'active').order('opi_score', { ascending: false }).limit(30);
+  var chatPipeCtx = '\n\nPIPELINE (' + (chatPipeline.data||[]).length + ' active):\n' + (chatPipeline.data||[]).map(function(o) { return (o.opi_score||0) + ' | ' + (o.stage||'') + ' | ' + (o.title||'') + ' (' + (o.agency||'') + ') | Due: ' + (o.due_date||'TBD') + ' | Value: ' + (o.estimated_value||'TBD'); }).join('\n');
+
+  // Build messages array with conversation history
+  var chatMessages = [];
+  if (Array.isArray(chatHistory) && chatHistory.length > 0) {
+    chatHistory.forEach(function(h) {
+      if (h.role === 'user' || h.role === 'assistant') {
+        chatMessages.push({ role: h.role, content: h.content });
+      }
+    });
+  }
+  chatMessages.push({ role: 'user', content: chatMsg });
 
   const chatResp = await anthropic.messages.create({
     model: SONNET,
-    max_tokens: 2048,
-    system: 'You are the HGI Business Development Organism — a 95-year-old minority-owned firm specializing in disaster recovery, TPA/claims, workforce, construction management, grant management, housing, property tax appeals, and program administration. Answer questions about the HGI pipeline, opportunities, competitive intel, and BD strategy. Be concise, direct, and strategic. You have access to all organism intelligence below.\n\n' + HGI.substring(0, 1500) + '\n\nRecent organism memories:\n' + chatCtx + chatOppCtx + chatPipeCtx,
-    messages: [{role:'user',content:chatMsg}]
+    max_tokens: 4096,
+    system: 'You are the HGI Business Development Organism — a 95-year-old minority-owned firm specializing in disaster recovery, TPA/claims, workforce, construction management, grant management, housing, property tax appeals, and program administration. Answer questions about the HGI pipeline, opportunities, competitive intel, and BD strategy. Be concise, direct, and strategic. You have access to all organism intelligence below.\n\n' + HGI + '\n\nRecent organism memories:\n' + chatCtx + chatOppCtx + chatPipeCtx,
+    messages: chatMessages
   });
 
   const chatReply = chatResp.content[0].text;
 
-  // Store meaningful interactions as organism memory
+  // Store meaningful interactions as organism memory — full content
   if (chatMsg.length > 30 && chatReply.length > 100) {
     try {
-      await storeMemory('chat_agent', chatOppId || null, 'chat,interaction', 'User asked: ' + chatMsg.slice(0, 200) + '\nOrganism responded: ' + chatReply.slice(0, 300), 'scratch', null, 'medium');
+      await storeMemory('chat_agent', chatOppId || null, 'chat,interaction', 'User asked: ' + chatMsg.slice(0, 500) + '\nOrganism responded: ' + chatReply.slice(0, 1000), 'scratch', null, 'medium');
     } catch(ce) {}
   }
 
@@ -2549,7 +2560,7 @@ if (url === '/api/exec-brief') {
     var recentMems = await supabase.from('organism_memory').select('agent,observation,created_at')
       .in('agent', ['pipeline_scanner','disaster_monitor','amendment_tracker','dashboard_agent','self_awareness'])
       .order('created_at', { ascending: false }).limit(10);
-    var briefMems = (recentMems.data || []).map(function(m) { return { agent: m.agent, summary: (m.observation || '').slice(0, 300), when: m.created_at }; });
+    var briefMems = (recentMems.data || []).map(function(m) { return { agent: m.agent, summary: (m.observation || ''), when: m.created_at }; });
     
     var alerts = [];
     upcoming.forEach(function(o) {
@@ -2569,7 +2580,7 @@ if (url === '/api/exec-brief') {
       },
       upcoming_deadlines: upcoming.slice(0, 5).map(function(o) {
         var d = o.due_date ? Math.ceil((new Date(o.due_date) - Date.now()) / 86400000) : null;
-        return { title: (o.title || '').slice(0, 80), opi: o.opi_score, stage: o.stage, due: o.due_date, days_remaining: d };
+        return { title: (o.title || ''), opi: o.opi_score, stage: o.stage, due: o.due_date, days_remaining: d };
       }),
       alerts: alerts,
       awaiting_award: submitted.map(function(o) { return { title: o.title, opi: o.opi_score }; }),
@@ -2924,7 +2935,7 @@ if (url.startsWith('/api/phase3')) {
     var grouped = {};
     p3mems.forEach(function(m) {
       if (!grouped[m.agent]) grouped[m.agent] = [];
-      grouped[m.agent].push({ obs: (m.observation||'').substring(0,500), at: m.created_at, type: m.memory_type });
+      grouped[m.agent].push({ obs: (m.observation||''), at: m.created_at, type: m.memory_type });
     });
     // Build category summaries
     var categories = {
