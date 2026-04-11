@@ -671,6 +671,223 @@ function stageColor(s){
   return m[s]||TEXT_D;
 }
 
+
+// ============================================================
+// MANUAL INTAKE (replaces Full Workflow — simpler intake form)
+// ============================================================
+function ManualIntake(p){
+  var pl=p.pl;
+  var st1=useState(''),title=st1[0],setTitle=st1[1];
+  var st2=useState(''),agency=st2[0],setAgency=st2[1];
+  var st3=useState(''),incumbent=st3[0],setIncumbent=st3[1];
+  var st4=useState(''),rfpUrl=st4[0],setRfpUrl=st4[1];
+  var st5=useState(''),context=st5[0],setContext=st5[1];
+  var st6=useState(''),rfpText=st6[0],setRfpText=st6[1];
+  var st7=useState(null),file=st7[0],setFile=st7[1];
+  var st8=useState(false),submitting=st8[0],setSubmitting=st8[1];
+  var st9=useState(null),result=st9[0],setResult=st9[1];
+  var st10=useState(false),extracting=st10[0],setExtracting=st10[1];
+  var st11=useState(null),extractResult=st11[0],setExtractResult=st11[1];
+  var fileRef=useRef(null);
+
+  function handleFile(ev){
+    var f=ev.target.files[0];
+    if(!f)return;
+    setFile(f);
+    setExtracting(true);setExtractResult(null);
+    var reader=new FileReader();
+    reader.onload=function(){
+      var base64=reader.result.split(',')[1];
+      callClaude('Extract the full text from this uploaded document. Return ONLY the extracted text, no commentary.','You are a document extraction assistant. Extract all text faithfully.',8000
+      ).then(function(r){
+        setRfpText(r);setExtractResult('Extracted '+r.length+' characters from '+f.name);setExtracting(false);
+      }).catch(function(){setExtracting(false);setExtractResult('Extraction failed — paste text manually.')});
+    };
+    reader.readAsDataURL(f);
+  }
+
+  function handleSubmit(){
+    if(!title.trim()){alert('Title is required');return}
+    setSubmitting(true);setResult(null);
+    fetch('/api/intake',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        title:title,agency:agency,incumbent:incumbent,source_url:rfpUrl,
+        context:context,rfp_text:rfpText,manual:true
+      })
+    }).then(function(r){return r.json()}).then(function(d){
+      setResult(d);setSubmitting(false);
+      setTitle('');setAgency('');setIncumbent('');setRfpUrl('');setContext('');setRfpText('');setFile(null);
+      pl.refresh();
+    }).catch(function(err){setResult({error:'Submission failed: '+err.message});setSubmitting(false)});
+  }
+
+  return e('div',{style:{padding:'24px 32px',maxWidth:900}},
+    e('h2',{style:{color:GOLD,marginBottom:4}},'Manual Intake'),
+    e('div',{style:{fontSize:12,color:TEXT_D,marginBottom:16}},'Submit a new opportunity. Paste RFP text or upload a document.'),
+
+    // Pipeline selector
+    pl.pipeline.length>0?e('div',{style:{marginBottom:16}},
+      e(OpportunitySelector,{pipeline:pl.pipeline,selected:pl.selected,onSelect:pl.select,loading:pl.loading,label:'EXISTING PIPELINE'})
+    ):e(Card,{style:{background:ORANGE+'15',borderColor:ORANGE+'44'}},
+      e('div',{style:{color:ORANGE,fontSize:12}},'No active opportunities. Submit your first RFP below.')
+    ),
+
+    // Form
+    e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}},
+      e('div',null,e(Label,{text:'OPPORTUNITY TITLE'}),e(Input,{value:title,onChange:function(ev){setTitle(ev.target.value)},placeholder:'e.g. FEMA PA TPA — Jefferson Parish'})),
+      e('div',null,e(Label,{text:'AGENCY'}),e(Input,{value:agency,onChange:function(ev){setAgency(ev.target.value)},placeholder:'e.g. Jefferson Parish OEM'}))
+    ),
+    e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}},
+      e('div',null,e(Label,{text:'KNOWN INCUMBENT'}),e(Input,{value:incumbent,onChange:function(ev){setIncumbent(ev.target.value)},placeholder:'e.g. ICF / None / Unknown'})),
+      e('div',null,e(Label,{text:'RFP URL (optional)'}),e(Input,{value:rfpUrl,onChange:function(ev){setRfpUrl(ev.target.value)},placeholder:'https://...'}))
+    ),
+    e('div',{style:{marginBottom:12}},
+      e(Label,{text:'RELATIONSHIP INTEL / CONTEXT'}),
+      e(Textarea,{value:context,onChange:function(ev){setContext(ev.target.value)},placeholder:'Known relationships, budget intel, political context...',rows:3})
+    ),
+    e('div',{style:{marginBottom:12}},
+      e(Label,{text:'RFP / SOLICITATION TEXT'}),
+      e('div',{style:{marginBottom:8}},
+        e(Btn,{onClick:function(){fileRef.current&&fileRef.current.click()},variant:'ghost',small:true},'📎 Upload PDF / Word / TXT'),
+        e('input',{ref:fileRef,type:'file',accept:'.pdf,.docx,.doc,.txt',onChange:handleFile,style:{display:'none'}}),
+        file?e('span',{style:{marginLeft:8,fontSize:11,color:CYAN}},file.name):null,
+        extracting?e('span',{style:{marginLeft:8,fontSize:11,color:GOLD,animation:'pulse 1.5s infinite'}},' Extracting...'):null,
+        extractResult?e('span',{style:{marginLeft:8,fontSize:11,color:GREEN}},extractResult):null
+      ),
+      e(Textarea,{value:rfpText,onChange:function(ev){setRfpText(ev.target.value)},placeholder:'Paste RFP text here, or upload a file above...',rows:10})
+    ),
+
+    e(Btn,{onClick:handleSubmit,disabled:submitting||!title.trim(),style:{width:'100%',padding:'12px 0',fontSize:14}},
+      submitting?'Submitting...':'Submit to Pipeline'
+    ),
+
+    result?e(Card,{style:{marginTop:16,background:result.error?RED+'15':GREEN+'15',borderColor:result.error?RED+'44':GREEN+'44'}},
+      e('div',{style:{color:result.error?RED:GREEN,fontSize:13,fontWeight:'bold'}},
+        result.error||'✓ Opportunity submitted successfully. OPI: '+(result.opi_score||result.opi||'scoring...')
+      ),
+      !result.error?e(Btn,{onClick:function(){p.nav('tracker')},variant:'ghost',small:true,style:{marginTop:8}},'View in Pipeline →'):null
+    ):null
+  );
+}
+
+// ============================================================
+// SYSTEM CHAT
+// ============================================================
+function SystemChat(p){
+  var pl=p.pl;
+  var st1=useState([]),messages=st1[0],setMessages=st1[1];
+  var st2=useState(''),input=st2[0],setInput=st2[1];
+  var st3=useState(false),sending=st3[0],setSending=st3[1];
+  var st4=useState(null),memoryToast=st4[0],setMemoryToast=st4[1];
+  var chatEndRef=useRef(null);
+
+  useEffect(function(){
+    if(chatEndRef.current)chatEndRef.current.scrollIntoView({behavior:'smooth'});
+  },[messages]);
+
+  var quickActions=[
+    {label:'Pipeline summary',prompt:'Give me a summary of the current pipeline — how many opportunities, which are highest priority, any upcoming deadlines.'},
+    {label:'What should I focus on today?',prompt:'Based on the current pipeline and deadlines, what should I focus on today? Give me 3 specific actions.'},
+    {label:'Competitive landscape',prompt:'Summarize the competitive landscape across our active opportunities. Who are the main competitors and what are our advantages?'},
+    {label:'System status',prompt:'What is the current status of the organism? How many agents, recent activity, any issues?'}
+  ];
+
+  function sendMessage(text){
+    if(!text.trim())return;
+    var newMsg={role:'user',content:text,timestamp:new Date().toISOString()};
+    var updated=messages.concat([newMsg]);
+    setMessages(updated);
+    setInput('');
+    setSending(true);
+
+    var oppCtx='';
+    if(pl.selected){
+      oppCtx='\n\nCurrently focused opportunity: '+pl.selected.title+' (OPI: '+(pl.selected.opi_score||'?')+', Agency: '+(pl.selected.agency||'?')+')';
+    }
+
+    fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        message:text+oppCtx,
+        history:messages.slice(-6).map(function(m){return{role:m.role,content:m.content}})
+      })
+    }).then(function(r){return r.json()}).then(function(d){
+      var response=d.response||d.content||'No response received.';
+      var assistantMsg={role:'assistant',content:response,timestamp:new Date().toISOString()};
+      setMessages(function(prev){return prev.concat([assistantMsg])});
+      setSending(false);
+
+      // Memory toast
+      if(d.memory_stored||d.stored){
+        setMemoryToast('Memory stored: organism is learning from this conversation');
+        setTimeout(function(){setMemoryToast(null)},4000);
+      }
+    }).catch(function(){
+      setMessages(function(prev){return prev.concat([{role:'assistant',content:'Connection error. Try again.',timestamp:new Date().toISOString()}])});
+      setSending(false);
+    });
+  }
+
+  function handleKeyDown(ev){
+    if(ev.key==='Enter'&&!ev.shiftKey){
+      ev.preventDefault();
+      sendMessage(input);
+    }
+  }
+
+  return e('div',{style:{padding:'24px 32px',maxWidth:900,display:'flex',flexDirection:'column',height:'calc(100vh - 60px)'}},
+    e('h2',{style:{color:GOLD,marginBottom:4}},'System Chat'),
+    e('div',{style:{fontSize:12,color:TEXT_D,marginBottom:12}},'Talk to the organism. It has full context on your pipeline, intelligence, and history.'),
+
+    // Quick actions
+    e('div',{style:{display:'flex',gap:6,marginBottom:12,flexWrap:'wrap'}},
+      quickActions.map(function(qa){
+        return e(Btn,{key:qa.label,onClick:function(){sendMessage(qa.prompt)},variant:'ghost',small:true},qa.label);
+      })
+    ),
+
+    // Opportunity context
+    pl.selected?e('div',{style:{fontSize:11,color:CYAN,marginBottom:8,padding:'4px 8px',background:CYAN+'11',borderRadius:4}},
+      '◎ Context: '+pl.selected.title+' (OPI '+pl.selected.opi_score+')'
+    ):null,
+
+    // Messages
+    e('div',{style:{flex:1,overflowY:'auto',marginBottom:12,padding:8}},
+      messages.length===0?e('div',{style:{color:TEXT_D,textAlign:'center',padding:40}},'Ask the organism anything about your pipeline, opportunities, or strategy.'):
+      messages.map(function(m,i){
+        var isUser=m.role==='user';
+        return e('div',{key:i,style:{marginBottom:12,display:'flex',justifyContent:isUser?'flex-end':'flex-start'}},
+          e('div',{style:{
+            maxWidth:'75%',padding:'10px 14px',borderRadius:isUser?'12px 12px 2px 12px':'12px 12px 12px 2px',
+            background:isUser?GOLD+'22':BG3,border:'1px solid '+(isUser?GOLD+'33':BORDER),fontSize:13,lineHeight:1.6,whiteSpace:'pre-wrap'
+          }},
+            m.content,
+            m.timestamp?e('div',{style:{fontSize:9,color:TEXT_D,marginTop:4,textAlign:'right'}},new Date(m.timestamp).toLocaleTimeString()):null
+          )
+        );
+      }),
+      sending?e('div',{style:{display:'flex',justifyContent:'flex-start',marginBottom:12}},
+        e('div',{style:{padding:'10px 14px',borderRadius:12,background:BG3,border:'1px solid '+BORDER,color:GOLD,animation:'pulse 1.5s infinite',fontSize:13}},'Thinking...')
+      ):null,
+      e('div',{ref:chatEndRef})
+    ),
+
+    // Memory toast
+    memoryToast?e('div',{style:{position:'fixed',bottom:80,right:32,background:GREEN+'22',border:'1px solid '+GREEN+'44',borderRadius:8,padding:'8px 16px',fontSize:12,color:GREEN,zIndex:300}},
+      '🧠 '+memoryToast
+    ):null,
+
+    // Input
+    e('div',{style:{display:'flex',gap:8}},
+      e('textarea',{value:input,onChange:function(ev){setInput(ev.target.value)},onKeyDown:handleKeyDown,
+        placeholder:'Ask the organism...',rows:2,
+        style:{flex:1,background:BG3,color:TEXT,border:'1px solid '+BORDER,borderRadius:8,padding:'10px 14px',fontSize:13,fontFamily:'Georgia,serif',outline:'none',resize:'none'}
+      }),
+      e(Btn,{onClick:function(){sendMessage(input)},disabled:sending||!input.trim(),style:{alignSelf:'flex-end'}},'Send')
+    ),
+    e('div',{style:{fontSize:10,color:TEXT_D,marginTop:4}},'Enter to send · Shift+Enter for newline')
+  );
+}
+
 function PlaceholderModule(p){
   return e('div',{style:{padding:'40px 32px'}},
     e('h2',{style:{color:GOLD,marginBottom:8}},p.title),
@@ -729,6 +946,8 @@ function App(){
   function renderModule(){
     if(active==='dashboard')return e(Dashboard,{pl:pl,nav:nav});
     if(active==='tracker')return e(PipelineTracker,{pl:pl,nav:nav});
+    if(active==='intake')return e(ManualIntake,{pl:pl,nav:nav});
+    if(active==='chat')return e(SystemChat,{pl:pl,nav:nav});
     var mod=modules.find(function(m){return m.key===active});
     return e(PlaceholderModule,{title:mod?mod.label:active,pl:pl});
   }
