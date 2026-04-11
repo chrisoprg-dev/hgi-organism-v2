@@ -2687,16 +2687,23 @@ function KnowledgeBaseModule(p){
   var fileRef=useRef(null);
 
   useEffect(function(){
-    fetch('/api/kb-extract').then(function(r){return r.json()}).then(function(d){setDocs(Array.isArray(d)?d:d.documents||[])}).catch(function(){});
+    fetch('/api/kb-documents').then(function(r){return r.json()}).then(function(d){setDocs(Array.isArray(d)?d:d.documents||[])}).catch(function(){});
   },[]);
 
   function handleUpload(ev){
     var f=ev.target.files[0];
     if(!f)return;
     setUploading(f.name);
-    var formData=new FormData();
-    formData.append('file',f);
-    fetch('/api/intake',{method:'POST',body:formData}).then(function(){setUploading(null)}).catch(function(){setUploading(null)});
+    var reader=new FileReader();
+    reader.onload=function(){
+      var text=reader.result;
+      fetch('/api/kb-extract',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:f.name,content:text,vertical:'general'})}).then(function(r){return r.json()}).then(function(d){
+        setUploading(null);
+        fetch('/api/kb-documents').then(function(r){return r.json()}).then(function(d2){setDocs(Array.isArray(d2)?d2:d2.documents||[])});
+      }).catch(function(){setUploading(null)});
+    };
+    reader.onerror=function(){setUploading(null)};
+    reader.readAsText(f);
   }
 
   return e('div',{style:{padding:'24px 32px',maxWidth:1000}},
