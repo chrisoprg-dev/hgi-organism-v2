@@ -2642,6 +2642,57 @@ if (url === '/api/record-outcome' && req.method === 'POST') {
   return;
 }
 
+// === MANUAL INTAKE — /api/intake ===
+if (url === '/api/intake' && req.method === 'POST') {
+  var body = '';
+  req.on('data', function(c) { body += c; });
+  req.on('end', async function() {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    try {
+      var params = JSON.parse(body);
+      if (!params.title) { res.end(JSON.stringify({ error: 'title required' })); return; }
+      var newId = 'manual-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+      await supabase.from('opportunities').insert({
+        id: newId, title: params.title, agency: params.agency || null, vertical: params.type || params.vertical || null,
+        opi_score: parseInt(params.opi) || 50, status: 'active', stage: params.stage || 'identified',
+        source: 'manual', source_url: params.source_url || null, estimated_value: params.value || null,
+        due_date: params.deadline || null, description: params.notes || params.context || null,
+        rfp_text: params.rfp_text || null, incumbent: params.incumbent || null,
+        discovered_at: new Date().toISOString(), last_updated: new Date().toISOString()
+      });
+      log('MANUAL INTAKE: ' + params.title.slice(0, 60) + ' (OPI ' + (params.opi || 50) + ')');
+      res.end(JSON.stringify({ success: true, id: newId }));
+    } catch (e) { res.end(JSON.stringify({ error: e.message })); }
+  });
+  return;
+}
+
+// === UPDATE OPPORTUNITY — /api/update-opportunity ===
+// Generic field update for any opportunity fields (edit, save-on-blur, archive/delete)
+if (url === '/api/update-opportunity' && req.method === 'POST') {
+  var body = '';
+  req.on('data', function(c) { body += c; });
+  req.on('end', async function() {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    try {
+      var params = JSON.parse(body);
+      if (!params.id) { res.end(JSON.stringify({ error: 'id required' })); return; }
+      var id = params.id;
+      delete params.id;
+      // Whitelist allowed fields
+      var allowed = ['title','agency','vertical','opi_score','stage','status','estimated_value','due_date','description',
+        'source_url','rfp_document_url','oral_presentation_date','award_notification_date','outcome_notes',
+        'capture_strategy','capture_action','incumbent','notes'];
+      var upd = { last_updated: new Date().toISOString() };
+      allowed.forEach(function(f) { if (params[f] !== undefined) upd[f] = params[f]; });
+      await supabase.from('opportunities').update(upd).eq('id', id);
+      log('UPDATE-OPP: ' + id.slice(0, 40) + ' fields: ' + Object.keys(upd).join(','));
+      res.end(JSON.stringify({ success: true, updated: Object.keys(upd) }));
+    } catch (e) { res.end(JSON.stringify({ error: e.message })); }
+  });
+  return;
+}
+
 // === UPDATE STAGE — /api/update-stage ===
 if (url === '/api/update-stage' && req.method === 'POST') {
   var body = '';
@@ -3857,12 +3908,17 @@ if (url.startsWith('/api/proposal-doc')) {
   return;
 }
 // === EXPORT OPPORTUNITY DECISION BRIEF — /api/export-opportunity ===
-if (url.startsWith('/api/export-opportunity') && method === 'POST') {
+if (url.startsWith('/api/export-opportunity')) {
   try {
     var eoBody = '';
-    await new Promise(function(resolve) { req.on('data', function(c) { eoBody += c; }); req.on('end', resolve); });
-    var eoData = JSON.parse(eoBody || '{}');
-    var eoId = eoData.opportunityId || eoData.id || '';
+    var eoId = '';
+    if (method === 'GET') {
+      eoId = (url.split('?id=')[1] || '').split('&')[0];
+    } else {
+      await new Promise(function(resolve) { req.on('data', function(c) { eoBody += c; }); req.on('end', resolve); });
+      var eoData = JSON.parse(eoBody || '{}');
+      eoId = eoData.opportunityId || eoData.id || '';
+    }
     if (!eoId) { res.writeHead(400); res.end(JSON.stringify({ error: 'opportunityId required' })); return; }
     var eoOpp = await supabase.from('opportunities').select('*').eq('id', eoId).single();
     if (!eoOpp.data) { res.writeHead(404); res.end(JSON.stringify({ error: 'Opportunity not found' })); return; }
