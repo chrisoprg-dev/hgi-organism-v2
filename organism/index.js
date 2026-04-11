@@ -1638,7 +1638,7 @@ if (url.startsWith('/api/contacts')) {
       try {
         var p = JSON.parse(body);
         if (!p.contact_name) { res.end(JSON.stringify({error:'contact_name required'})); return; }
-        var ins = { contact_name: p.contact_name, title: p.title||null, organization: p.organization||null, agency: p.agency||null, email: p.email||null, phone: p.phone||null, contact_type: p.contact_type||'client', priority: p.priority||'medium', hgi_relationship: p.hgi_relationship||'new', notes: p.notes||null, opportunity_id: p.opportunity_id||null, updated_at: new Date().toISOString() };
+        var ins = { id: 'ct-'+Date.now()+'-'+Math.random().toString(36).slice(2,6), contact_name: p.contact_name, title: p.title||null, organization: p.organization||null, agency: p.agency||null, email: p.email||null, phone: p.phone||null, contact_type: p.contact_type||'client', priority: p.priority||'medium', hgi_relationship: p.hgi_relationship||'new', notes: p.notes||null, opportunity_id: p.opportunity_id||null, updated_at: new Date().toISOString(), created_at: new Date().toISOString() };
         var r = await supabase.from('relationship_graph').insert(ins);
         if (r.error) { res.end(JSON.stringify({error:r.error.message})); return; }
         res.end(JSON.stringify({success:true}));
@@ -1957,7 +1957,7 @@ if (url.startsWith('/api/recompetes')) {
 if (url.startsWith('/api/kb-documents')) {
   res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
   try {
-    var kdr = await supabase.from('knowledge_documents').select('id,filename,document_class,vertical,status,chunk_count,created_at,updated_at').order('created_at',{ascending:false}).limit(100);
+    var kdr = await supabase.from('knowledge_documents').select('id,filename,document_class,vertical,status,chunk_count,uploaded_at,processed_at').order('uploaded_at',{ascending:false}).limit(100);
     res.end(JSON.stringify({ total: (kdr.data||[]).length, documents: kdr.data || [] }));
   } catch(e) { res.end(JSON.stringify({error:e.message})); }
   return;
