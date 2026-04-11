@@ -930,7 +930,7 @@ function PipelineTracker(p){
     filtered.map(function(o){
       var isExpanded=expanded===o.id;
       var sc=o.opi_score||0;
-      var daysLeft=o.deadline?Math.ceil((new Date(o.deadline)-new Date())/(1000*60*60*24)):null;
+      var daysLeft=o.due_date?Math.ceil((new Date(o.due_date)-new Date())/(1000*60*60*24)):null;
       var sc_color=stageColor(o.stage);
       var det=oppDetails[o.id]||o;
       var mems=oppMemories[o.id]||[];
@@ -984,7 +984,7 @@ function PipelineTracker(p){
               // LEFT: Details
               e('div',null,
                 e(Label,{text:'OPPORTUNITY DETAILS'}),
-                [{l:'Agency',v:o.agency},{l:'Type',v:o.type||o.vertical},{l:'Value',v:o.estimated_value},{l:'Deadline',v:o.deadline},{l:'Decision',v:det.capture_action?det.capture_action.substring(0,200):''},{l:'OPI',v:sc},{l:'Added',v:o.created_at?new Date(o.created_at).toLocaleDateString():''},{l:'Source URL',v:o.source_url?e('a',{href:o.source_url,target:'_blank',style:{color:CYAN,textDecoration:'none'}},'View Original RFP ↗'):''},{l:'RFP Doc URL',v:det.rfp_document_url?e('a',{href:det.rfp_document_url,target:'_blank',style:{color:CYAN,textDecoration:'none'}},'Download ↗'):''}].map(function(d){
+                [{l:'Agency',v:o.agency},{l:'Type',v:o.type||o.vertical},{l:'Value',v:o.estimated_value},{l:'Deadline',v:o.due_date},{l:'Decision',v:det.capture_action?det.capture_action.substring(0,200):''},{l:'OPI',v:sc},{l:'Added',v:o.created_at?new Date(o.created_at).toLocaleDateString():''},{l:'Source URL',v:o.source_url?e('a',{href:o.source_url,target:'_blank',style:{color:CYAN,textDecoration:'none'}},'View Original RFP ↗'):''},{l:'RFP Doc URL',v:det.rfp_document_url?e('a',{href:det.rfp_document_url,target:'_blank',style:{color:CYAN,textDecoration:'none'}},'Download ↗'):''}].map(function(d){
                   return d.v?e('div',{key:d.l,style:{display:'flex',justifyContent:'space-between',padding:'4px 0',fontSize:12,borderBottom:'1px solid '+BORDER}},
                     e('span',{style:{color:TEXT_D}},d.l),e('span',null,d.v)
                   ):null;
@@ -1160,7 +1160,7 @@ function OpportunityDetail(p){
         e('div',null,
           e('div',{style:{fontSize:36,fontWeight:'bold',color:sc>=90?GREEN:sc>=75?CYAN:GOLD}},sc),
           e('h2',{style:{margin:'4px 0',fontSize:18}},o.title),
-          e('div',{style:{fontSize:12,color:TEXT_D}},o.agency,' · ',o.vertical||'',o.deadline?' · Due '+o.deadline:'')
+          e('div',{style:{fontSize:12,color:TEXT_D}},o.agency,' · ',o.vertical||'',o.due_date?' · Due '+o.due_date:'')
         ),
         e('div',{style:{textAlign:'right'}},
           o.stage?e(Badge,{color:stageColor(o.stage)},o.stage):null,
@@ -1641,7 +1641,7 @@ function OpportunityBriefModule(p){
   var o=pl.selected;
   var det=detail||o;
   var sc=o.opi_score||0;
-  var daysLeft=o.deadline?Math.ceil((new Date(o.deadline)-new Date())/(1000*60*60*24)):null;
+  var daysLeft=o.due_date?Math.ceil((new Date(o.due_date)-new Date())/(1000*60*60*24)):null;
 
   function toggleSection(key){var c=Object.assign({},expanded);c[key]=!c[key];setExpanded(c)}
 
@@ -2868,7 +2868,7 @@ function DiscoverySignals(){
     setLoading(true);
     Promise.all([
       fetch('/api/memories?agent=disaster_monitor&limit=10').then(function(r){return r.json()}),
-      fetch('/api/memories?agent=budget_tracker&limit=10').then(function(r){return r.json()}),
+      fetch('/api/memories?agent=budget_cycle&limit=10').then(function(r){return r.json()}),
       fetch('/api/memories?agent=regulatory_monitor&limit=10').then(function(r){return r.json()})
     ]).then(function(results){
       var all=[];
@@ -2877,7 +2877,7 @@ function DiscoverySignals(){
       setSignals(all);setLoading(false);
     }).catch(function(){setLoading(false)});
   },[]);
-  var icons={'disaster_monitor':'🌊','budget_tracker':'💰','regulatory_monitor':'📋'};
+  var icons={'disaster_monitor':'🌊','budget_cycle':'💰','regulatory_monitor':'📋'};
   return e('div',null,
     e(Card,null,e(Label,{text:'DISASTER · BUDGET · REGULATORY SIGNALS ('+signals.length+')'}),
       loading?e('div',{style:{color:TEXT_D,textAlign:'center',padding:20}},'Loading signals...'):
@@ -2911,7 +2911,7 @@ function DiscoveryRetrieve(p){
   }
 
   var pipeline=pl&&pl.pipeline?pl.pipeline:[];
-  var noDoc=pipeline.filter(function(o){return o.status==='active'&&(!o.rfp_text||o.rfp_text.length<500)});
+  var noDoc=pipeline.filter(function(o){return o.status==='active'&&!o.rfp_document_retrieved});
 
   return e('div',null,
     e(Label,{text:'RETRIEVE & ANALYZE DOCUMENTS'}),
@@ -3059,14 +3059,14 @@ function PipelineScannerModule(p){
 
   var pipeline=pl.pipeline||[];
   var now=new Date();
-  var deadlines=pipeline.filter(function(o){return o.deadline&&o.status==='active'}).map(function(o){
-    var d=new Date(o.deadline),diff=Math.ceil((d-now)/(1000*60*60*24));
+  var deadlines=pipeline.filter(function(o){return o.due_date&&o.status==='active'}).map(function(o){
+    var d=new Date(o.due_date),diff=Math.ceil((d-now)/(1000*60*60*24));
     return Object.assign({},o,{days_left:diff});
   }).sort(function(a,b){return a.days_left-b.days_left});
   var urgent=deadlines.filter(function(o){return o.days_left<=14&&o.days_left>0});
   var overdue=deadlines.filter(function(o){return o.days_left<=0});
   var recompetes=pipeline.filter(function(o){return(o.scope_analysis||'').toLowerCase().indexOf('recompete')>-1||(o.title||'').toLowerCase().indexOf('recompete')>-1});
-  var noRfp=pipeline.filter(function(o){return o.status==='active'&&(!o.rfp_text||o.rfp_text.length<500)&&(o.stage==='identified'||o.stage==='pursuing')});
+  var noRfp=pipeline.filter(function(o){return o.status==='active'&&!o.rfp_document_retrieved&&(o.stage==='identified'||o.stage==='pursuing')});
 
   return e('div',{style:{padding:'24px 32px',maxWidth:1100}},
     e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:16}},
