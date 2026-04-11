@@ -195,7 +195,12 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url === '/api/memories') {
-      const r = await supabase.from('organism_memory').select('agent,observation,memory_type,created_at,opportunity_id').neq('memory_type','decision_point').order('created_at', { ascending: false }).limit(100);
+      var mParams = new URL(req.url, 'http://x').searchParams;
+      var mAgent = mParams.get('agent');
+      var mLimit = parseInt(mParams.get('limit')) || 100;
+      var mQ = supabase.from('organism_memory').select('agent,observation,memory_type,created_at,opportunity_id').neq('memory_type','decision_point').order('created_at', { ascending: false }).limit(mLimit);
+      if (mAgent) mQ = mQ.eq('agent', mAgent);
+      const r = await mQ;
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(r.data || []));
       return;
