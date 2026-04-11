@@ -556,23 +556,44 @@ function Dashboard(p){
 // ============================================================
 // PIPELINE TRACKER
 // ============================================================
+// Styled Modal overlay (reusable, not browser confirm/prompt)
+function PTModal(pp){
+  if(!pp.show)return null;
+  return e('div',{style:{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.7)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:16},onClick:function(ev){if(ev.target===ev.currentTarget&&pp.onClose)pp.onClose()}},
+    e('div',{style:{background:BG2,border:'1px solid '+BORDER,borderRadius:8,padding:24,maxWidth:pp.wide?700:480,width:'100%',maxHeight:'85vh',overflowY:'auto'}},pp.children)
+  );
+}
+
 function PipelineTracker(p){
   var pl=p.pl;
   var st1=useState('all'),stageFilter=st1[0],setStageFilter=st1[1];
   var st2=useState(null),expanded=st2[0],setExpanded=st2[1];
   var st3=useState(false),showAdd=st3[0],setShowAdd=st3[1];
-  var st4=useState(null),editing=st4[0],setEditing=st4[1];
-  var st5=useState(null),intelTab=st5[0],setIntelTab=st5[1];
   var st6=useState(null),detailOpp=st6[0],setDetailOpp=st6[1];
   var st7=useState(null),captureStrategy=st7[0],setCaptureStrategy=st7[1];
   var st8=useState(false),csLoading=st8[0],setCsLoading=st8[1];
-
-  // Add form state
   var st9=useState({title:'',agency:'',type:'',value:'',deadline:'',notes:'',stage:'identified',opi:50}),addForm=st9[0],setAddForm=st9[1];
+
+  // Modal states
+  var stM1=useState(null),stageModal=stM1[0],setStageModal=stM1[1]; // {opp,stage}
+  var stM2=useState(null),outcomeModal=stM2[0],setOutcomeModal=stM2[1]; // {opp,outcome}
+  var stM3=useState({winner:'',theirPrice:'',ourPrice:'',notes:''}),lossFields=stM3[0],setLossFields=stM3[1];
+  var stM4=useState(null),editModal=stM4[0],setEditModal=stM4[1]; // opp being edited
+  var stM5=useState({title:'',agency:'',type:'',value:'',deadline:'',notes:'',stage:'',opi:''}),editForm=stM5[0],setEditForm=stM5[1];
+  var stM6=useState(null),deleteModal=stM6[0],setDeleteModal=stM6[1]; // opp to delete
+  var stM7=useState(null),lossAnalysisOpp=stM7[0],setLossAnalysisOpp=stM7[1]; // standalone loss analysis
+  var stM8=useState({winner_name:'',winner_amount:'',our_bid_amount:'',notes:''}),laForm=stM8[0],setLaForm=stM8[1];
+  var stM9=useState(false),laSubmitted=stM9[0],setLaSubmitted=stM9[1];
+  var stM10=useState(null),toastMsg=stM10[0],setToastMsg=stM10[1];
+
+  // Per-opp expand sub-tab + intel tab + memories
+  var stE1=useState('overview'),expSubTab=stE1[0],setExpSubTab=stE1[1];
+  var stE2=useState('winnability'),expIntelTab=stE2[0],setExpIntelTab=stE2[1];
+  var stE3=useState({}),oppMemories=stE3[0],setOppMemories=stE3[1]; // keyed by opp id
+  var stE4=useState({}),oppDetails=stE4[0],setOppDetails=stE4[1]; // keyed by opp id
 
   var pipeline=pl.pipeline||[];
   var stages=['all','identified','qualifying','pursuing','proposal','submitted','won','lost'];
-
   var filtered=stageFilter==='all'?pipeline:pipeline.filter(function(o){return o.stage===stageFilter});
 
   function stageCounts(){
@@ -582,78 +603,258 @@ function PipelineTracker(p){
   }
   var counts=stageCounts();
 
+  // Toast helper
+  function showToast(msg){setToastMsg(msg);setTimeout(function(){setToastMsg(null)},5000)}
+
+  // Load memories + detail when expanding
+  function loadOppData(oppId){
+    if(!oppMemories[oppId]){
+      fetch('/api/opportunity-memories?id='+encodeURIComponent(oppId)).then(function(r){return r.json()}).then(function(d){
+        var copy=Object.assign({},oppMemories);copy[oppId]=Array.isArray(d)?d:d.memories||[];setOppMemories(copy);
+      }).catch(function(){});
+    }
+    if(!oppDetails[oppId]){
+      fetch('/api/opportunity-detail?id='+encodeURIComponent(oppId)).then(function(r){return r.json()}).then(function(d){
+        var copy=Object.assign({},oppDetails);copy[oppId]=d;setOppDetails(copy);
+      }).catch(function(){});
+    }
+  }
 
   function winPathStep(o){
-    if(o.stage==='won')return 8;
-    if(o.stage==='submitted')return 7;
-    if(o.has_proposal||o.proposal_content)return 5;
-    if(o.has_financial||o.financial_analysis)return 4;
-    if(o.has_intel||o.research_brief)return 3;
-    if(o.has_scope||o.scope_analysis)return 2;
-    return 1;
+    if(o.stage==='won')return 8;if(o.stage==='submitted')return 7;
+    if(o.has_proposal||o.proposal_content)return 5;if(o.has_financial||o.financial_analysis)return 4;
+    if(o.has_intel||o.research_brief)return 3;if(o.has_scope||o.scope_analysis)return 2;return 1;
   }
 
   function WinPathBar(pp){
     var o=pp.opp,step=winPathStep(o);
     var steps=['Discovered','Scored','Researched','Financial','Proposal','Red Team','Export','Submitted','WON'];
     return e('div',{style:{display:'flex',gap:2,margin:'4px 0'}},
-      steps.map(function(s,i){
-        var active=i<step;
-        return e('div',{key:s,style:{flex:1,height:4,borderRadius:2,background:active?GREEN:BORDER}});
-      })
+      steps.map(function(s,i){var active=i<step;return e('div',{key:s,title:s,style:{flex:1,height:4,borderRadius:2,background:active?GREEN:BORDER}})})
     );
   }
 
-  function handleStageChange(opp,newStage){
-    if(!confirm('Change '+opp.title+' to '+newStage+'?'))return;
+  // IntelPanel: 5 tabbed views
+  function IntelPanel(pp){
+    var o=pp.opp,det=oppDetails[o.id]||o;
+    var tabs=[
+      {id:'winnability',label:'Winnability',field:'capture_action'},
+      {id:'competitive',label:'Competitive Intel',field:'research_brief'},
+      {id:'financial',label:'Financial',field:'financial_analysis'},
+      {id:'proposal',label:'Proposal Draft',field:'staffing_plan'},
+      {id:'scope',label:'Scope Analysis',field:'scope_analysis'}
+    ];
+    var availTabs=tabs.filter(function(t){var v=det[t.field];return v&&v.length>50});
+    if(availTabs.length===0)return e('div',{style:{fontSize:11,color:TEXT_D,padding:8}},'No intel data available yet. Run analysis to populate.');
+    var activeTab=availTabs.find(function(t){return t.id===expIntelTab})||availTabs[0];
+    return e('div',null,
+      e('div',{style:{display:'flex',gap:0,borderBottom:'1px solid '+BORDER,marginBottom:8}},
+        availTabs.map(function(t){return e('div',{key:t.id,onClick:function(){setExpIntelTab(t.id)},style:{
+          padding:'6px 12px',cursor:'pointer',fontSize:10,fontWeight:'bold',letterSpacing:1,textTransform:'uppercase',
+          color:activeTab.id===t.id?GOLD:TEXT_D,borderBottom:activeTab.id===t.id?'2px solid '+GOLD:'2px solid transparent'
+        }},t.label)})
+      ),
+      e('div',{style:{fontSize:12,whiteSpace:'pre-wrap',maxHeight:500,overflowY:'auto',background:BG3,borderRadius:4,padding:12,fontFamily:'monospace',lineHeight:1.5}},
+        (det[activeTab.field]||'').substring(0,5000)
+      )
+    );
+  }
+
+  // Stage change via styled modal
+  function confirmStageChange(){
+    if(!stageModal)return;
     fetch('/api/update-stage',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({id:opp.id,stage:newStage})
-    }).then(function(){pl.refresh()});
+      body:JSON.stringify({id:stageModal.opp.id,stage:stageModal.stage})
+    }).then(function(){pl.refresh();setStageModal(null);showToast('Stage updated to '+stageModal.stage.toUpperCase())});
   }
 
-  function handleOutcome(opp,outcome){
+  // Outcome via styled modal
+  function confirmOutcome(){
+    if(!outcomeModal)return;
     var notes='';
-    if(outcome==='lost'){
-      var winner=prompt('Who won?');
-      var theirPrice=prompt('Their price?');
-      var ourPrice=prompt('Our bid amount?');
-      notes='Winner: '+(winner||'Unknown')+', Their price: '+(theirPrice||'N/A')+', Our price: '+(ourPrice||'N/A');
+    if(outcomeModal.outcome==='lost'){
+      notes='Winner: '+(lossFields.winner||'Unknown')+', Their price: '+(lossFields.theirPrice||'N/A')+', Our price: '+(lossFields.ourPrice||'N/A')+', Notes: '+(lossFields.notes||'');
     }
-    if(!confirm('Record '+opp.title+' as '+outcome.toUpperCase()+'?'))return;
     fetch('/api/record-outcome',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({id:opp.id,outcome:outcome,notes:notes})
-    }).then(function(){pl.refresh()});
+      body:JSON.stringify({id:outcomeModal.opp.id,outcome:outcomeModal.outcome,notes:notes})
+    }).then(function(){
+      pl.refresh();setOutcomeModal(null);setLossFields({winner:'',theirPrice:'',ourPrice:'',notes:''});
+      showToast('🧠 All 10 learning agents are recalibrating now. Outcome recorded as '+outcomeModal.outcome.toUpperCase()+'.');
+    });
   }
 
+  // Get capture strategy + writeback
   function getCapture(opp){
     setCsLoading(true);setCaptureStrategy(null);
-    callClaude('Generate a capture strategy for this opportunity: '+opp.title+' ('+opp.agency+', '+(opp.vertical||'')+').'
-    ).then(function(r){setCaptureStrategy(r);setCsLoading(false)});
+    callClaude('Generate a capture strategy for: '+opp.title+' ('+opp.agency+', '+(opp.vertical||'')+', value: '+(opp.estimated_value||'Unknown')+', deadline: '+(opp.deadline||'Unknown')+'). Include: 3 immediate capture actions, intel gaps to fill, teaming partners, Pwin estimate, and recommended next steps.'
+    ).then(function(r){
+      setCaptureStrategy(r);setCsLoading(false);
+      // Write back to opportunity
+      fetch('/api/update-stage',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({id:opp.id,capture_strategy:r})
+      }).catch(function(){});
+    });
   }
 
-  function exportBrief(opp){
-    window.open('/api/export-opportunity?id='+encodeURIComponent(opp.id));
-  }
+  function exportBrief(opp){window.open('/api/export-opportunity?id='+encodeURIComponent(opp.id))}
 
   function handleAdd(){
-    fetch('/api/intake',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(addForm)
+    fetch('/api/intake',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(addForm)
     }).then(function(){setShowAdd(false);setAddForm({title:'',agency:'',type:'',value:'',deadline:'',notes:'',stage:'identified',opi:50});pl.refresh()});
   }
 
-  // If viewing detail
-  if(detailOpp){
-    return e(OpportunityDetail,{opp:detailOpp,onBack:function(){setDetailOpp(null)},pl:pl,nav:p.nav});
+  // Edit opportunity
+  function openEdit(opp){
+    setEditForm({title:opp.title||'',agency:opp.agency||'',type:opp.type||opp.vertical||'',value:opp.estimated_value||'',deadline:opp.deadline||'',notes:opp.description||'',stage:opp.stage||'identified',opi:opp.opi_score||50});
+    setEditModal(opp);
+  }
+  function saveEdit(){
+    if(!editModal)return;
+    fetch('/api/opportunities',{method:'PATCH',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({id:editModal.id,title:editForm.title,agency:editForm.agency,vertical:editForm.type,estimated_value:editForm.value,due_date:editForm.deadline,description:editForm.notes,stage:editForm.stage,opi_score:parseInt(editForm.opi)||50})
+    }).then(function(){pl.refresh();setEditModal(null);showToast('Opportunity updated.')}).catch(function(){showToast('Update failed — check API.')});
   }
 
+  // Delete opportunity (archive)
+  function confirmDelete(){
+    if(!deleteModal)return;
+    fetch('/api/opportunities',{method:'PATCH',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({id:deleteModal.id,status:'archived'})
+    }).then(function(){pl.refresh();setDeleteModal(null);setExpanded(null);showToast('Opportunity archived.')});
+  }
+
+  // Clean test data
+  function cleanTestData(){
+    var testItems=pipeline.filter(function(o){return !o.title||o.title.toLowerCase().indexOf('test')>=0||o.title.toLowerCase().indexOf('untitled')>=0||o.title.trim()===''});
+    if(testItems.length===0){showToast('No test data found.');return}
+    Promise.all(testItems.map(function(o){
+      return fetch('/api/opportunities',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:o.id,status:'archived'})});
+    })).then(function(){pl.refresh();showToast(testItems.length+' test items archived.')});
+  }
+
+  // Submit standalone loss analysis
+  function submitLossAnalysis(){
+    if(!lossAnalysisOpp)return;
+    fetch('/api/loss-analysis',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({opportunity_id:lossAnalysisOpp.id,winner_name:laForm.winner_name,winner_amount:laForm.winner_amount,our_bid_amount:laForm.our_bid_amount,notes:laForm.notes,date:new Date().toISOString()})
+    }).then(function(){setLaSubmitted(true);showToast('Loss analysis submitted. Learning agents processing.')});
+  }
+
+  // Save field on blur (post-submission tracking)
+  function saveFieldOnBlur(opp,field,value){
+    fetch('/api/opportunities',{method:'PATCH',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({id:opp.id,[field]:value})
+    }).catch(function(){});
+  }
+
+  // If viewing detail
+  if(detailOpp){return e(OpportunityDetail,{opp:detailOpp,onBack:function(){setDetailOpp(null)},pl:pl,nav:p.nav})}
+
   return e('div',{style:{padding:'24px 32px',maxWidth:1100}},
-    // Header
+
+    // Toast notification
+    toastMsg?e('div',{style:{position:'fixed',bottom:24,right:24,background:GREEN+'22',border:'1px solid '+GREEN,color:GREEN,padding:'12px 20px',borderRadius:8,fontSize:13,fontWeight:'bold',zIndex:10000,maxWidth:400}},toastMsg):null,
+
+    // ===== MODALS =====
+    // Stage change confirmation modal
+    e(PTModal,{show:!!stageModal,onClose:function(){setStageModal(null)}},
+      stageModal?[
+        e('h3',{key:'h',style:{color:GOLD,margin:'0 0 12px 0'}},'Confirm Stage Change'),
+        e('div',{key:'b',style:{fontSize:13,marginBottom:16}},'Change ',e('strong',null,stageModal.opp.title),' to ',e(Badge,{color:stageColor(stageModal.stage)},stageModal.stage),'?'),
+        e('div',{key:'a',style:{display:'flex',gap:8,justifyContent:'flex-end'}},
+          e(Btn,{onClick:function(){setStageModal(null)},variant:'ghost'},'Cancel'),
+          e(Btn,{onClick:confirmStageChange},'Confirm')
+        )
+      ]:null
+    ),
+
+    // Outcome confirmation modal (includes loss fields if LOST)
+    e(PTModal,{show:!!outcomeModal,onClose:function(){setOutcomeModal(null)}},
+      outcomeModal?[
+        e('h3',{key:'h',style:{color:outcomeModal.outcome==='won'?GREEN:outcomeModal.outcome==='lost'?RED:GOLD,margin:'0 0 12px 0'}},'Record Outcome: '+outcomeModal.outcome.toUpperCase()),
+        e('div',{key:'t',style:{fontSize:13,marginBottom:16}},'Record ',e('strong',null,outcomeModal.opp.title),' as ',e('strong',{style:{color:outcomeModal.outcome==='won'?GREEN:outcomeModal.outcome==='lost'?RED:GOLD}},outcomeModal.outcome.toUpperCase()),'?'),
+        outcomeModal.outcome==='lost'?e('div',{key:'lf',style:{marginBottom:16}},
+          e(Label,{text:'WHO WON?'}),e(Input,{value:lossFields.winner,onChange:function(ev){setLossFields(Object.assign({},lossFields,{winner:ev.target.value}))},placeholder:'Winner name'}),
+          e('div',{style:{height:8}}),
+          e(Label,{text:'THEIR PRICE'}),e(Input,{value:lossFields.theirPrice,onChange:function(ev){setLossFields(Object.assign({},lossFields,{theirPrice:ev.target.value}))},placeholder:'$0'}),
+          e('div',{style:{height:8}}),
+          e(Label,{text:'OUR BID AMOUNT'}),e(Input,{value:lossFields.ourPrice,onChange:function(ev){setLossFields(Object.assign({},lossFields,{ourPrice:ev.target.value}))},placeholder:'$0'}),
+          e('div',{style:{height:8}}),
+          e(Label,{text:'DEBRIEF NOTES'}),e(Textarea,{value:lossFields.notes,onChange:function(ev){setLossFields(Object.assign({},lossFields,{notes:ev.target.value}))},placeholder:'Why did we lose? Lessons learned...',rows:3})
+        ):null,
+        e('div',{key:'a',style:{display:'flex',gap:8,justifyContent:'flex-end'}},
+          e(Btn,{onClick:function(){setOutcomeModal(null);setLossFields({winner:'',theirPrice:'',ourPrice:'',notes:''})},variant:'ghost'},'Cancel'),
+          e(Btn,{onClick:confirmOutcome,variant:outcomeModal.outcome==='won'?'primary':'danger'},'Record '+outcomeModal.outcome.toUpperCase())
+        )
+      ]:null
+    ),
+
+    // Edit opportunity modal
+    e(PTModal,{show:!!editModal,onClose:function(){setEditModal(null)},wide:true},
+      editModal?[
+        e('h3',{key:'h',style:{color:GOLD,margin:'0 0 16px 0'}},'Edit Opportunity'),
+        e('div',{key:'f',style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}},
+          e('div',null,e(Label,{text:'TITLE'}),e(Input,{value:editForm.title,onChange:function(ev){setEditForm(Object.assign({},editForm,{title:ev.target.value}))}})),
+          e('div',null,e(Label,{text:'AGENCY'}),e(Input,{value:editForm.agency,onChange:function(ev){setEditForm(Object.assign({},editForm,{agency:ev.target.value}))}})),
+          e('div',null,e(Label,{text:'TYPE / VERTICAL'}),e(Input,{value:editForm.type,onChange:function(ev){setEditForm(Object.assign({},editForm,{type:ev.target.value}))}})),
+          e('div',null,e(Label,{text:'EST. VALUE'}),e(Input,{value:editForm.value,onChange:function(ev){setEditForm(Object.assign({},editForm,{value:ev.target.value}))}})),
+          e('div',null,e(Label,{text:'DEADLINE'}),e(Input,{value:editForm.deadline,onChange:function(ev){setEditForm(Object.assign({},editForm,{deadline:ev.target.value}))}})),
+          e('div',null,e(Label,{text:'OPI SCORE'}),e(Input,{value:editForm.opi,onChange:function(ev){setEditForm(Object.assign({},editForm,{opi:ev.target.value}))}})),
+          e('div',null,e(Label,{text:'STAGE'}),e(Sel,{value:editForm.stage,onChange:function(ev){setEditForm(Object.assign({},editForm,{stage:ev.target.value}))},options:stages.filter(function(s){return s!=='all'}).map(function(s){return{value:s,label:s.charAt(0).toUpperCase()+s.slice(1)}})}))
+        ),
+        e('div',{key:'n',style:{marginTop:12}},e(Label,{text:'NOTES'}),e(Textarea,{value:editForm.notes,onChange:function(ev){setEditForm(Object.assign({},editForm,{notes:ev.target.value}))},rows:3})),
+        e('div',{key:'a',style:{display:'flex',gap:8,justifyContent:'flex-end',marginTop:16}},
+          e(Btn,{onClick:function(){setEditModal(null)},variant:'ghost'},'Cancel'),
+          e(Btn,{onClick:saveEdit},'Save Changes')
+        )
+      ]:null
+    ),
+
+    // Delete confirmation modal
+    e(PTModal,{show:!!deleteModal,onClose:function(){setDeleteModal(null)}},
+      deleteModal?[
+        e('h3',{key:'h',style:{color:RED,margin:'0 0 12px 0'}},'Delete Opportunity'),
+        e('div',{key:'b',style:{fontSize:13,marginBottom:16}},'Archive ',e('strong',null,deleteModal.title),'? This removes it from the active pipeline.'),
+        e('div',{key:'a',style:{display:'flex',gap:8,justifyContent:'flex-end'}},
+          e(Btn,{onClick:function(){setDeleteModal(null)},variant:'ghost'},'Cancel'),
+          e(Btn,{onClick:confirmDelete,variant:'danger'},'Archive')
+        )
+      ]:null
+    ),
+
+    // Standalone Loss Analysis modal
+    e(PTModal,{show:!!lossAnalysisOpp,onClose:function(){setLossAnalysisOpp(null);setLaSubmitted(false);setLaForm({winner_name:'',winner_amount:'',our_bid_amount:'',notes:''})},wide:true},
+      lossAnalysisOpp?[
+        e('h3',{key:'h',style:{color:RED,margin:'0 0 12px 0'}},'Loss Analysis: '+lossAnalysisOpp.title),
+        laSubmitted?e('div',{key:'done',style:{textAlign:'center',padding:20}},
+          e('div',{style:{fontSize:24,marginBottom:8}},'✓'),
+          e('div',{style:{color:GREEN,fontWeight:'bold'}},'Loss analysis submitted.'),
+          e('div',{style:{color:TEXT_D,fontSize:12,marginTop:8}},'Learning agents are processing this data to improve future captures.'),
+          e(Btn,{onClick:function(){setLossAnalysisOpp(null);setLaSubmitted(false);setLaForm({winner_name:'',winner_amount:'',our_bid_amount:'',notes:''})},style:{marginTop:16}},'Close')
+        ):e('div',{key:'form'},
+          e(Label,{text:'WINNER NAME'}),e(Input,{value:laForm.winner_name,onChange:function(ev){setLaForm(Object.assign({},laForm,{winner_name:ev.target.value}))},placeholder:'Company that won'}),
+          e('div',{style:{height:8}}),
+          e(Label,{text:'WINNER AMOUNT'}),e(Input,{value:laForm.winner_amount,onChange:function(ev){setLaForm(Object.assign({},laForm,{winner_amount:ev.target.value}))},placeholder:'$0'}),
+          e('div',{style:{height:8}}),
+          e(Label,{text:'OUR BID AMOUNT'}),e(Input,{value:laForm.our_bid_amount,onChange:function(ev){setLaForm(Object.assign({},laForm,{our_bid_amount:ev.target.value}))},placeholder:'$0'}),
+          e('div',{style:{height:8}}),
+          e(Label,{text:'DEBRIEF NOTES'}),e(Textarea,{value:laForm.notes,onChange:function(ev){setLaForm(Object.assign({},laForm,{notes:ev.target.value}))},placeholder:'Why we lost, lessons learned, debrief notes...',rows:4}),
+          e('div',{style:{display:'flex',gap:8,justifyContent:'flex-end',marginTop:16}},
+            e(Btn,{onClick:function(){setLossAnalysisOpp(null);setLaForm({winner_name:'',winner_amount:'',our_bid_amount:'',notes:''})},variant:'ghost'},'Cancel'),
+            e(Btn,{onClick:submitLossAnalysis,variant:'danger'},'Submit Loss Analysis')
+          )
+        )
+      ]:null
+    ),
+
+    // ===== HEADER =====
     e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}},
       e('div',null,
         e('h2',{style:{color:GOLD,margin:0}},'Pipeline Tracker'),
         e('div',{style:{fontSize:12,color:TEXT_D}},pipeline.length+' opportunities tracked')
       ),
       e('div',{style:{display:'flex',gap:8}},
+        e(Btn,{onClick:cleanTestData,variant:'ghost',small:true},'🧹 Clean Test Data'),
         e(Btn,{onClick:function(){setShowAdd(!showAdd)},variant:'primary'},showAdd?'Cancel':'+ Add Opportunity')
       )
     ),
@@ -675,8 +876,7 @@ function PipelineTracker(p){
     // Stage filter pills
     e('div',{style:{display:'flex',gap:6,marginBottom:16,flexWrap:'wrap'}},
       stages.map(function(s){
-        var isActive=stageFilter===s;
-        var c=counts[s]||0;
+        var isActive=stageFilter===s;var c=counts[s]||0;
         return e('div',{key:s,onClick:function(){setStageFilter(s)},style:{
           padding:'4px 12px',borderRadius:20,fontSize:11,cursor:'pointer',fontWeight:'bold',letterSpacing:1,textTransform:'uppercase',
           background:isActive?stageColor(s)+'22':BG3,color:isActive?stageColor(s):TEXT_D,border:'1px solid '+(isActive?stageColor(s)+'44':BORDER)
@@ -684,30 +884,36 @@ function PipelineTracker(p){
       })
     ),
 
-    // Opportunity list
+    // Empty state
     filtered.length===0?e(Card,{style:{textAlign:'center',padding:40}},
       e('div',{style:{fontSize:24,marginBottom:8}},'◈'),
-      e('div',{style:{color:TEXT_D}},'No opportunities tracked yet'),
-      e(Btn,{onClick:function(){setShowAdd(true)},style:{marginTop:12}},'+ Add First Opportunity')
+      e('div',{style:{color:TEXT_D}},'No opportunities in this filter'),
+      e(Btn,{onClick:function(){setShowAdd(true)},style:{marginTop:12}},'+ Add Opportunity')
     ):
+
+    // ===== OPPORTUNITY LIST =====
     filtered.map(function(o){
       var isExpanded=expanded===o.id;
       var sc=o.opi_score||0;
       var daysLeft=o.deadline?Math.ceil((new Date(o.deadline)-new Date())/(1000*60*60*24)):null;
       var sc_color=stageColor(o.stage);
+      var det=oppDetails[o.id]||o;
+      var mems=oppMemories[o.id]||[];
+      var isPostSub=o.stage==='submitted'||o.stage==='won'||o.stage==='lost';
 
       return e(Card,{key:o.id,style:{borderLeft:'3px solid '+sc_color}},
-        // Header row
-        e('div',{onClick:function(){setExpanded(isExpanded?null:o.id)},style:{cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center'}},
+        // Collapsed header row
+        e('div',{onClick:function(){var newExp=isExpanded?null:o.id;setExpanded(newExp);if(newExp){loadOppData(o.id);setExpSubTab('overview')}},style:{cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center'}},
           e('div',{style:{flex:1}},
-            e('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:4}},
+            e('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:4,flexWrap:'wrap'}},
               e('span',{style:{width:8,height:8,borderRadius:4,background:sc_color,display:'inline-block'}}),
               e('span',{style:{fontWeight:'bold',fontSize:14}},o.title),
               e(OPIBadge,{score:sc}),
-              o.stage?e(Badge,{color:sc_color},o.stage):null
+              o.stage?e(Badge,{color:sc_color},o.stage):null,
+              o.outcome?e(Badge,{color:o.outcome==='won'?GREEN:o.outcome==='lost'?RED:GOLD},o.outcome.toUpperCase()):null
             ),
             e('div',{style:{fontSize:11,color:TEXT_D}},
-              o.agency||'',o.type?' · '+o.type:'',o.estimated_value?' · '+o.estimated_value:'',
+              o.agency||'',o.type||o.vertical?' · '+(o.type||o.vertical):'',o.estimated_value?' · '+o.estimated_value:'',
               daysLeft!==null?' · ':null,
               daysLeft!==null?e('span',{style:{color:daysLeft<=5?RED:daysLeft<=10?ORANGE:TEXT_D}},daysLeft+' days left'):null
             ),
@@ -716,55 +922,151 @@ function PipelineTracker(p){
           e('span',{style:{fontSize:16,color:TEXT_D}},isExpanded?'▼':'▶')
         ),
 
-        // Expanded content
+        // ===== EXPANDED CONTENT =====
         isExpanded?e('div',{style:{marginTop:12,borderTop:'1px solid '+BORDER,paddingTop:12}},
           // Completeness indicators
           e('div',{style:{display:'flex',gap:12,marginBottom:12}},
             [{k:'has_scope',l:'SCOPE'},{k:'has_intel',l:'INTEL'},{k:'has_financial',l:'FIN'},{k:'has_staffing',l:'STAFF'},{k:'has_proposal',l:'PROP'}].map(function(f){
-              var has=o[f.k]||(f.k==='has_scope'&&o.scope_analysis)||(f.k==='has_proposal'&&o.proposal_content)||(f.k==='has_intel'&&o.research_brief)||(f.k==='has_financial'&&o.financial_analysis);
-              return e('span',{key:f.k,style:{fontSize:10,color:has?GREEN:TEXT_D,fontWeight:'bold',letterSpacing:1}},
-                (has?'✓':'—')+' '+f.l
-              );
+              var has=o[f.k]||(f.k==='has_scope'&&(o.scope_analysis||det.scope_analysis))||(f.k==='has_proposal'&&(o.proposal_content||det.proposal_content))||(f.k==='has_intel'&&(o.research_brief||det.research_brief))||(f.k==='has_financial'&&(o.financial_analysis||det.financial_analysis));
+              return e('span',{key:f.k,style:{fontSize:10,color:has?GREEN:TEXT_D,fontWeight:'bold',letterSpacing:1}},(has?'✓':'—')+' '+f.l);
             })
           ),
 
-          // Two-column detail
-          e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}},
-            // LEFT: Details
-            e('div',null,
-              e(Label,{text:'DETAILS'}),
-              [{l:'Agency',v:o.agency},{l:'Type',v:o.type||o.vertical},{l:'Value',v:o.estimated_value},{l:'Deadline',v:o.deadline},{l:'Added',v:o.created_at?new Date(o.created_at).toLocaleDateString():''},{l:'Source',v:o.source_url?e('a',{href:o.source_url,target:'_blank',style:{color:CYAN,textDecoration:'none'}},'View →'):''}].map(function(d){
-                return d.v?e('div',{key:d.l,style:{display:'flex',justifyContent:'space-between',padding:'4px 0',fontSize:12,borderBottom:'1px solid '+BORDER}},
-                  e('span',{style:{color:TEXT_D}},d.l),e('span',null,d.v)
-                ):null;
-              })
-            ),
-            // RIGHT: Stage + Actions
-            e('div',null,
-              e(Label,{text:'CHANGE STAGE'}),
-              e('div',{style:{display:'flex',gap:4,flexWrap:'wrap',marginBottom:12}},
-                ['identified','pursuing','proposal','submitted','watching'].map(function(s){
-                  return e(Btn,{key:s,onClick:function(){handleStageChange(o,s)},small:true,variant:o.stage===s?'primary':'ghost'},s);
-                })
-              ),
-              e(Label,{text:'ACTIONS'}),
-              e('div',{style:{display:'flex',flexDirection:'column',gap:6}},
-                e(Btn,{onClick:function(){setDetailOpp(o)},variant:'ghost',small:true},'◑ View Full Detail'),
-                e(Btn,{onClick:function(){getCapture(o)},variant:'ghost',small:true},'⚡ Get Capture Strategy'),
-                e(Btn,{onClick:function(){exportBrief(o)},variant:'ghost',small:true},'📄 Export Decision Brief'),
-                e(Btn,{onClick:function(){p.nav('proposal');pl.select(o)},variant:'ghost',small:true},'✦ Start Proposal')
-              )
-            )
+          // Sub-tabs: OVERVIEW | INTEL | PROPOSAL | ACTIVITY
+          e('div',{style:{display:'flex',gap:0,borderBottom:'1px solid '+BORDER,marginBottom:12}},
+            ['overview','intel','proposal','activity'].map(function(t){
+              return e('div',{key:t,onClick:function(){setExpSubTab(t)},style:{
+                padding:'6px 14px',cursor:'pointer',fontSize:11,fontWeight:'bold',letterSpacing:1,textTransform:'uppercase',
+                color:expSubTab===t?CYAN:TEXT_D,borderBottom:expSubTab===t?'2px solid '+CYAN:'2px solid transparent'
+              }},t);
+            })
           ),
 
-          // Capture strategy
-          captureStrategy&&expanded===o.id?e('div',{style:{marginTop:12}},e(AIOut,{content:captureStrategy,loading:csLoading,label:'CAPTURE STRATEGY'})):null,
+          // ---- OVERVIEW sub-tab ----
+          expSubTab==='overview'?e('div',null,
+            // Two-column: LEFT details + RIGHT stage/notes
+            e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}},
+              // LEFT: Details
+              e('div',null,
+                e(Label,{text:'OPPORTUNITY DETAILS'}),
+                [{l:'Agency',v:o.agency},{l:'Type',v:o.type||o.vertical},{l:'Value',v:o.estimated_value},{l:'Deadline',v:o.deadline},{l:'Decision',v:det.capture_action?det.capture_action.substring(0,80)+'...':''},{l:'OPI',v:sc},{l:'Added',v:o.created_at?new Date(o.created_at).toLocaleDateString():''},{l:'Source URL',v:o.source_url?e('a',{href:o.source_url,target:'_blank',style:{color:CYAN,textDecoration:'none'}},'View Original RFP ↗'):''},{l:'RFP Doc URL',v:det.rfp_document_url?e('a',{href:det.rfp_document_url,target:'_blank',style:{color:CYAN,textDecoration:'none'}},'Download ↗'):''}].map(function(d){
+                  return d.v?e('div',{key:d.l,style:{display:'flex',justifyContent:'space-between',padding:'4px 0',fontSize:12,borderBottom:'1px solid '+BORDER}},
+                    e('span',{style:{color:TEXT_D}},d.l),e('span',null,d.v)
+                  ):null;
+                })
+              ),
+              // RIGHT: Stage buttons + editable notes
+              e('div',null,
+                e(Label,{text:'CHANGE STAGE'}),
+                e('div',{style:{display:'flex',gap:4,flexWrap:'wrap',marginBottom:12}},
+                  ['identified','pursuing','proposal','submitted','watching'].map(function(s){
+                    return e(Btn,{key:s,onClick:function(){setStageModal({opp:o,stage:s})},small:true,variant:o.stage===s?'primary':'ghost'},s);
+                  })
+                ),
+                e(Label,{text:'NOTES'}),
+                e(Textarea,{value:det.description||o.description||'',onChange:function(){},onBlur:function(ev){saveFieldOnBlur(o,'description',ev.target.value)},placeholder:'Add notes...',rows:4,style:{width:'100%'}}),
+                e('div',{style:{fontSize:9,color:TEXT_D,marginTop:4}},'Fields save automatically on blur')
+              )
+            ),
 
-          // Outcome recording
-          e('div',{style:{display:'flex',gap:8,marginTop:12,paddingTop:12,borderTop:'1px solid '+BORDER}},
-            e(Btn,{onClick:function(){handleOutcome(o,'won')},variant:'primary',small:true},'🏆 WON'),
-            e(Btn,{onClick:function(){handleOutcome(o,'lost')},variant:'danger',small:true},'LOST'),
-            e(Btn,{onClick:function(){handleOutcome(o,'no-bid')},variant:'ghost',small:true},'NO-BID')
+            // Post-submission tracking (for submitted/won/lost)
+            isPostSub?e('div',{style:{marginTop:16,padding:12,background:BG3,borderRadius:6}},
+              e(Label,{text:'POST-SUBMISSION TRACKING'}),
+              e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginTop:8}},
+                e('div',null,e(Label,{text:'ORAL PRESENTATION DATE'}),e(Input,{defaultValue:det.oral_presentation_date||'',onBlur:function(ev){saveFieldOnBlur(o,'oral_presentation_date',ev.target.value)},placeholder:'MM/DD/YYYY'})),
+                e('div',null,e(Label,{text:'AWARD NOTIFICATION DATE'}),e(Input,{defaultValue:det.award_notification_date||'',onBlur:function(ev){saveFieldOnBlur(o,'award_notification_date',ev.target.value)},placeholder:'MM/DD/YYYY'})),
+                e('div',null,e(Label,{text:'RFP DOCUMENT URL'}),e(Input,{defaultValue:det.rfp_document_url||'',onBlur:function(ev){saveFieldOnBlur(o,'rfp_document_url',ev.target.value)},placeholder:'https://...'})),
+                e('div',null,e(Label,{text:'OUTCOME NOTES'}),e(Textarea,{defaultValue:det.outcome_notes||'',onBlur:function(ev){saveFieldOnBlur(o,'outcome_notes',ev.target.value)},placeholder:'Outcome details...',rows:2}))
+              ),
+              e('div',{style:{fontSize:9,color:TEXT_D,marginTop:4}},'Fields save automatically on blur')
+            ):null,
+
+            // Actions row
+            e('div',{style:{display:'flex',gap:6,marginTop:16,flexWrap:'wrap'}},
+              e(Btn,{onClick:function(){setDetailOpp(o)},variant:'ghost',small:true},'◑ Full Detail'),
+              e(Btn,{onClick:function(){getCapture(o)},variant:'ghost',small:true},'⚡ Capture Strategy'),
+              e(Btn,{onClick:function(){exportBrief(o)},variant:'ghost',small:true},'📄 Export Brief'),
+              e(Btn,{onClick:function(){p.nav('proposal');pl.select(o)},variant:'ghost',small:true},'✦ Start Proposal'),
+              e(Btn,{onClick:function(){openEdit(o)},variant:'ghost',small:true},'✏ Edit'),
+              e(Btn,{onClick:function(){setDeleteModal(o)},variant:'danger',small:true},'🗑 Delete'),
+              o.stage==='lost'?e(Btn,{onClick:function(){setLossAnalysisOpp(o)},variant:'danger',small:true},'📊 Loss Analysis'):null
+            ),
+
+            // Capture strategy output
+            captureStrategy&&expanded===o.id?e('div',{style:{marginTop:12}},e(AIOut,{content:captureStrategy,loading:csLoading,label:'CAPTURE STRATEGY'})):null
+          ):null,
+
+          // ---- INTEL sub-tab (5-tab IntelPanel) ----
+          expSubTab==='intel'?e('div',null,e(IntelPanel,{opp:o})):null,
+
+          // ---- PROPOSAL sub-tab ----
+          expSubTab==='proposal'?e('div',null,
+            (det.proposal_content||o.proposal_content)?e('div',null,
+              e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}},
+                e(Label,{text:'PROPOSAL'}),
+                e('div',{style:{display:'flex',gap:8}},
+                  e(Btn,{onClick:function(){window.open('/api/proposal-doc?id='+encodeURIComponent(o.id))},small:true,variant:'primary'},'DOWNLOAD DOC'),
+                  e(Btn,{onClick:function(){fetch('/api/produce-proposal?id='+encodeURIComponent(o.id),{method:'POST'}).then(function(){showToast('Proposal regeneration triggered.')})},small:true,variant:'ghost'},'REGENERATE')
+                )
+              ),
+              // ACTION REQUIRED highlighting
+              (function(){
+                var content=(det.proposal_content||o.proposal_content||'');
+                var actionCount=(content.match(/ACTION REQUIRED/gi)||[]).length;
+                return actionCount>0?e('div',{style:{background:ORANGE+'22',border:'1px solid '+ORANGE,borderRadius:4,padding:'6px 10px',marginBottom:8,fontSize:11,color:ORANGE,fontWeight:'bold'}},
+                  '⚠ '+actionCount+' ACTION REQUIRED items need attention'
+                ):null;
+              })(),
+              e('div',{style:{fontSize:12,whiteSpace:'pre-wrap',maxHeight:600,overflowY:'auto',lineHeight:1.6,background:BG3,padding:12,borderRadius:4}},
+                (det.proposal_content||o.proposal_content||'').substring(0,10000).split(/(ACTION REQUIRED[^\n]*)/gi).map(function(chunk,i){
+                  return /ACTION REQUIRED/i.test(chunk)?e('span',{key:i,style:{background:ORANGE+'33',color:ORANGE,fontWeight:'bold',padding:'2px 4px',borderRadius:2}},chunk):e('span',{key:i},chunk);
+                })
+              ),
+              // Red team display
+              (function(){
+                var rtMems=mems.filter(function(m){return m.agent_name==='red_team_agent'||m.agent_name==='agentRedTeam'});
+                if(!rtMems.length)return null;
+                return e('div',{style:{marginTop:12}},
+                  e(Label,{text:'RED TEAM ANALYSIS'}),
+                  rtMems.map(function(m,i){return e('div',{key:i,style:{fontSize:12,padding:8,background:RED+'11',border:'1px solid '+RED+'33',borderRadius:4,marginBottom:4,whiteSpace:'pre-wrap'}},m.observation?m.observation.substring(0,800):'')})
+                );
+              })()
+            ):e('div',{style:{textAlign:'center',padding:20,color:TEXT_D}},
+              'No proposal generated yet.',
+              e('div',{style:{marginTop:12}},e(Btn,{onClick:function(){fetch('/api/produce-proposal?id='+encodeURIComponent(o.id),{method:'POST'}).then(function(){showToast('Proposal generation triggered.')})}},'PRODUCE PROPOSAL'))
+            )
+          ):null,
+
+          // ---- ACTIVITY sub-tab (per-opp agent memories) ----
+          expSubTab==='activity'?e('div',null,
+            mems.length>0?e('div',null,
+              e('div',{style:{fontSize:12,color:TEXT_D,marginBottom:8}},mems.length+' memories from '+(new Set(mems.map(function(m){return m.agent_name}))).size+' agents'),
+              (function(){
+                var grouped={};
+                mems.forEach(function(m){var n=m.agent_name||'unknown';if(!grouped[n])grouped[n]=[];grouped[n].push(m)});
+                return Object.keys(grouped).map(function(agent){
+                  return e(Card,{key:agent,style:{marginBottom:8}},
+                    e('div',{style:{fontSize:11,color:CYAN,fontWeight:'bold',marginBottom:6}},agent.replace(/_/g,' ').toUpperCase()+' ('+grouped[agent].length+')'),
+                    grouped[agent].slice(0,3).map(function(m,i){
+                      return e('div',{key:i,style:{fontSize:12,padding:'4px 0',borderBottom:'1px solid '+BORDER,whiteSpace:'pre-wrap'}},
+                        e('div',{style:{fontSize:10,color:TEXT_D,marginBottom:2}},m.created_at?new Date(m.created_at).toLocaleString():''),
+                        m.observation?m.observation.substring(0,500):''
+                      );
+                    })
+                  );
+                });
+              })()
+            ):e('div',{style:{color:TEXT_D,textAlign:'center',padding:20}},'No activity recorded for this opportunity yet.')
+          ):null,
+
+          // Outcome recording bar (always visible at bottom of expanded)
+          e('div',{style:{display:'flex',gap:8,marginTop:16,paddingTop:12,borderTop:'1px solid '+BORDER,alignItems:'center'}},
+            e('span',{style:{fontSize:10,color:TEXT_D,fontWeight:'bold',letterSpacing:1,marginRight:8}},'RECORD OUTCOME:'),
+            e(Btn,{onClick:function(){setOutcomeModal({opp:o,outcome:'won'})},variant:'primary',small:true},'🏆 WON'),
+            e(Btn,{onClick:function(){setOutcomeModal({opp:o,outcome:'lost'})},variant:'danger',small:true},'LOST'),
+            e(Btn,{onClick:function(){setOutcomeModal({opp:o,outcome:'no-bid'})},variant:'ghost',small:true},'NO-BID'),
+            e(Btn,{onClick:function(){setOutcomeModal({opp:o,outcome:'cancelled'})},variant:'ghost',small:true},'CANCELLED'),
+            o.outcome?e('span',{style:{fontSize:11,color:o.outcome==='won'?GREEN:o.outcome==='lost'?RED:GOLD,marginLeft:8,fontWeight:'bold'}},'Recorded: '+o.outcome.toUpperCase()+(o.outcome_notes?' — '+o.outcome_notes:'')):null
           )
         ):null
       );
@@ -781,6 +1083,11 @@ function OpportunityDetail(p){
   var st2=useState(null),memories=st2[0],setMemories=st2[1];
   var st3=useState(null),fullOpp=st3[0],setFullOpp=st3[1];
   var st4b=useState(-1),expandedStep=st4b[0],setExpandedStep=st4b[1];
+  var stDM1=useState(null),detOutcomeModal=stDM1[0],setDetOutcomeModal=stDM1[1];
+  var stDM2=useState({winner:'',theirPrice:'',ourPrice:'',notes:''}),detLossFields=stDM2[0],setDetLossFields=stDM2[1];
+  var stDM3=useState(null),detStageModal=stDM3[0],setDetStageModal=stDM3[1];
+  var stDM4=useState(null),detToast=stDM4[0],setDetToast=stDM4[1];
+  function detShowToast(m){setDetToast(m);setTimeout(function(){setDetToast(null)},5000)}
 
   useEffect(function(){
     fetch('/api/opportunity-detail?id='+encodeURIComponent(opp.id)).then(function(r){return r.json()}).then(setFullOpp).catch(function(){});
@@ -931,10 +1238,60 @@ function OpportunityDetail(p){
     ):null,
 
     // Outcome bar
-    e('div',{style:{display:'flex',gap:8,marginTop:16,paddingTop:16,borderTop:'1px solid '+BORDER}},
-      e(Btn,{onClick:function(){if(confirm('Record as WON?'))fetch('/api/record-outcome',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:o.id,outcome:'won'})}).then(function(){p.pl.refresh()})},variant:'primary'},'🏆 WON'),
-      e(Btn,{onClick:function(){var w=prompt('Who won?');if(confirm('Record as LOST?'))fetch('/api/record-outcome',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:o.id,outcome:'lost',notes:'Winner: '+(w||'Unknown')})}).then(function(){p.pl.refresh()})},variant:'danger'},'LOST'),
-      e(Btn,{onClick:function(){if(confirm('Record as NO-BID?'))fetch('/api/record-outcome',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:o.id,outcome:'no-bid'})}).then(function(){p.pl.refresh()})},variant:'ghost'},'NO-BID')
+    detToast?e('div',{style:{position:'fixed',bottom:24,right:24,background:GREEN+'22',border:'1px solid '+GREEN,color:GREEN,padding:'12px 20px',borderRadius:8,fontSize:13,fontWeight:'bold',zIndex:10000,maxWidth:400}},detToast):null,
+
+    // Stage change modal
+    e(PTModal,{show:!!detStageModal,onClose:function(){setDetStageModal(null)}},
+      detStageModal?[
+        e('h3',{key:'h',style:{color:GOLD,margin:'0 0 12px 0'}},'Confirm Stage Change'),
+        e('div',{key:'b',style:{fontSize:13,marginBottom:16}},'Change ',e('strong',null,o.title),' to ',e(Badge,{color:stageColor(detStageModal)},detStageModal),'?'),
+        e('div',{key:'a',style:{display:'flex',gap:8,justifyContent:'flex-end'}},
+          e(Btn,{onClick:function(){setDetStageModal(null)},variant:'ghost'},'Cancel'),
+          e(Btn,{onClick:function(){fetch('/api/update-stage',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:o.id,stage:detStageModal})}).then(function(){p.pl.refresh();setDetStageModal(null);detShowToast('Stage updated to '+detStageModal.toUpperCase())})}},'Confirm')
+        )
+      ]:null
+    ),
+
+    // Outcome modal
+    e(PTModal,{show:!!detOutcomeModal,onClose:function(){setDetOutcomeModal(null)}},
+      detOutcomeModal?[
+        e('h3',{key:'h',style:{color:detOutcomeModal==='won'?GREEN:detOutcomeModal==='lost'?RED:GOLD,margin:'0 0 12px 0'}},'Record Outcome: '+detOutcomeModal.toUpperCase()),
+        e('div',{key:'t',style:{fontSize:13,marginBottom:16}},'Record ',e('strong',null,o.title),' as ',e('strong',null,detOutcomeModal.toUpperCase()),'?'),
+        detOutcomeModal==='lost'?e('div',{key:'lf',style:{marginBottom:16}},
+          e(Label,{text:'WHO WON?'}),e(Input,{value:detLossFields.winner,onChange:function(ev){setDetLossFields(Object.assign({},detLossFields,{winner:ev.target.value}))},placeholder:'Winner name'}),
+          e('div',{style:{height:8}}),
+          e(Label,{text:'THEIR PRICE'}),e(Input,{value:detLossFields.theirPrice,onChange:function(ev){setDetLossFields(Object.assign({},detLossFields,{theirPrice:ev.target.value}))},placeholder:'$0'}),
+          e('div',{style:{height:8}}),
+          e(Label,{text:'OUR BID AMOUNT'}),e(Input,{value:detLossFields.ourPrice,onChange:function(ev){setDetLossFields(Object.assign({},detLossFields,{ourPrice:ev.target.value}))},placeholder:'$0'}),
+          e('div',{style:{height:8}}),
+          e(Label,{text:'DEBRIEF NOTES'}),e(Textarea,{value:detLossFields.notes,onChange:function(ev){setDetLossFields(Object.assign({},detLossFields,{notes:ev.target.value}))},placeholder:'Why did we lose?',rows:3})
+        ):null,
+        e('div',{key:'a',style:{display:'flex',gap:8,justifyContent:'flex-end'}},
+          e(Btn,{onClick:function(){setDetOutcomeModal(null);setDetLossFields({winner:'',theirPrice:'',ourPrice:'',notes:''})},variant:'ghost'},'Cancel'),
+          e(Btn,{onClick:function(){
+            var notes='';
+            if(detOutcomeModal==='lost')notes='Winner: '+(detLossFields.winner||'Unknown')+', Their price: '+(detLossFields.theirPrice||'N/A')+', Our price: '+(detLossFields.ourPrice||'N/A')+', Notes: '+(detLossFields.notes||'');
+            fetch('/api/record-outcome',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:o.id,outcome:detOutcomeModal,notes:notes})}).then(function(){
+              p.pl.refresh();setDetOutcomeModal(null);setDetLossFields({winner:'',theirPrice:'',ourPrice:'',notes:''});
+              detShowToast('🧠 All 10 learning agents are recalibrating now. Outcome recorded as '+detOutcomeModal.toUpperCase()+'.');
+            });
+          },variant:detOutcomeModal==='won'?'primary':'danger'},'Record '+detOutcomeModal.toUpperCase())
+        )
+      ]:null
+    ),
+
+    // Stage change buttons
+    e('div',{style:{display:'flex',gap:4,flexWrap:'wrap',marginTop:12}},
+      ['identified','pursuing','proposal','submitted','watching'].map(function(s){
+        return e(Btn,{key:s,onClick:function(){setDetStageModal(s)},small:true,variant:o.stage===s?'primary':'ghost'},s);
+      })
+    ),
+
+    e('div',{style:{display:'flex',gap:8,marginTop:8}},
+      e(Btn,{onClick:function(){setDetOutcomeModal('won')},variant:'primary',small:true},'🏆 WON'),
+      e(Btn,{onClick:function(){setDetOutcomeModal('lost')},variant:'danger',small:true},'LOST'),
+      e(Btn,{onClick:function(){setDetOutcomeModal('no-bid')},variant:'ghost',small:true},'NO-BID'),
+      e(Btn,{onClick:function(){setDetOutcomeModal('cancelled')},variant:'ghost',small:true},'CANCELLED')
     )
   );
 }
