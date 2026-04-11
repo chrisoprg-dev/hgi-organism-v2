@@ -4691,6 +4691,108 @@ async function storeMemory(agent, oppId, tags, observation, memType, sourceUrl, 
 }
 
 // === CLAUDE CALL: MODEL TIERING + WEB SEARCH + PROMPT CACHING ===
+
+// ============================================================
+// MORNING BRIEF EMAIL — Sends notification to President after cron
+// ============================================================
+async function sendMorningBrief(state, sessionResults, trigger, newOppsFound, proposalCandidates) {
+  var RESEND_KEY = process.env.RESEND_API_KEY;
+  if (!RESEND_KEY) {
+    log('NOTIFY: No RESEND_API_KEY set — skipping email. Set this env var to enable morning briefs.');
+    return;
+  }
+
+  try {
+    // Gather latest dashboard + pipeline scanner output
+    var dashMem = await supabase.from('organism_memory').select('observation')
+      .eq('agent', 'dashboard_agent').order('created_at', {ascending: false}).limit(1);
+    var scanMem = await supabase.from('organism_memory').select('observation')
+      .eq('agent', 'pipeline_scanner').order('created_at', {ascending: false}).limit(1);
+    var huntMem = await supabase.from('organism_memory').select('observation')
+      .eq('agent', 'hunting_agent').order('created_at', {ascending: false}).limit(1);
+
+    var dashText = (dashMem.data && dashMem.data[0]) ? dashMem.data[0].observation : 'No dashboard data.';
+    var scanText = (scanMem.data && scanMem.data[0]) ? scanMem.data[0].observation : '';
+    var huntText = (huntMem.data && huntMem.data[0]) ? huntMem.data[0].observation : '';
+
+    // Deadline alerts
+    var deadlines = state.pipeline.filter(function(o) {
+      if (!o.due_date) return false;
+      var days = Math.floor((new Date(o.due_date).getTime() - Date.now()) / 86400000);
+      return days >= 0 && days <= 14;
+    }).sort(function(a, b) { return new Date(a.due_date) - new Date(b.due_date); });
+
+    var deadlineSection = '';
+    if (deadlines.length > 0) {
+      deadlineSection = '<h2 style="color:#e74c3c;margin-top:24px;">DEADLINE ALERTS</h2><ul>';
+      deadlines.forEach(function(d) {
+        var days = Math.floor((new Date(d.due_date).getTime() - Date.now()) / 86400000);
+        deadlineSection += '<li><strong>' + days + ' days</strong> — ' + (d.title || '?').slice(0, 80) + ' (OPI ' + d.opi_score + ')</li>';
+      });
+      deadlineSection += '</ul>';
+    }
+
+    // Proposal candidates
+    var proposalSection = '';
+    if (proposalCandidates && proposalCandidates.length > 0) {
+      proposalSection = '<h2 style="color:#27ae60;margin-top:24px;">PROPOSAL CANDIDATES (Awaiting Your Approval)</h2><ul>';
+      proposalCandidates.forEach(function(c) {
+        proposalSection += '<li>' + (c.title || '?').slice(0, 80) + ' — OPI ' + c.opi_score + '</li>';
+      });
+      proposalSection += '</ul><p style="color:#666;font-size:12px;">To trigger: /api/produce-proposal?id=OPPORTUNITY_ID</p>';
+    }
+
+    // Pipeline summary
+    var pipelineRows = state.pipeline.slice(0, 15).map(function(o) {
+      return '<tr><td style="padding:4px 8px;border-bottom:1px solid #eee;">' + (o.opi_score || 0) + '</td>' +
+        '<td style="padding:4px 8px;border-bottom:1px solid #eee;">' + (o.stage || 'identified') + '</td>' +
+        '<td style="padding:4px 8px;border-bottom:1px solid #eee;">' + (o.title || '?').slice(0, 70) + '</td>' +
+        '<td style="padding:4px 8px;border-bottom:1px solid #eee;">' + (o.due_date || 'TBD').slice(0, 10) + '</td></tr>';
+    }).join('');
+
+    var sessionCost = costLog.reduce(function(s, c) { return s + c.cost_usd; }, 0);
+
+    var htmlBody = '<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">' +
+      '<div style="background:#1a1a2e;color:#00d4ff;padding:16px;border-radius:8px 8px 0 0;">' +
+      '<h1 style="margin:0;font-size:20px;">HGI ORGANISM — Morning Brief</h1>' +
+      '<p style="margin:4px 0 0;font-size:12px;color:#aaa;">' + new Date().toLocaleDateString('en-US', {weekday:'long', year:'numeric', month:'long', day:'numeric'}) + ' | Session cost: $' + sessionCost.toFixed(4) + '</p>' +
+      '</div>' +
+      '<div style="background:#fff;padding:16px;border:1px solid #ddd;border-top:none;">' +
+      '<h2 style="color:#1a1a2e;margin-top:0;">Dashboard</h2>' +
+      '<div style="white-space:pre-wrap;font-size:13px;line-height:1.5;background:#f8f9fa;padding:12px;border-radius:4px;">' + dashText.replace(/</g, '&lt;').slice(0, 3000) + '</div>' +
+      deadlineSection +
+      proposalSection +
+      (newOppsFound > 0 ? '<h2 style="margin-top:24px;">Hunting Results</h2><div style="font-size:13px;background:#f8f9fa;padding:12px;border-radius:4px;white-space:pre-wrap;">' + huntText.replace(/</g, '&lt;').slice(0, 2000) + '</div>' : '') +
+      '<h2 style="margin-top:24px;">Pipeline (' + state.pipeline.length + ' active)</h2>' +
+      '<table style="width:100%;font-size:12px;border-collapse:collapse;">' +
+      '<tr style="background:#f0f0f0;"><th style="padding:4px 8px;text-align:left;">OPI</th><th style="padding:4px 8px;text-align:left;">Stage</th><th style="padding:4px 8px;text-align:left;">Opportunity</th><th style="padding:4px 8px;text-align:left;">Due</th></tr>' +
+      pipelineRows +
+      '</table>' +
+      (scanText ? '<h2 style="margin-top:24px;">Pipeline Scanner</h2><div style="font-size:12px;background:#f8f9fa;padding:12px;border-radius:4px;white-space:pre-wrap;">' + scanText.replace(/</g, '&lt;').slice(0, 2000) + '</div>' : '') +
+      '<p style="color:#999;font-size:11px;margin-top:24px;border-top:1px solid #eee;padding-top:12px;">Agents fired: ' + sessionResults.length + ' | Trigger: ' + trigger + ' | Pipeline: ' + state.pipeline.length + ' opps</p>' +
+      '</div></body></html>';
+
+    var emailResp = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + RESEND_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: 'HGI Organism <onboarding@resend.dev>',
+        to: ['Christophero@hgi-global.com'],
+        subject: 'HGI Morning Brief — ' + state.pipeline.length + ' opps | ' + (newOppsFound > 0 ? newOppsFound + ' new' : 'no new') + (deadlines.length > 0 ? ' | ' + deadlines.length + ' deadlines' : ''),
+        html: htmlBody
+      })
+    });
+    if (emailResp.ok) {
+      log('NOTIFY: Morning brief sent to Christophero@hgi-global.com');
+    } else {
+      var errText = await emailResp.text();
+      log('NOTIFY: Email failed (' + emailResp.status + '): ' + errText.slice(0, 200));
+    }
+  } catch(e) {
+    log('NOTIFY: Error sending morning brief: ' + e.message);
+  }
+}
+
 async function claudeCall(system, prompt, maxTokens, opts) {
   opts = opts || {};
   var model = opts.model || 'claude-sonnet-4-6';
@@ -7079,6 +7181,11 @@ async function runSession(trigger) {
 
     log('=== SESSION COMPLETE: ' + id + ' | ' + allResults.length + ' agent outputs ===');
     log('Completed: ' + allResults.map(function(r) { return r.agent + '(' + r.chars + ')'; }).join(', '));
+
+    // ═══ MORNING BRIEF EMAIL ═══
+    try {
+      await sendMorningBrief(state, allResults, trigger, newOppsFound, proposalCandidates || []);
+    } catch(notifyErr) { log('NOTIFY error: ' + notifyErr.message); }
 
     // Flush cost log to hunt_runs
     if (costLog.length > 0) {
