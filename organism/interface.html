@@ -1130,6 +1130,433 @@ function WinnabilityScoringModule(p){
   );
 }
 
+
+// ============================================================
+// PROPOSAL ENGINE — Section-by-section proposal workspace
+// ============================================================
+function ProposalEngineModule(p){
+  var pl=p.pl;
+  var st1=useState('single'),mode=st1[0],setMode=st1[1];
+  var st2=useState('Executive Summary'),section=st2[0],setSection=st2[1];
+  var st3=useState(''),rfpContext=st3[0],setRfpContext=st3[1];
+  var st4=useState(''),addContext=st4[0],setAddContext=st4[1];
+  var st5=useState({}),sections=st5[0],setSections=st5[1];
+  var st6=useState(null),generating=st6[0],setGenerating=st6[1];
+  var st7=useState(null),autoProgress=st7[0],setAutoProgress=st7[1];
+  var st8=useState(null),improveResult=st8[0],setImproveResult=st8[1];
+
+  var sectionList=['Executive Summary','Technical Approach','Management Approach','Staffing Plan','Past Performance Matrix','Transition / Mobilization Plan','Pricing Narrative','Compliance Matrix','Clarifying Questions','Red Team Critique'];
+
+  useEffect(function(){
+    if(pl.selected){
+      if(pl.selected.rfp_text)setRfpContext(pl.selected.rfp_text.substring(0,5000));
+      else if(pl.selected.scope_analysis)setRfpContext(pl.selected.scope_analysis.substring(0,3000));
+      // Load existing proposal content into sections
+      if(pl.selected.proposal_content){
+        var parsed={};
+        var parts=pl.selected.proposal_content.split(/(?=^#{1,3}\s)/m);
+        parts.forEach(function(part){
+          sectionList.forEach(function(s){
+            if(part.toLowerCase().includes(s.toLowerCase()))parsed[s]=part.trim();
+          });
+        });
+        if(Object.keys(parsed).length>0)setSections(parsed);
+      }
+    }
+  },[pl.selected?pl.selected.id:null]);
+
+  function generateSection(sec){
+    setGenerating(sec);
+    var prompt='Generate the "'+sec+'" section for a government proposal.\n'+
+      'RFP Context:\n'+rfpContext.substring(0,3000)+
+      (addContext?'\nAdditional Context: '+addContext:'')+
+      (pl.selected?'\nOpportunity: '+pl.selected.title+' ('+pl.selected.agency+')':'');
+
+    callClaude(prompt,'You are HGI\'s proposal writer. Write a submission-ready proposal section. Be specific, cite HGI capabilities and past performance. No placeholders.',6000
+    ).then(function(r){
+      setSections(function(prev){var n=Object.assign({},prev);n[sec]=r;return n});
+      setGenerating(null);
+    });
+  }
+
+  function autoGenerateAll(){
+    setAutoProgress({current:0,total:sectionList.length});
+    var i=0;
+    function next(){
+      if(i>=sectionList.length){setAutoProgress(null);return}
+      var sec=sectionList[i];
+      setAutoProgress({current:i+1,total:sectionList.length,section:sec});
+      setGenerating(sec);
+      var prompt='Generate the "'+sec+'" section for a government proposal.\nRFP: '+rfpContext.substring(0,2000)+
+        (pl.selected?'\nOpp: '+pl.selected.title+' ('+pl.selected.agency+')':'');
+      callClaude(prompt,'You are HGI\'s proposal writer. Write submission-ready content.',4000
+      ).then(function(r){
+        setSections(function(prev){var n=Object.assign({},prev);n[sec]=r;return n});
+        setGenerating(null);i++;next();
+      });
+    }
+    next();
+  }
+
+  function improveSection(sec,action){
+    setImproveResult(null);setGenerating(sec);
+    var content=sections[sec]||'';
+    fetch('/api/proposal-improve',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({section:sec,content:content,action:action,rfp_context:rfpContext.substring(0,2000)})
+    }).then(function(r){return r.json()}).then(function(d){
+      if(action==='improve'){setSections(function(prev){var n=Object.assign({},prev);n[sec]=d.improved||d.content||content;return n})}
+      else{setImproveResult(d.critique||d.red_team||JSON.stringify(d))}
+      setGenerating(null);
+    }).catch(function(){setGenerating(null)});
+  }
+
+  function produceProposal(){
+    if(!pl.selected)return;
+    fetch('/api/produce-proposal?id='+encodeURIComponent(pl.selected.id),{method:'POST'});
+  }
+
+  function exportDocx(){
+    if(!pl.selected)return;
+    window.open('/api/proposal-doc?id='+encodeURIComponent(pl.selected.id));
+  }
+
+  return e('div',{style:{padding:'24px 32px',maxWidth:1100}},
+    e('h2',{style:{color:GOLD,marginBottom:4}},'Proposal Engine'),
+    e('div',{style:{fontSize:12,color:TEXT_D,marginBottom:12}},'Select a pipeline opportunity or paste RFP text manually'),
+
+    pl.pipeline.length>0?e(OpportunitySelector,{pipeline:pl.pipeline,selected:pl.selected,onSelect:pl.select,loading:pl.loading}):
+    e(Card,{style:{background:ORANGE+'15'}},e('div',{style:{color:ORANGE,fontSize:12}},'No active opportunities.')),
+
+    !pl.selected&&!rfpContext?e(Card,{style:{background:GOLD+'11',borderColor:GOLD+'33'}},
+      e('div',{style:{color:GOLD,fontWeight:'bold',fontSize:12}},'Recommended: Complete Full Workflow First'),
+      e('div',{style:{color:TEXT_D,fontSize:12}},'For best results run Full Workflow first. Or paste RFP text below.')
+    ):null,
+
+    // Mode tabs
+    e('div',{style:{display:'flex',gap:0,marginBottom:12,marginTop:12}},
+      [{k:'single',l:'Single Section'},{k:'auto',l:'Auto Generate All'},{k:'workspace',l:'Draft Workspace'}].map(function(m){
+        return e('div',{key:m.k,onClick:function(){setMode(m.k)},style:{
+          padding:'8px 16px',cursor:'pointer',fontSize:12,fontWeight:'bold',
+          background:mode===m.k?GOLD+'22':BG3,color:mode===m.k?GOLD:TEXT_D,
+          border:'1px solid '+(mode===m.k?GOLD+'44':BORDER),borderRadius:m.k==='single'?'4px 0 0 4px':m.k==='workspace'?'0 4px 4px 0':0
+        }},m.l);
+      })
+    ),
+
+    // RFP Context
+    e(Card,null,
+      e(Label,{text:'RFP CONTEXT (paste if not loaded from workflow)'}),
+      e(Textarea,{value:rfpContext,onChange:function(ev){setRfpContext(ev.target.value)},placeholder:'Paste RFP text...',rows:4})
+    ),
+
+    // Single Section mode
+    mode==='single'?e('div',null,
+      e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}},
+        e('div',null,e(Label,{text:'SECTION'}),e(Sel,{value:section,onChange:function(ev){setSection(ev.target.value)},options:sectionList.map(function(s){return{value:s,label:s}})})),
+        e('div',null,e(Label,{text:'ADDITIONAL CONTEXT'}),e(Input,{value:addContext,onChange:function(ev){setAddContext(ev.target.value)},placeholder:'Agency, key win themes, incumbent...'}))
+      ),
+      e(Btn,{onClick:function(){generateSection(section)},disabled:generating===section,style:{marginTop:12}},
+        generating===section?'Generating...':'Generate: '+section
+      ),
+      sections[section]?e('div',{style:{marginTop:12}},
+        e(AIOut,{content:sections[section],label:section.toUpperCase()}),
+        e('div',{style:{display:'flex',gap:8,marginTop:8}},
+          e(Btn,{onClick:function(){improveSection(section,'improve')},variant:'ghost',small:true},'✨ Improve'),
+          e(Btn,{onClick:function(){improveSection(section,'redteam')},variant:'ghost',small:true},'🔴 Red Team')
+        ),
+        improveResult?e(AIOut,{content:improveResult,label:'RED TEAM CRITIQUE'}):null
+      ):null
+    ):null,
+
+    // Auto Generate mode
+    mode==='auto'?e('div',null,
+      e(Btn,{onClick:autoGenerateAll,disabled:autoProgress!==null,style:{marginBottom:12}},
+        autoProgress?'Generating '+autoProgress.current+'/'+autoProgress.total+': '+(autoProgress.section||'...'):'Auto Generate All Sections'
+      ),
+      autoProgress?e('div',{style:{background:BG3,borderRadius:4,height:8,marginBottom:12}},
+        e('div',{style:{background:GOLD,height:8,borderRadius:4,width:(autoProgress.current/autoProgress.total*100)+'%',transition:'width 0.3s'}})
+      ):null
+    ):null,
+
+    // Workspace mode
+    mode==='workspace'?e('div',null,
+      e('div',{style:{display:'flex',gap:8,marginBottom:12}},
+        e(Btn,{onClick:produceProposal},'🚀 Produce Full Proposal (Opus)'),
+        e(Btn,{onClick:exportDocx,variant:'ghost'},'📄 Export .docx')
+      ),
+      pl.selected&&pl.selected.proposal_content?e(Card,null,
+        e(Label,{text:'CURRENT PROPOSAL DRAFT'}),
+        e('div',{style:{fontSize:12,whiteSpace:'pre-wrap',maxHeight:600,overflowY:'auto',lineHeight:1.6}},pl.selected.proposal_content.substring(0,15000))
+      ):null
+    ):null,
+
+    // Section pills
+    e('div',{style:{display:'flex',gap:6,flexWrap:'wrap',marginTop:16}},
+      sectionList.map(function(s){
+        var has=!!sections[s];
+        return e('div',{key:s,onClick:function(){setSection(s);setMode('single')},style:{
+          padding:'4px 10px',borderRadius:4,fontSize:11,cursor:'pointer',
+          background:has?GREEN+'22':BG3,color:has?GREEN:TEXT_D,border:'1px solid '+(has?GREEN+'44':BORDER)
+        }},s);
+      })
+    )
+  );
+}
+
+// ============================================================
+// FINANCIAL & PRICING — 6-tab pricing command center
+// ============================================================
+function FinancialPricingModule(p){
+  var pl=p.pl;
+  var st1=useState('intelligence'),tab=st1[0],setTab=st1[1];
+
+  // Price Intelligence state
+  var st2=useState({contractType:'Best Value — Tradeoff',setAside:'Full & Open Competition',priceWeight:30,value:'',years:3,geography:'Louisiana',incumbent:'',incumbentAdv:'Unknown',hgiIncumbent:'No',competitors:'ICF, Hagerty, Witt O\'Brien\'s, Dewberry',marginTarget:12,protestRisk:'Low'}),intel=st2[0],setIntel=st2[1];
+
+  // Cost Buildup state
+  var st3=useState([
+    {cat:'Program Manager',hours:2080,rate:155,fringe:0.32,oh:0.15,ga:0.08,fee:0.07},
+    {cat:'Senior Analyst',hours:2080,rate:125,fringe:0.32,oh:0.15,ga:0.08,fee:0.07}
+  ]),labor=st3[0],setLabor=st3[1];
+  var st4=useState([{desc:'Travel',amount:25000},{desc:'Other Direct Costs',amount:10000}]),odcs=st4[0],setOdcs=st4[1];
+
+  // Results
+  var st5=useState(null),marketRates=st5[0],setMarketRates=st5[1];
+  var st6=useState(null),ptw=st6[0],setPtw=st6[1];
+  var st7=useState(null),narrative=st7[0],setNarrative=st7[1];
+  var st8=useState(false),loading=st8[0],setLoading=st8[1];
+
+  // Period pricing
+  var st9=useState({baseMonths:12,optionYears:2,escalation:3}),periods=st9[0],setPeriods=st9[1];
+
+  // Eval model
+  var st10=useState({price:30,technical:40,pastPerf:20,management:10}),evalWeights=st10[0],setEvalWeights=st10[1];
+
+  // Scenario
+  var st11=useState({feeAdj:0,rateAdj:0,hoursAdj:0}),scenario=st11[0],setScenario=st11[1];
+
+  useEffect(function(){
+    if(pl.selected){
+      setIntel(function(prev){return Object.assign({},prev,{value:pl.selected.estimated_value||'',geography:pl.selected.vertical==='disaster'?'Louisiana':prev.geography})});
+    }
+  },[pl.selected?pl.selected.id:null]);
+
+  function calcLoaded(row){
+    var loaded=row.rate*(1+row.fringe)*(1+row.oh)*(1+row.ga)*(1+row.fee);
+    return Math.round(loaded*100)/100;
+  }
+  function calcRowTotal(row){return Math.round(calcLoaded(row)*row.hours)}
+
+  var laborTotal=labor.reduce(function(s,r){return s+calcRowTotal(r)},0);
+  var odcTotal=odcs.reduce(function(s,r){return s+(parseFloat(r.amount)||0)},0);
+  var feeEarned=Math.round(laborTotal*0.07);
+  var baseYear=laborTotal+odcTotal;
+  var contractTotal=Math.round(baseYear*(1+periods.optionYears*(1+periods.escalation/100)));
+  var profitMargin=baseYear>0?Math.round(feeEarned/baseYear*1000)/10:0;
+
+  function analyzeMarket(){
+    setLoading(true);
+    callClaude('Analyze market rates for this opportunity: '+JSON.stringify(intel)+
+      (pl.selected?'\nOpp: '+pl.selected.title:''),
+      'You are a pricing analyst. Provide GSA ranges per role, competitor indirect rates, locality factors, red flags, and HGI positioning.',5000
+    ).then(function(r){setMarketRates(r);setLoading(false)});
+  }
+
+  function runPTW(){
+    setLoading(true);
+    callClaude('Run full Price-to-Win analysis: '+JSON.stringify(intel)+'\nLabor total: $'+laborTotal+', ODCs: $'+odcTotal,
+      'You are a PTW analyst. Provide: bidder pool, competitor pricing models, incumbent analysis, eval score modeling, price sensitivity, 3 win price scenarios, pricing strategy, risks.',6000
+    ).then(function(r){setPtw(r);setLoading(false)});
+  }
+
+  function generateNarrative(){
+    setLoading(true);
+    callClaude('Generate an 800+ word cost narrative for submission. Labor total: $'+laborTotal+', ODCs: $'+odcTotal+', Contract total: $'+contractTotal+'. '+JSON.stringify(intel),
+      'Write a submission-ready cost narrative covering methodology, rate justification, indirect rates, ODC justification, cost realism, value proposition, fee reasonableness.',6000
+    ).then(function(r){setNarrative(r);setLoading(false)});
+  }
+
+  function updateLabor(i,field,val){
+    setLabor(function(prev){var n=prev.slice();n[i]=Object.assign({},n[i],{[field]:field==='cat'?val:parseFloat(val)||0});return n});
+  }
+  function addLabor(){setLabor(function(prev){return prev.concat([{cat:'',hours:2080,rate:100,fringe:0.32,oh:0.15,ga:0.08,fee:0.07}])})}
+  function removeLabor(i){setLabor(function(prev){return prev.filter(function(_,j){return j!==i})})}
+
+  var tabs=[{k:'intelligence',l:'⚡ Price Intelligence'},{k:'buildup',l:'Cost Buildup'},{k:'periods',l:'Period Pricing'},{k:'eval',l:'Eval Score Model'},{k:'scenario',l:'Scenario Modeling'},{k:'narrative',l:'Cost Narrative'}];
+
+  return e('div',{style:{padding:'24px 32px',maxWidth:1200}},
+    e('h2',{style:{color:GOLD,marginBottom:4}},'Financial Analysis & Pricing'),
+    e('div',{style:{fontSize:12,color:TEXT_D,marginBottom:12}},'Price Intelligence · Cost Buildup · PTW · Evaluation Modeling · Cost Narrative'),
+
+    pl.pipeline.length>0?e(OpportunitySelector,{pipeline:pl.pipeline,selected:pl.selected,onSelect:pl.select,loading:pl.loading}):null,
+
+    // Live summary bar
+    e('div',{style:{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:8,margin:'12px 0'}},
+      [{l:'BASE YEAR',v:'$'+baseYear.toLocaleString()},{l:'CONTRACT TOTAL',v:'$'+contractTotal.toLocaleString()},{l:'PROFIT MARGIN',v:profitMargin+'%',c:profitMargin>=intel.marginTarget?GREEN:RED},
+       {l:'LABOR TOTAL',v:'$'+laborTotal.toLocaleString()},{l:'ODCs',v:'$'+odcTotal.toLocaleString()},{l:'WIN PRICE',v:ptw?'See PTW →':'Click PTW'}].map(function(s){
+        return e('div',{key:s.l,style:{background:BG2,border:'1px solid '+BORDER,borderRadius:4,padding:12,textAlign:'center'}},
+          e('div',{style:{fontSize:16,fontWeight:'bold',color:s.c||GOLD}},s.v),
+          e('div',{style:{fontSize:9,letterSpacing:2,color:TEXT_D,marginTop:4}},s.l)
+        );
+      })
+    ),
+
+    // Cost composition bar
+    e('div',{style:{marginBottom:12}},
+      e('div',{style:{fontSize:10,color:TEXT_D,marginBottom:4}},'COST COMPOSITION — $'+(baseYear+feeEarned).toLocaleString()+' total'),
+      e('div',{style:{display:'flex',height:8,borderRadius:4,overflow:'hidden'}},
+        laborTotal>0?e('div',{style:{flex:laborTotal,background:GREEN}}):null,
+        odcTotal>0?e('div',{style:{flex:odcTotal,background:BLUE}}):null,
+        feeEarned>0?e('div',{style:{flex:feeEarned,background:CYAN}}):null
+      ),
+      e('div',{style:{display:'flex',gap:16,fontSize:10,color:TEXT_D,marginTop:4}},
+        e('span',null,'■ Labor '+(baseYear>0?Math.round(laborTotal/baseYear*100):0)+'%'),
+        e('span',null,'■ ODCs '+(baseYear>0?Math.round(odcTotal/baseYear*100):0)+'%'),
+        e('span',null,'■ Fee '+(baseYear>0?Math.round(feeEarned/baseYear*100):0)+'%')
+      )
+    ),
+
+    // Tab navigation
+    e('div',{style:{display:'flex',gap:0,marginBottom:12,flexWrap:'wrap'}},
+      tabs.map(function(t,i){
+        return e('div',{key:t.k,onClick:function(){setTab(t.k)},style:{
+          padding:'8px 14px',cursor:'pointer',fontSize:11,fontWeight:'bold',
+          background:tab===t.k?GOLD+'22':BG3,color:tab===t.k?GOLD:TEXT_D,
+          border:'1px solid '+(tab===t.k?GOLD+'44':BORDER),
+          borderRadius:i===0?'4px 0 0 4px':i===tabs.length-1?'0 4px 4px 0':0
+        }},t.l);
+      })
+    ),
+
+    // Tab content
+    tab==='intelligence'?e(Card,null,
+      e(Label,{text:'PRICE INTELLIGENCE ENGINE'}),
+      e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12}},
+        e('div',null,e(Label,{text:'CONTRACT TYPE'}),e(Sel,{value:intel.contractType,onChange:function(ev){setIntel(Object.assign({},intel,{contractType:ev.target.value}))},options:[{value:'Best Value — Tradeoff',label:'Best Value — Tradeoff'},{value:'LPTA',label:'LPTA'},{value:'Fixed Price',label:'Fixed Price'}]})),
+        e('div',null,e(Label,{text:'SET-ASIDE'}),e(Sel,{value:intel.setAside,onChange:function(ev){setIntel(Object.assign({},intel,{setAside:ev.target.value}))},options:[{value:'Full & Open Competition',label:'Full & Open'},{value:'8(a)',label:'8(a)'},{value:'SDB',label:'SDB'},{value:'WOSB',label:'WOSB'}]})),
+        e('div',null,e(Label,{text:'PRICE WEIGHT (%)'}),e(Input,{value:intel.priceWeight,onChange:function(ev){setIntel(Object.assign({},intel,{priceWeight:ev.target.value}))}}))
+      ),
+      e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginTop:12}},
+        e('div',null,e(Label,{text:'EST. VALUE'}),e(Input,{value:intel.value,onChange:function(ev){setIntel(Object.assign({},intel,{value:ev.target.value}))},placeholder:'$8,500,000'})),
+        e('div',null,e(Label,{text:'CONTRACT YEARS'}),e(Input,{value:intel.years,onChange:function(ev){setIntel(Object.assign({},intel,{years:ev.target.value}))}})),
+        e('div',null,e(Label,{text:'GEOGRAPHY'}),e(Input,{value:intel.geography,onChange:function(ev){setIntel(Object.assign({},intel,{geography:ev.target.value}))}}))
+      ),
+      e('div',{style:{marginTop:12}},e(Label,{text:'KNOWN COMPETITORS'}),e(Input,{value:intel.competitors,onChange:function(ev){setIntel(Object.assign({},intel,{competitors:ev.target.value}))}})),
+      e('div',{style:{marginTop:12}},
+        e(Label,{text:'HGI TARGET PROFIT MARGIN (%)'}),
+        e('div',{style:{display:'flex',alignItems:'center',gap:12}},
+          e('input',{type:'range',min:5,max:75,value:intel.marginTarget,onChange:function(ev){setIntel(Object.assign({},intel,{marginTarget:parseInt(ev.target.value)}))},style:{flex:1,accentColor:GOLD}}),
+          e('span',{style:{color:GOLD,fontWeight:'bold'}},intel.marginTarget+'% target')
+        )
+      ),
+      e('div',{style:{display:'flex',gap:8,marginTop:16}},
+        e(Btn,{onClick:analyzeMarket,disabled:loading},'1. Analyze Market Rates'),
+        e(Btn,{onClick:runPTW,disabled:loading},'2. Run Full PTW Analysis')
+      ),
+      marketRates?e(AIOut,{content:marketRates,label:'MARKET RATE ANALYSIS'}):null,
+      ptw?e(AIOut,{content:ptw,label:'PRICE-TO-WIN ANALYSIS'}):null
+    ):
+
+    tab==='buildup'?e(Card,null,
+      e(Label,{text:'COST BUILDUP — LABOR'}),
+      e('div',{style:{overflowX:'auto'}},
+        e('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:11}},
+          e('thead',null,e('tr',null,
+            ['Category','Hours','Rate','Fringe','OH','G&A','Fee','Loaded','Total',''].map(function(h){
+              return e('th',{key:h,style:{padding:'6px 4px',textAlign:'left',color:TEXT_D,borderBottom:'1px solid '+BORDER,fontSize:10}},h);
+            })
+          )),
+          e('tbody',null,
+            labor.map(function(row,i){
+              return e('tr',{key:i},
+                e('td',{style:{padding:4}},e('input',{value:row.cat,onChange:function(ev){updateLabor(i,'cat',ev.target.value)},style:{background:BG3,color:TEXT,border:'1px solid '+BORDER,padding:'4px 6px',width:140,fontSize:11}})),
+                e('td',{style:{padding:4}},e('input',{type:'number',value:row.hours,onChange:function(ev){updateLabor(i,'hours',ev.target.value)},style:{background:BG3,color:TEXT,border:'1px solid '+BORDER,padding:'4px 6px',width:60,fontSize:11}})),
+                e('td',{style:{padding:4}},e('input',{type:'number',value:row.rate,onChange:function(ev){updateLabor(i,'rate',ev.target.value)},style:{background:BG3,color:TEXT,border:'1px solid '+BORDER,padding:'4px 6px',width:60,fontSize:11}})),
+                e('td',{style:{padding:4,color:TEXT_D}},Math.round(row.fringe*100)+'%'),
+                e('td',{style:{padding:4,color:TEXT_D}},Math.round(row.oh*100)+'%'),
+                e('td',{style:{padding:4,color:TEXT_D}},Math.round(row.ga*100)+'%'),
+                e('td',{style:{padding:4,color:TEXT_D}},Math.round(row.fee*100)+'%'),
+                e('td',{style:{padding:4,color:CYAN}},String.fromCharCode(36)+calcLoaded(row).toFixed(2)),
+                e('td',{style:{padding:4,fontWeight:'bold'}},String.fromCharCode(36)+calcRowTotal(row).toLocaleString()),
+                e('td',{style:{padding:4}},e('span',{onClick:function(){removeLabor(i)},style:{color:RED,cursor:'pointer'}},'✕'))
+              );
+            })
+          )
+        )
+      ),
+      e('div',{style:{display:'flex',justifyContent:'space-between',marginTop:8}},
+        e(Btn,{onClick:addLabor,variant:'ghost',small:true},'+ Add Row'),
+        e('div',{style:{fontWeight:'bold',color:GOLD}},'Labor Subtotal: '+String.fromCharCode(36)+laborTotal.toLocaleString())
+      ),
+      e('div',{style:{marginTop:16}},
+        e(Label,{text:'OTHER DIRECT COSTS (ODCs)'}),
+        odcs.map(function(odc,i){
+          return e('div',{key:i,style:{display:'flex',gap:8,marginBottom:4}},
+            e('input',{value:odc.desc,onChange:function(ev){setOdcs(function(prev){var n=prev.slice();n[i]={desc:ev.target.value,amount:n[i].amount};return n})},style:{background:BG3,color:TEXT,border:'1px solid '+BORDER,padding:'4px 8px',flex:1,fontSize:11},placeholder:'Description'}),
+            e('input',{type:'number',value:odc.amount,onChange:function(ev){setOdcs(function(prev){var n=prev.slice();n[i]={desc:n[i].desc,amount:parseFloat(ev.target.value)||0};return n})},style:{background:BG3,color:TEXT,border:'1px solid '+BORDER,padding:'4px 8px',width:100,fontSize:11}})
+          );
+        }),
+        e('div',{style:{fontWeight:'bold',color:GOLD,textAlign:'right',marginTop:4}},'ODC Total: '+String.fromCharCode(36)+odcTotal.toLocaleString())
+      ),
+      e('div',{style:{marginTop:12,padding:12,background:GREEN+'11',borderRadius:4,textAlign:'center',fontWeight:'bold',fontSize:16,color:GREEN}},
+        'GRAND TOTAL: '+String.fromCharCode(36)+(laborTotal+odcTotal).toLocaleString()
+      )
+    ):
+
+    tab==='periods'?e(Card,null,
+      e(Label,{text:'PERIOD PRICING'}),
+      e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12}},
+        e('div',null,e(Label,{text:'BASE YEAR MONTHS'}),e(Input,{value:periods.baseMonths,onChange:function(ev){setPeriods(Object.assign({},periods,{baseMonths:parseInt(ev.target.value)||12}))}})),
+        e('div',null,e(Label,{text:'OPTION YEARS'}),e(Input,{value:periods.optionYears,onChange:function(ev){setPeriods(Object.assign({},periods,{optionYears:parseInt(ev.target.value)||0}))}})),
+        e('div',null,e(Label,{text:'ESCALATION %'}),e(Input,{value:periods.escalation,onChange:function(ev){setPeriods(Object.assign({},periods,{escalation:parseFloat(ev.target.value)||0}))}}))
+      ),
+      e('div',{style:{marginTop:16}},
+        e('div',{style:{display:'flex',justifyContent:'space-between',padding:'8px 0',borderBottom:'1px solid '+BORDER}},e('strong',null,'Base Year'),e('span',{style:{color:GOLD}},String.fromCharCode(36)+baseYear.toLocaleString())),
+        Array.from({length:periods.optionYears},function(_,i){
+          var yr=Math.round(baseYear*Math.pow(1+periods.escalation/100,i+1));
+          return e('div',{key:i,style:{display:'flex',justifyContent:'space-between',padding:'8px 0',borderBottom:'1px solid '+BORDER}},e('span',null,'Option Year '+(i+1)),e('span',null,String.fromCharCode(36)+yr.toLocaleString()));
+        }),
+        e('div',{style:{display:'flex',justifyContent:'space-between',padding:'8px 0',fontWeight:'bold',color:GREEN,fontSize:16}},e('span',null,'CONTRACT TOTAL'),e('span',null,String.fromCharCode(36)+contractTotal.toLocaleString()))
+      )
+    ):
+
+    tab==='eval'?e(Card,null,
+      e(Label,{text:'EVALUATION SCORE MODEL'}),
+      e('div',{style:{fontSize:12,color:TEXT_D,marginBottom:12}},'Adjust weights to model evaluation scoring. Must total 100%.'),
+      [{k:'price',l:'PRICE'},{k:'technical',l:'TECHNICAL'},{k:'pastPerf',l:'PAST PERFORMANCE'},{k:'management',l:'MANAGEMENT'}].map(function(w){
+        return e('div',{key:w.k,style:{marginBottom:12}},
+          e('div',{style:{display:'flex',justifyContent:'space-between'}},e(Label,{text:w.l}),e('span',{style:{color:GOLD,fontWeight:'bold'}},evalWeights[w.k]+'%')),
+          e('input',{type:'range',min:0,max:100,value:evalWeights[w.k],onChange:function(ev){setEvalWeights(Object.assign({},evalWeights,{[w.k]:parseInt(ev.target.value)}))},style:{width:'100%',accentColor:GOLD}})
+        );
+      }),
+      e('div',{style:{color:Object.values(evalWeights).reduce(function(a,b){return a+b},0)===100?GREEN:RED,fontWeight:'bold',fontSize:12}},
+        'Total: '+Object.values(evalWeights).reduce(function(a,b){return a+b},0)+'%'+(Object.values(evalWeights).reduce(function(a,b){return a+b},0)!==100?' — must equal 100%':'  ✓'))
+    ):
+
+    tab==='scenario'?e(Card,null,
+      e(Label,{text:'SCENARIO MODELING'}),
+      [{k:'feeAdj',l:'FEE ADJUSTMENT',range:[-50,50]},{k:'rateAdj',l:'LABOR RATE ADJUSTMENT',range:[-30,30]},{k:'hoursAdj',l:'HOURS ADJUSTMENT',range:[-30,30]}].map(function(s){
+        return e('div',{key:s.k,style:{marginBottom:16}},
+          e('div',{style:{display:'flex',justifyContent:'space-between'}},e(Label,{text:s.l}),e('span',{style:{color:scenario[s.k]>=0?GREEN:RED,fontWeight:'bold'}},scenario[s.k]>0?'+'+scenario[s.k]+'%':scenario[s.k]+'%')),
+          e('input',{type:'range',min:s.range[0],max:s.range[1],value:scenario[s.k],onChange:function(ev){setScenario(Object.assign({},scenario,{[s.k]:parseInt(ev.target.value)}))},style:{width:'100%',accentColor:GOLD}})
+        );
+      }),
+      e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginTop:12}},
+        e('div',{style:{textAlign:'center',padding:12,background:BG3,borderRadius:4}},e('div',{style:{fontSize:10,color:TEXT_D}},'BASE'),e('div',{style:{fontSize:18,fontWeight:'bold'}},String.fromCharCode(36)+baseYear.toLocaleString())),
+        e('div',{style:{textAlign:'center',padding:12,background:GOLD+'11',borderRadius:4}},e('div',{style:{fontSize:10,color:TEXT_D}},'ADJUSTED'),e('div',{style:{fontSize:18,fontWeight:'bold',color:GOLD}},String.fromCharCode(36)+Math.round(baseYear*(1+scenario.feeAdj/100)*(1+scenario.rateAdj/100)*(1+scenario.hoursAdj/100)).toLocaleString())),
+        e('div',{style:{textAlign:'center',padding:12,background:BG3,borderRadius:4}},e('div',{style:{fontSize:10,color:TEXT_D}},'DELTA'),e('div',{style:{fontSize:18,fontWeight:'bold',color:scenario.feeAdj+scenario.rateAdj+scenario.hoursAdj>=0?GREEN:RED}},String.fromCharCode(36)+Math.abs(Math.round(baseYear*(1+scenario.feeAdj/100)*(1+scenario.rateAdj/100)*(1+scenario.hoursAdj/100))-baseYear).toLocaleString()))
+      )
+    ):
+
+    tab==='narrative'?e(Card,null,
+      e(Label,{text:'COST NARRATIVE'}),
+      e('div',{style:{fontSize:12,color:TEXT_D,marginBottom:12}},'AI-generated 800+ word submission-ready cost narrative.'),
+      e(Btn,{onClick:generateNarrative,disabled:loading},loading?'Generating...':'Generate Cost Narrative'),
+      narrative?e(AIOut,{content:narrative,label:'COST NARRATIVE (800+ words)'}):null
+    ):null
+  );
+}
+
 function PlaceholderModule(p){
   return e('div',{style:{padding:'40px 32px'}},
     e('h2',{style:{color:GOLD,marginBottom:8}},p.title),
@@ -1193,6 +1620,8 @@ function App(){
     if(active==='brief')return e(OpportunityBriefModule,{pl:pl,nav:nav});
     if(active==='research')return e(ResearchAnalysisModule,{pl:pl,nav:nav});
     if(active==='scoring')return e(WinnabilityScoringModule,{pl:pl,nav:nav});
+    if(active==='proposal')return e(ProposalEngineModule,{pl:pl,nav:nav});
+    if(active==='financial')return e(FinancialPricingModule,{pl:pl,nav:nav});
     var mod=modules.find(function(m){return m.key===active});
     return e(PlaceholderModule,{title:mod?mod.label:active,pl:pl});
   }
