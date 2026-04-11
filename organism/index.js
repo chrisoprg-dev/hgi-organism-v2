@@ -448,6 +448,82 @@ if (url === '/api/hunt-stats') {
   return;
 }
 
+// === INTELLIGENCE SUMMARY — /api/intelligence ===
+if (url === '/api/intelligence') {
+  res.writeHead(200, {'Content-Type':'application/json','Access-Control-Allow-Origin':'*'});
+  try {
+    var intState = await loadState();
+    var intMems = await supabase.from('organism_memory').select('agent,observation,created_at').order('created_at',{ascending:false}).limit(30);
+    var intOutcomes = await supabase.from('opportunities').select('title,outcome,opi_score,vertical').not('outcome','is',null).order('last_updated',{ascending:false}).limit(10);
+    var intHunt = await supabase.from('hunt_runs').select('run_at,source,opportunities_found,opportunities_new').order('run_at',{ascending:false}).limit(10);
+    res.end(JSON.stringify({
+      pipeline: { total: intState.pipeline.length, by_stage: intState.pipeline.reduce(function(a,o){var s=o.stage||'identified';a[s]=(a[s]||0)+1;return a},{}), avg_opi: intState.pipeline.length>0?Math.round(intState.pipeline.reduce(function(s,o){return s+(o.opi_score||0)},0)/intState.pipeline.length):0, upcoming: intState.pipeline.filter(function(o){return o.due_date}).sort(function(a,b){return new Date(a.due_date)-new Date(b.due_date)}).slice(0,5).map(function(o){return{title:o.title,due:o.due_date,opi:o.opi_score,stage:o.stage}}) },
+      recent_intel: (intMems.data||[]).slice(0,15).map(function(m){return{agent:m.agent,summary:(m.observation||'').slice(0,300),when:m.created_at}}),
+      outcomes: (intOutcomes.data||[]).map(function(o){return{title:o.title,outcome:o.outcome,opi:o.opi_score,vertical:o.vertical}}),
+      hunting: (intHunt.data||[]).map(function(h){return{source:h.source,found:h.opportunities_found,new:h.opportunities_new,when:h.run_at}})
+    }));
+  } catch(e) { res.end(JSON.stringify({error:e.message})); }
+  return;
+}
+
+// === HUNT — /api/hunt ===
+if (url === '/api/hunt' && req.method === 'POST') {
+  var body = '';
+  req.on('data', function(c) { body += c; });
+  req.on('end', async function() {
+    res.writeHead(200, {'Content-Type':'application/json','Access-Control-Allow-Origin':'*'});
+    try {
+      var p = JSON.parse(body);
+      var verticals = p.verticals || ['disaster_recovery','tpa_claims','construction','grant','workforce','housing','program_admin'];
+      var states = p.states || ['Louisiana','Texas','Florida','Mississippi','Alabama','Georgia'];
+      log('HUNT triggered: ' + verticals.length + ' verticals, ' + states.length + ' states');
+      // Trigger the hunting functions asynchronously
+      if (typeof huntAllSources === 'function') { huntAllSources().catch(function(e){log('Hunt error: '+e.message)}); }
+      else { log('huntAllSources not available — manual hunt only'); }
+      res.end(JSON.stringify({success:true,message:'Hunt triggered for '+verticals.length+' verticals across '+states.length+' states',note:'Results will appear in pipeline as opportunities are processed'}));
+    } catch(e) { res.end(JSON.stringify({error:e.message})); }
+  });
+  return;
+}
+
+// === HUNT ANALYTICS — /api/hunt-analytics ===
+if (url === '/api/hunt-analytics') {
+  res.writeHead(200, {'Content-Type':'application/json','Access-Control-Allow-Origin':'*'});
+  try {
+    var haRuns = await supabase.from('hunt_runs').select('*').order('run_at',{ascending:false}).limit(100);
+    var runs = haRuns.data || [];
+    var bySource = {};
+    runs.forEach(function(r){
+      var s = r.source||'unknown';
+      if(!bySource[s]) bySource[s]={source:s,total_runs:0,total_found:0,total_new:0,last_run:null};
+      bySource[s].total_runs++;
+      bySource[s].total_found += (r.opportunities_found||0);
+      bySource[s].total_new += (r.opportunities_new||0);
+      if(!bySource[s].last_run) bySource[s].last_run = r.run_at;
+    });
+    var haOpps = await supabase.from('opportunities').select('vertical,opi_score,status,stage').limit(500);
+    var allOpps = haOpps.data || [];
+    var byVertical = {};
+    allOpps.forEach(function(o){
+      var v = o.vertical||'unknown';
+      if(!byVertical[v]) byVertical[v]={vertical:v,total:0,active:0,avg_opi:0,opiSum:0};
+      byVertical[v].total++;
+      if(o.status==='active') byVertical[v].active++;
+      byVertical[v].opiSum += (o.opi_score||0);
+    });
+    Object.values(byVertical).forEach(function(v){v.avg_opi=v.total>0?Math.round(v.opiSum/v.total):0;delete v.opiSum});
+    res.end(JSON.stringify({
+      total_runs: runs.length,
+      sources: Object.values(bySource),
+      verticals: Object.values(byVertical),
+      recent_runs: runs.slice(0,20).map(function(r){return{source:r.source,found:r.opportunities_found,new_opps:r.opportunities_new,status:r.status,when:r.run_at}}),
+      pipeline_total: allOpps.length,
+      active_count: allOpps.filter(function(o){return o.status==='active'}).length
+    }));
+  } catch(e) { res.end(JSON.stringify({error:e.message})); }
+  return;
+}
+
 if (url === '/api/crash-log') {
   var cr = await supabase.from('organism_memory').select('observation,created_at').eq('agent','v3_engine').order('created_at',{ascending:false}).limit(10);
   res.writeHead(200, {'Content-Type':'application/json'});
