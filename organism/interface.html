@@ -599,7 +599,7 @@ function PipelineTracker(p){
   var stE4=useState({}),oppDetails=stE4[0],setOppDetails=stE4[1]; // keyed by opp id
 
   var pipeline=pl.pipeline||[];
-  var stages=['all','identified','qualifying','pursuing','proposal','submitted','won','lost'];
+  var stages=['all','identified','pursuing','proposal','submitted','won','lost'];
   var filtered=stageFilter==='all'?pipeline:pipeline.filter(function(o){return o.stage===stageFilter});
 
   function stageCounts(){
@@ -1194,7 +1194,7 @@ function OpportunityDetail(p){
         e(Label,{text:'ACTIONS'}),
         e('div',{style:{display:'flex',gap:8,flexWrap:'wrap'}},
           e(Btn,{onClick:function(){fetch('/api/produce-proposal?id='+encodeURIComponent(o.id),{method:'POST'})},variant:'primary'},'PRODUCE PROPOSAL'),
-          e(Btn,{onClick:function(){fetch('/api/compliance-check?id='+encodeURIComponent(o.id),{method:'POST'})},variant:'ghost'},'COMPLIANCE CHECK'),
+          e(Btn,{onClick:function(){fetch('/api/compliance-check?id='+encodeURIComponent(o.id),{method:'POST'}).then(function(r){return r.json()}).then(function(d){detShowToast(d.compliance_summary||d.result||'Compliance check complete')}).catch(function(){detShowToast('Compliance check failed')})},variant:'ghost'},'COMPLIANCE CHECK'),
           o.source_url?e(Btn,{onClick:function(){window.open(o.source_url)},variant:'ghost'},'SOURCE'):null,
           e(Btn,{onClick:function(){window.open('/api/proposal-doc?id='+encodeURIComponent(o.id))},variant:'ghost'},'DOWNLOAD DOC')
         )
@@ -1363,7 +1363,7 @@ function ManualIntake(p){
   }
 
   function handleSubmit(){
-    if(!title.trim()){alert('Title is required');return}
+    if(!title.trim()){setResult({error:'Title is required'});return}
     setSubmitting(true);setResult(null);
     fetch('/api/intake',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
@@ -2423,10 +2423,10 @@ function CRMModule(p){
 
   var filtered=contacts.filter(function(c){
     if(search&&!JSON.stringify(c).toLowerCase().includes(search.toLowerCase()))return false;
-    if(agencyFilter!=='All Agencies'&&c.org!==agencyFilter)return false;
+    if(agencyFilter!=='All Agencies'&&c.organization!==agencyFilter)return false;
     return true;
   });
-  var agencies=['All Agencies'].concat(Array.from(new Set(contacts.map(function(c){return c.org}).filter(Boolean))));
+  var agencies=['All Agencies'].concat(Array.from(new Set(contacts.map(function(c){return c.organization}).filter(Boolean))));
 
   return e('div',{style:{padding:'24px 32px',maxWidth:1000}},
     e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}},
@@ -2451,11 +2451,11 @@ function CRMModule(p){
     ):null,
     filtered.length===0?e(Card,null,e('div',{style:{textAlign:'center',padding:20,color:TEXT_D}},'No contacts yet — add decision-makers at agencies HGI pursues.')):
     filtered.map(function(c,i){
-      var relColor=c.relationship==='hot'?RED:c.relationship==='warm'?ORANGE:c.relationship==='cold'?BLUE:CYAN;
+      var relColor=c.hgi_relationship==='hot'?RED:c.hgi_relationship==='warm'?ORANGE:c.hgi_relationship==='cold'?BLUE:CYAN;
       return e(Card,{key:i,style:{borderLeft:'3px solid '+relColor}},
         e('div',{style:{display:'flex',justifyContent:'space-between'}},
-          e('div',null,e('strong',null,c.name||'Unknown'),c.title?' — '+c.title:'',c.org?e('span',{style:{color:TEXT_D}},' · '+c.org):''),
-          e(Badge,{color:relColor},c.relationship||'new')
+          e('div',null,e('strong',null,c.name||'Unknown'),c.title?' — '+c.title:'',c.organization?e('span',{style:{color:TEXT_D}},' · '+c.organization):''),
+          e(Badge,{color:relColor},c.hgi_relationship||'new')
         ),
         e('div',{style:{fontSize:11,color:TEXT_D,marginTop:4}},c.email?c.email+' · ':'',c.phone||'',c.notes?' · '+c.notes:'')
       );
@@ -2598,7 +2598,7 @@ function WeeklyDigestModule(p){
     }).catch(function(){setLoading(false)});
   }
 
-  function exportDocx(){window.open('/api/export-module?type=digest')}
+  function exportDocx(){fetch('/api/export-module',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({module:'digest',content:digest,title:'Weekly Capture Intelligence Digest',agency:'HGI Global'})}).then(function(r){return r.blob()}).then(function(b){var u=URL.createObjectURL(b);var a=document.createElement('a');a.href=u;a.download='HGI_Weekly_Digest.docx';a.click();URL.revokeObjectURL(u)})}
 
   return e('div',{style:{padding:'24px 32px',maxWidth:1000}},
     e('h2',{style:{color:GOLD,marginBottom:4}},'Weekly Digest'),
