@@ -279,6 +279,398 @@ function Dashboard(p){
 // ============================================================
 // PLACEHOLDER MODULES (Steps 2-7)
 // ============================================================
+
+// ============================================================
+// PIPELINE TRACKER
+// ============================================================
+function PipelineTracker(p){
+  var pl=p.pl;
+  var st1=useState('all'),stageFilter=st1[0],setStageFilter=st1[1];
+  var st2=useState(null),expanded=st2[0],setExpanded=st2[1];
+  var st3=useState(false),showAdd=st3[0],setShowAdd=st3[1];
+  var st4=useState(null),editing=st4[0],setEditing=st4[1];
+  var st5=useState(null),intelTab=st5[0],setIntelTab=st5[1];
+  var st6=useState(null),detailOpp=st6[0],setDetailOpp=st6[1];
+  var st7=useState(null),captureStrategy=st7[0],setCaptureStrategy=st7[1];
+  var st8=useState(false),csLoading=st8[0],setCsLoading=st8[1];
+
+  // Add form state
+  var st9=useState({title:'',agency:'',type:'',value:'',deadline:'',notes:'',stage:'identified',opi:50}),addForm=st9[0],setAddForm=st9[1];
+
+  var pipeline=pl.pipeline||[];
+  var stages=['all','identified','qualifying','pursuing','proposal','submitted','won','lost'];
+
+  var filtered=stageFilter==='all'?pipeline:pipeline.filter(function(o){return o.stage===stageFilter});
+
+  function stageCounts(){
+    var c={all:pipeline.length};
+    stages.forEach(function(s){if(s!=='all')c[s]=pipeline.filter(function(o){return o.stage===s}).length});
+    return c;
+  }
+  var counts=stageCounts();
+
+
+  function winPathStep(o){
+    if(o.stage==='won')return 8;
+    if(o.stage==='submitted')return 7;
+    if(o.has_proposal||o.proposal_content)return 5;
+    if(o.has_financial||o.financial_analysis)return 4;
+    if(o.has_intel||o.research_brief)return 3;
+    if(o.has_scope||o.scope_analysis)return 2;
+    return 1;
+  }
+
+  function WinPathBar(pp){
+    var o=pp.opp,step=winPathStep(o);
+    var steps=['Discovered','Scored','Researched','Financial','Proposal','Red Team','Export','Submitted','WON'];
+    return e('div',{style:{display:'flex',gap:2,margin:'4px 0'}},
+      steps.map(function(s,i){
+        var active=i<step;
+        return e('div',{key:s,style:{flex:1,height:4,borderRadius:2,background:active?GREEN:BORDER}});
+      })
+    );
+  }
+
+  function handleStageChange(opp,newStage){
+    if(!confirm('Change '+opp.title+' to '+newStage+'?'))return;
+    fetch('/api/update-stage',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({id:opp.id,stage:newStage})
+    }).then(function(){pl.refresh()});
+  }
+
+  function handleOutcome(opp,outcome){
+    var notes='';
+    if(outcome==='lost'){
+      var winner=prompt('Who won?');
+      var theirPrice=prompt('Their price?');
+      var ourPrice=prompt('Our bid amount?');
+      notes='Winner: '+(winner||'Unknown')+', Their price: '+(theirPrice||'N/A')+', Our price: '+(ourPrice||'N/A');
+    }
+    if(!confirm('Record '+opp.title+' as '+outcome.toUpperCase()+'?'))return;
+    fetch('/api/record-outcome',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({id:opp.id,outcome:outcome,notes:notes})
+    }).then(function(){pl.refresh()});
+  }
+
+  function getCapture(opp){
+    setCsLoading(true);setCaptureStrategy(null);
+    callClaude('Generate a capture strategy for this opportunity: '+opp.title+' ('+opp.agency+', '+(opp.vertical||'')+').'
+    ).then(function(r){setCaptureStrategy(r);setCsLoading(false)});
+  }
+
+  function exportBrief(opp){
+    window.open('/api/export-opportunity?id='+encodeURIComponent(opp.id));
+  }
+
+  function handleAdd(){
+    fetch('/api/intake',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(addForm)
+    }).then(function(){setShowAdd(false);setAddForm({title:'',agency:'',type:'',value:'',deadline:'',notes:'',stage:'identified',opi:50});pl.refresh()});
+  }
+
+  // If viewing detail
+  if(detailOpp){
+    return e(OpportunityDetail,{opp:detailOpp,onBack:function(){setDetailOpp(null)},pl:pl,nav:p.nav});
+  }
+
+  return e('div',{style:{padding:'24px 32px',maxWidth:1100}},
+    // Header
+    e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}},
+      e('div',null,
+        e('h2',{style:{color:GOLD,margin:0}},'Pipeline Tracker'),
+        e('div',{style:{fontSize:12,color:TEXT_D}},pipeline.length+' opportunities tracked')
+      ),
+      e('div',{style:{display:'flex',gap:8}},
+        e(Btn,{onClick:function(){setShowAdd(!showAdd)},variant:'primary'},showAdd?'Cancel':'+ Add Opportunity')
+      )
+    ),
+
+    // Add form
+    showAdd?e(Card,null,
+      e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}},
+        e('div',null,e(Label,{text:'TITLE'}),e(Input,{value:addForm.title,onChange:function(ev){setAddForm(Object.assign({},addForm,{title:ev.target.value}))},placeholder:'Opportunity title'})),
+        e('div',null,e(Label,{text:'AGENCY'}),e(Input,{value:addForm.agency,onChange:function(ev){setAddForm(Object.assign({},addForm,{agency:ev.target.value}))},placeholder:'Agency name'})),
+        e('div',null,e(Label,{text:'TYPE'}),e(Input,{value:addForm.type,onChange:function(ev){setAddForm(Object.assign({},addForm,{type:ev.target.value}))},placeholder:'FEMA PA, TPA, CDBG-DR...'})),
+        e('div',null,e(Label,{text:'EST. VALUE'}),e(Input,{value:addForm.value,onChange:function(ev){setAddForm(Object.assign({},addForm,{value:ev.target.value}))},placeholder:'$50M'})),
+        e('div',null,e(Label,{text:'DEADLINE'}),e(Input,{value:addForm.deadline,onChange:function(ev){setAddForm(Object.assign({},addForm,{deadline:ev.target.value}))},placeholder:'YYYY-MM-DD'})),
+        e('div',null,e(Label,{text:'STAGE'}),e(Sel,{value:addForm.stage,onChange:function(ev){setAddForm(Object.assign({},addForm,{stage:ev.target.value}))},options:stages.filter(function(s){return s!=='all'}).map(function(s){return{value:s,label:s.charAt(0).toUpperCase()+s.slice(1)}})}))
+      ),
+      e('div',{style:{marginTop:12}},e(Label,{text:'NOTES'}),e(Textarea,{value:addForm.notes,onChange:function(ev){setAddForm(Object.assign({},addForm,{notes:ev.target.value}))},placeholder:'Additional context...',rows:2})),
+      e('div',{style:{marginTop:12}},e(Btn,{onClick:handleAdd},'Submit'))
+    ):null,
+
+    // Stage filter pills
+    e('div',{style:{display:'flex',gap:6,marginBottom:16,flexWrap:'wrap'}},
+      stages.map(function(s){
+        var isActive=stageFilter===s;
+        var c=counts[s]||0;
+        return e('div',{key:s,onClick:function(){setStageFilter(s)},style:{
+          padding:'4px 12px',borderRadius:20,fontSize:11,cursor:'pointer',fontWeight:'bold',letterSpacing:1,textTransform:'uppercase',
+          background:isActive?stageColor(s)+'22':BG3,color:isActive?stageColor(s):TEXT_D,border:'1px solid '+(isActive?stageColor(s)+'44':BORDER)
+        }},s.charAt(0).toUpperCase()+s.slice(1)+' ('+c+')');
+      })
+    ),
+
+    // Opportunity list
+    filtered.length===0?e(Card,{style:{textAlign:'center',padding:40}},
+      e('div',{style:{fontSize:24,marginBottom:8}},'◈'),
+      e('div',{style:{color:TEXT_D}},'No opportunities tracked yet'),
+      e(Btn,{onClick:function(){setShowAdd(true)},style:{marginTop:12}},'+ Add First Opportunity')
+    ):
+    filtered.map(function(o){
+      var isExpanded=expanded===o.id;
+      var sc=o.opi_score||0;
+      var daysLeft=o.deadline?Math.ceil((new Date(o.deadline)-new Date())/(1000*60*60*24)):null;
+      var sc_color=stageColor(o.stage);
+
+      return e(Card,{key:o.id,style:{borderLeft:'3px solid '+sc_color}},
+        // Header row
+        e('div',{onClick:function(){setExpanded(isExpanded?null:o.id)},style:{cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center'}},
+          e('div',{style:{flex:1}},
+            e('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:4}},
+              e('span',{style:{width:8,height:8,borderRadius:4,background:sc_color,display:'inline-block'}}),
+              e('span',{style:{fontWeight:'bold',fontSize:14}},o.title),
+              e(OPIBadge,{score:sc}),
+              o.stage?e(Badge,{color:sc_color},o.stage):null
+            ),
+            e('div',{style:{fontSize:11,color:TEXT_D}},
+              o.agency||'',o.type?' · '+o.type:'',o.estimated_value?' · '+o.estimated_value:'',
+              daysLeft!==null?' · ':null,
+              daysLeft!==null?e('span',{style:{color:daysLeft<=5?RED:daysLeft<=10?ORANGE:TEXT_D}},daysLeft+' days left'):null
+            ),
+            e(WinPathBar,{opp:o})
+          ),
+          e('span',{style:{fontSize:16,color:TEXT_D}},isExpanded?'▼':'▶')
+        ),
+
+        // Expanded content
+        isExpanded?e('div',{style:{marginTop:12,borderTop:'1px solid '+BORDER,paddingTop:12}},
+          // Completeness indicators
+          e('div',{style:{display:'flex',gap:12,marginBottom:12}},
+            [{k:'has_scope',l:'SCOPE'},{k:'has_intel',l:'INTEL'},{k:'has_financial',l:'FIN'},{k:'has_staffing',l:'STAFF'},{k:'has_proposal',l:'PROP'}].map(function(f){
+              var has=o[f.k]||(f.k==='has_scope'&&o.scope_analysis)||(f.k==='has_proposal'&&o.proposal_content)||(f.k==='has_intel'&&o.research_brief)||(f.k==='has_financial'&&o.financial_analysis);
+              return e('span',{key:f.k,style:{fontSize:10,color:has?GREEN:TEXT_D,fontWeight:'bold',letterSpacing:1}},
+                (has?'✓':'—')+' '+f.l
+              );
+            })
+          ),
+
+          // Two-column detail
+          e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}},
+            // LEFT: Details
+            e('div',null,
+              e(Label,{text:'DETAILS'}),
+              [{l:'Agency',v:o.agency},{l:'Type',v:o.type||o.vertical},{l:'Value',v:o.estimated_value},{l:'Deadline',v:o.deadline},{l:'Added',v:o.created_at?new Date(o.created_at).toLocaleDateString():''},{l:'Source',v:o.source_url?e('a',{href:o.source_url,target:'_blank',style:{color:CYAN,textDecoration:'none'}},'View →'):''}].map(function(d){
+                return d.v?e('div',{key:d.l,style:{display:'flex',justifyContent:'space-between',padding:'4px 0',fontSize:12,borderBottom:'1px solid '+BORDER}},
+                  e('span',{style:{color:TEXT_D}},d.l),e('span',null,d.v)
+                ):null;
+              })
+            ),
+            // RIGHT: Stage + Actions
+            e('div',null,
+              e(Label,{text:'CHANGE STAGE'}),
+              e('div',{style:{display:'flex',gap:4,flexWrap:'wrap',marginBottom:12}},
+                ['identified','pursuing','proposal','submitted','watching'].map(function(s){
+                  return e(Btn,{key:s,onClick:function(){handleStageChange(o,s)},small:true,variant:o.stage===s?'primary':'ghost'},s);
+                })
+              ),
+              e(Label,{text:'ACTIONS'}),
+              e('div',{style:{display:'flex',flexDirection:'column',gap:6}},
+                e(Btn,{onClick:function(){setDetailOpp(o)},variant:'ghost',small:true},'◑ View Full Detail'),
+                e(Btn,{onClick:function(){getCapture(o)},variant:'ghost',small:true},'⚡ Get Capture Strategy'),
+                e(Btn,{onClick:function(){exportBrief(o)},variant:'ghost',small:true},'📄 Export Decision Brief'),
+                e(Btn,{onClick:function(){p.nav('proposal');pl.select(o)},variant:'ghost',small:true},'✦ Start Proposal')
+              )
+            )
+          ),
+
+          // Capture strategy
+          captureStrategy&&expanded===o.id?e('div',{style:{marginTop:12}},e(AIOut,{content:captureStrategy,loading:csLoading,label:'CAPTURE STRATEGY'})):null,
+
+          // Outcome recording
+          e('div',{style:{display:'flex',gap:8,marginTop:12,paddingTop:12,borderTop:'1px solid '+BORDER}},
+            e(Btn,{onClick:function(){handleOutcome(o,'won')},variant:'primary',small:true},'🏆 WON'),
+            e(Btn,{onClick:function(){handleOutcome(o,'lost')},variant:'danger',small:true},'LOST'),
+            e(Btn,{onClick:function(){handleOutcome(o,'no-bid')},variant:'ghost',small:true},'NO-BID')
+          )
+        ):null
+      );
+    })
+  );
+}
+
+// ============================================================
+// OPPORTUNITY DETAIL — Step-by-step status board
+// ============================================================
+function OpportunityDetail(p){
+  var opp=p.opp;
+  var st1=useState('overview'),subTab=st1[0],setSubTab=st1[1];
+  var st2=useState(null),memories=st2[0],setMemories=st2[1];
+  var st3=useState(null),fullOpp=st3[0],setFullOpp=st3[1];
+  var st4b=useState(-1),expandedStep=st4b[0],setExpandedStep=st4b[1];
+
+  useEffect(function(){
+    fetch('/api/opportunity-detail?id='+encodeURIComponent(opp.id)).then(function(r){return r.json()}).then(setFullOpp).catch(function(){});
+    fetch('/api/opportunity-memories?id='+encodeURIComponent(opp.id)).then(function(r){return r.json()}).then(function(d){setMemories(Array.isArray(d)?d:d.memories||[])}).catch(function(){});
+  },[opp.id]);
+
+  var o=fullOpp||opp;
+  var sc=o.opi_score||0;
+
+  var steps=[
+    {name:'INTAKE',done:true,data:o.source_url||o.created_at||'Discovered'},
+    {name:'SCOPE ANALYSIS',done:!!(o.scope_analysis||o.has_scope),data:o.scope_analysis},
+    {name:'FINANCIAL ANALYSIS',done:!!(o.financial_analysis||o.has_financial),data:o.financial_analysis},
+    {name:'COMPETITIVE RESEARCH',done:!!(o.research_brief||o.has_intel),data:o.research_brief},
+    {name:'WINNABILITY',done:!!(o.capture_action||o.winnability_score),data:o.capture_action},
+    {name:'PROPOSAL',done:!!(o.proposal_content||o.has_proposal),data:o.proposal_content},
+    {name:'RED TEAM',done:false,data:null}
+  ];
+
+  // Check red team from memories
+  if(memories){
+    var rtMems=memories.filter(function(m){return m.agent_name==='red_team_agent'||m.agent_name==='agentRedTeam'});
+    if(rtMems.length>0){steps[6].done=true;steps[6].data=rtMems.map(function(m){return m.observation}).join('\n\n');}
+  }
+
+  var subTabs=['overview','intel','proposal','activity'];
+
+  return e('div',{style:{padding:'24px 32px',maxWidth:1100}},
+    // Back button
+    e('div',{onClick:p.onBack,style:{cursor:'pointer',color:CYAN,fontSize:12,marginBottom:16}},'← Back to Pipeline'),
+
+    // Hero
+    e(Card,{style:{borderLeft:'4px solid '+(sc>=90?GREEN:sc>=75?CYAN:sc>=60?GOLD:RED)}},
+      e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}},
+        e('div',null,
+          e('div',{style:{fontSize:36,fontWeight:'bold',color:sc>=90?GREEN:sc>=75?CYAN:GOLD}},sc),
+          e('h2',{style:{margin:'4px 0',fontSize:18}},o.title),
+          e('div',{style:{fontSize:12,color:TEXT_D}},o.agency,' · ',o.vertical||'',o.deadline?' · Due '+o.deadline:'')
+        ),
+        e('div',{style:{textAlign:'right'}},
+          o.stage?e(Badge,{color:stageColor(o.stage)},o.stage):null,
+          o.estimated_value?e('div',{style:{fontSize:14,color:GOLD,marginTop:4}},o.estimated_value):null
+        )
+      )
+    ),
+
+    // Step-by-step pipeline
+    e(Card,null,
+      e(Label,{text:'PURSUIT PIPELINE'}),
+      steps.map(function(step,i){
+        
+        var icon=step.done?'✓':'—';
+        var clr=step.done?GREEN:TEXT_D;
+        var charCount=step.data?step.data.length:0;
+
+        return e('div',{key:step.name},
+          e('div',{onClick:function(){if(step.data)setExpandedStep(expandedStep===i?-1:i)},style:{
+            display:'flex',alignItems:'center',gap:12,padding:'8px 0',borderBottom:'1px solid '+BORDER,cursor:step.data?'pointer':'default'
+          }},
+            e('span',{style:{color:clr,fontWeight:'bold',width:20,textAlign:'center'}},icon),
+            e('span',{style:{flex:1,fontSize:13,color:step.done?TEXT:TEXT_D}},step.name),
+            charCount>0?e('span',{style:{fontSize:10,color:TEXT_D}},Math.round(charCount/1000)+'K chars'):null,
+            step.data?e('span',{style:{color:CYAN,fontSize:10}},expandedStep===i?'▼':'▶'):null
+          ),
+          expandedStep===i&&step.data?e('div',{style:{padding:'8px 32px',fontSize:12,whiteSpace:'pre-wrap',color:TEXT_D,maxHeight:300,overflowY:'auto',background:BG3,borderRadius:4,margin:'4px 0'}},
+            typeof step.data==='string'?step.data.substring(0,3000):JSON.stringify(step.data,null,2).substring(0,3000)
+          ):null
+        );
+      })
+    ),
+
+    // Completeness indicators
+    e('div',{style:{display:'flex',gap:16,margin:'12px 0'}},
+      [{k:'has_scope',l:'SCOPE'},{k:'has_intel',l:'INTEL'},{k:'has_financial',l:'FIN'},{k:'has_staffing',l:'STAFF'},{k:'has_proposal',l:'PROP'}].map(function(f){
+        var has=o[f.k];
+        return e('span',{key:f.k,style:{fontSize:11,color:has?GREEN:TEXT_D,fontWeight:'bold'}},
+          (has?'✓':'—')+' '+f.l
+        );
+      })
+    ),
+
+    // Sub-tabs
+    e('div',{style:{display:'flex',gap:0,borderBottom:'1px solid '+BORDER,marginBottom:12}},
+      subTabs.map(function(t){
+        return e('div',{key:t,onClick:function(){setSubTab(t)},style:{
+          padding:'8px 16px',cursor:'pointer',fontSize:12,fontWeight:'bold',letterSpacing:1,textTransform:'uppercase',
+          color:subTab===t?CYAN:TEXT_D,borderBottom:subTab===t?'2px solid '+CYAN:'2px solid transparent'
+        }},t);
+      })
+    ),
+
+    // Sub-tab content
+    subTab==='overview'?e('div',null,
+      o.scope_analysis?e(Card,null,e(Label,{text:'SCOPE ANALYSIS'}),e('div',{style:{fontSize:12,whiteSpace:'pre-wrap',maxHeight:300,overflowY:'auto'}},o.scope_analysis.substring(0,2000))):null,
+      o.description?e(Card,null,e(Label,{text:'EXECUTIVE SUMMARY'}),e('div',{style:{fontSize:12,whiteSpace:'pre-wrap'}},o.description.substring(0,2000))):null,
+      e(Card,null,
+        e(Label,{text:'ACTIONS'}),
+        e('div',{style:{display:'flex',gap:8,flexWrap:'wrap'}},
+          e(Btn,{onClick:function(){fetch('/api/produce-proposal?id='+encodeURIComponent(o.id),{method:'POST'})},variant:'primary'},'PRODUCE PROPOSAL'),
+          e(Btn,{onClick:function(){fetch('/api/compliance-check?id='+encodeURIComponent(o.id),{method:'POST'})},variant:'ghost'},'COMPLIANCE CHECK'),
+          o.source_url?e(Btn,{onClick:function(){window.open(o.source_url)},variant:'ghost'},'SOURCE'):null,
+          e(Btn,{onClick:function(){window.open('/api/proposal-doc?id='+encodeURIComponent(o.id))},variant:'ghost'},'DOWNLOAD DOC')
+        )
+      )
+    ):
+
+    subTab==='intel'?e('div',null,
+      memories?['intelligence_engine','crm_agent','winnability_agent','financial_agent','price_to_win'].map(function(agent){
+        var agentMems=memories.filter(function(m){return m.agent_name===agent});
+        if(!agentMems.length)return null;
+        return e(Card,{key:agent},
+          e(Label,{text:agent.replace(/_/g,' ').toUpperCase()}),
+          agentMems.slice(0,3).map(function(m,i){
+            return e('div',{key:i,style:{fontSize:12,padding:'6px 0',borderBottom:'1px solid '+BORDER,whiteSpace:'pre-wrap'}},m.observation?m.observation.substring(0,500):'');
+          })
+        );
+      }):e('div',{style:{color:TEXT_D}},'Loading intel...')
+    ):
+
+    subTab==='proposal'?e('div',null,
+      o.proposal_content?e(Card,null,
+        e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:8}},
+          e(Label,{text:'PROPOSAL'}),
+          e('div',{style:{display:'flex',gap:8}},
+            e(Btn,{onClick:function(){window.open('/api/proposal-doc?id='+encodeURIComponent(o.id))},small:true,variant:'primary'},'DOWNLOAD DOC'),
+            e(Btn,{onClick:function(){fetch('/api/produce-proposal?id='+encodeURIComponent(o.id),{method:'POST'})},small:true,variant:'ghost'},'REGENERATE')
+          )
+        ),
+        e('div',{style:{fontSize:12,whiteSpace:'pre-wrap',maxHeight:600,overflowY:'auto',lineHeight:1.6}},o.proposal_content.substring(0,10000))
+      ):e(Card,null,e('div',{style:{color:TEXT_D,textAlign:'center',padding:20}},'No proposal generated yet.'),
+        e('div',{style:{textAlign:'center'}},e(Btn,{onClick:function(){fetch('/api/produce-proposal?id='+encodeURIComponent(o.id),{method:'POST'})}},'PRODUCE PROPOSAL'))
+      )
+    ):
+
+    subTab==='activity'?e('div',null,
+      memories&&memories.length>0?e('div',null,
+        e('div',{style:{fontSize:12,color:TEXT_D,marginBottom:8}},memories.length+' memories from '+(new Set(memories.map(function(m){return m.agent_name}))).size+' agents'),
+        memories.slice(0,20).map(function(m,i){
+          return e(Card,{key:i},
+            e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:4}},
+              e('span',{style:{fontSize:11,color:CYAN,fontWeight:'bold'}},m.agent_name||'unknown'),
+              m.created_at?e('span',{style:{fontSize:10,color:TEXT_D}},new Date(m.created_at).toLocaleString()):null
+            ),
+            e('div',{style:{fontSize:12,whiteSpace:'pre-wrap'}},m.observation?m.observation.substring(0,500):'')
+          );
+        })
+      ):e('div',{style:{color:TEXT_D}},'No activity recorded yet.')
+    ):null,
+
+    // Outcome bar
+    e('div',{style:{display:'flex',gap:8,marginTop:16,paddingTop:16,borderTop:'1px solid '+BORDER}},
+      e(Btn,{onClick:function(){if(confirm('Record as WON?'))fetch('/api/record-outcome',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:o.id,outcome:'won'})}).then(function(){p.pl.refresh()})},variant:'primary'},'🏆 WON'),
+      e(Btn,{onClick:function(){var w=prompt('Who won?');if(confirm('Record as LOST?'))fetch('/api/record-outcome',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:o.id,outcome:'lost',notes:'Winner: '+(w||'Unknown')})}).then(function(){p.pl.refresh()})},variant:'danger'},'LOST'),
+      e(Btn,{onClick:function(){if(confirm('Record as NO-BID?'))fetch('/api/record-outcome',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:o.id,outcome:'no-bid'})}).then(function(){p.pl.refresh()})},variant:'ghost'},'NO-BID')
+    )
+  );
+}
+
+function stageColor(s){
+  var m={identified:CYAN,qualifying:BLUE,pursuing:GOLD,proposal:ORANGE,submitted:GREEN,won:GREEN,lost:RED,watching:TEXT_D};
+  return m[s]||TEXT_D;
+}
+
 function PlaceholderModule(p){
   return e('div',{style:{padding:'40px 32px'}},
     e('h2',{style:{color:GOLD,marginBottom:8}},p.title),
@@ -336,6 +728,7 @@ function App(){
 
   function renderModule(){
     if(active==='dashboard')return e(Dashboard,{pl:pl,nav:nav});
+    if(active==='tracker')return e(PipelineTracker,{pl:pl,nav:nav});
     var mod=modules.find(function(m){return m.key===active});
     return e(PlaceholderModule,{title:mod?mod.label:active,pl:pl});
   }
