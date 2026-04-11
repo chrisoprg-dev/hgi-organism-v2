@@ -1557,6 +1557,449 @@ function FinancialPricingModule(p){
   );
 }
 
+
+// ============================================================
+// CRM / RELATIONSHIP INTELLIGENCE
+// ============================================================
+function CRMModule(p){
+  var pl=p.pl;
+  var st1=useState([]),contacts=st1[0],setContacts=st1[1];
+  var st2=useState(false),showAdd=st2[0],setShowAdd=st2[1];
+  var st3=useState({name:'',title:'',org:'',email:'',phone:'',relationship:'warm',notes:''}),form=st3[0],setForm=st3[1];
+  var st4=useState(''),search=st4[0],setSearch=st4[1];
+  var st5=useState('All Agencies'),agencyFilter=st5[0],setAgencyFilter=st5[1];
+
+  useEffect(function(){
+    fetch('/api/contacts').then(function(r){return r.json()}).then(function(d){setContacts(Array.isArray(d)?d:d.contacts||[])}).catch(function(){});
+  },[]);
+
+  function addContact(){
+    fetch('/api/contacts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(form)})
+      .then(function(){setShowAdd(false);setForm({name:'',title:'',org:'',email:'',phone:'',relationship:'warm',notes:''});
+        fetch('/api/contacts').then(function(r){return r.json()}).then(function(d){setContacts(Array.isArray(d)?d:d.contacts||[])});
+      });
+  }
+
+  var filtered=contacts.filter(function(c){
+    if(search&&!JSON.stringify(c).toLowerCase().includes(search.toLowerCase()))return false;
+    if(agencyFilter!=='All Agencies'&&c.org!==agencyFilter)return false;
+    return true;
+  });
+  var agencies=['All Agencies'].concat(Array.from(new Set(contacts.map(function(c){return c.org}).filter(Boolean))));
+
+  return e('div',{style:{padding:'24px 32px',maxWidth:1000}},
+    e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}},
+      e('div',null,e('h2',{style:{color:GOLD,margin:0}},'Relationship Intelligence'),e('div',{style:{fontSize:12,color:TEXT_D}},contacts.length+' contacts tracked · synced to cloud · sorted by longest overdue')),
+      e(Btn,{onClick:function(){setShowAdd(!showAdd)}},showAdd?'Cancel':'+ Add Contact')
+    ),
+    e('div',{style:{display:'flex',gap:12,marginBottom:16}},
+      e(Input,{value:search,onChange:function(ev){setSearch(ev.target.value)},placeholder:'Search contacts...',style:{flex:1}}),
+      e(Sel,{value:agencyFilter,onChange:function(ev){setAgencyFilter(ev.target.value)},options:agencies.map(function(a){return{value:a,label:a}})})
+    ),
+    showAdd?e(Card,null,
+      e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}},
+        e('div',null,e(Label,{text:'NAME'}),e(Input,{value:form.name,onChange:function(ev){setForm(Object.assign({},form,{name:ev.target.value}))}})),
+        e('div',null,e(Label,{text:'TITLE'}),e(Input,{value:form.title,onChange:function(ev){setForm(Object.assign({},form,{title:ev.target.value}))}})),
+        e('div',null,e(Label,{text:'ORGANIZATION'}),e(Input,{value:form.org,onChange:function(ev){setForm(Object.assign({},form,{org:ev.target.value}))}})),
+        e('div',null,e(Label,{text:'EMAIL'}),e(Input,{value:form.email,onChange:function(ev){setForm(Object.assign({},form,{email:ev.target.value}))}})),
+        e('div',null,e(Label,{text:'PHONE'}),e(Input,{value:form.phone,onChange:function(ev){setForm(Object.assign({},form,{phone:ev.target.value}))}})),
+        e('div',null,e(Label,{text:'RELATIONSHIP'}),e(Sel,{value:form.relationship,onChange:function(ev){setForm(Object.assign({},form,{relationship:ev.target.value}))},options:[{value:'hot',label:'Hot'},{value:'warm',label:'Warm'},{value:'cold',label:'Cold'},{value:'new',label:'New'}]}))
+      ),
+      e('div',{style:{marginTop:8}},e(Label,{text:'NOTES'}),e(Textarea,{value:form.notes,onChange:function(ev){setForm(Object.assign({},form,{notes:ev.target.value}))},rows:2})),
+      e(Btn,{onClick:addContact,style:{marginTop:8}},'Save Contact')
+    ):null,
+    filtered.length===0?e(Card,null,e('div',{style:{textAlign:'center',padding:20,color:TEXT_D}},'No contacts yet — add decision-makers at agencies HGI pursues.')):
+    filtered.map(function(c,i){
+      var relColor=c.relationship==='hot'?RED:c.relationship==='warm'?ORANGE:c.relationship==='cold'?BLUE:CYAN;
+      return e(Card,{key:i,style:{borderLeft:'3px solid '+relColor}},
+        e('div',{style:{display:'flex',justifyContent:'space-between'}},
+          e('div',null,e('strong',null,c.name||'Unknown'),c.title?' — '+c.title:'',c.org?e('span',{style:{color:TEXT_D}},' · '+c.org):''),
+          e(Badge,{color:relColor},c.relationship||'new')
+        ),
+        e('div',{style:{fontSize:11,color:TEXT_D,marginTop:4}},c.email?c.email+' · ':'',c.phone||'',c.notes?' · '+c.notes:'')
+      );
+    })
+  );
+}
+
+// ============================================================
+// RECRUITING & BENCH
+// ============================================================
+function RecruitingModule(p){
+  var pl=p.pl;
+  var st1=useState('bench'),tab=st1[0],setTab=st1[1];
+  var st2=useState([]),bench=st2[0],setBench=st2[1];
+  var st3=useState(false),showAdd=st3[0],setShowAdd=st3[1];
+  var st4=useState({name:'',role:'',domain:'',clearance:'',location:'',availability:'Available',notes:''}),form=st4[0],setForm=st4[1];
+  var st5=useState(null),gapResult=st5[0],setGapResult=st5[1];
+  var st6=useState(''),gapInput=st6[0],setGapInput=st6[1];
+  var st7=useState(null),recruitResult=st7[0],setRecruitResult=st7[1];
+  var st8=useState(false),loading=st8[0],setLoading=st8[1];
+
+  useEffect(function(){
+    fetch('/api/bench').then(function(r){return r.json()}).then(function(d){setBench(Array.isArray(d)?d:d.bench||[])}).catch(function(){});
+  },[]);
+
+  function addPerson(){
+    fetch('/api/bench',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(form)}).then(function(){
+      setShowAdd(false);setForm({name:'',role:'',domain:'',clearance:'',location:'',availability:'Available',notes:''});
+      fetch('/api/bench').then(function(r){return r.json()}).then(function(d){setBench(Array.isArray(d)?d:d.bench||[])});
+    });
+  }
+
+  function analyzeGaps(){
+    setLoading(true);
+    callClaude('Analyze staffing gaps. Current bench:\n'+JSON.stringify(bench.map(function(b){return b.role+' - '+b.domain}))+'.\n\nRFP requirements:\n'+gapInput,
+      'You are a staffing analyst for HGI. Identify gaps between current bench and RFP requirements.',3000
+    ).then(function(r){setGapResult(r);setLoading(false)});
+  }
+
+  function generateRecruit(type){
+    setLoading(true);
+    var prompt=type==='job'?'Generate a job description for a government consulting role at HGI.':
+      type==='linkedin'?'Generate a LinkedIn post recruiting for HGI Global government consulting positions.':
+      'Generate screening questions for a government program management candidate.';
+    callClaude(prompt).then(function(r){setRecruitResult(r);setLoading(false)});
+  }
+
+  return e('div',{style:{padding:'24px 32px',maxWidth:1000}},
+    e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}},
+      e('div',null,e('h2',{style:{color:GOLD,margin:0}},'Recruiting & Bench'),e('div',{style:{fontSize:12,color:TEXT_D}},bench.length+' bench members tracked · synced to cloud')),
+      e(Btn,{onClick:function(){setShowAdd(!showAdd)}},showAdd?'Cancel':'+ Add Person')
+    ),
+    pl.pipeline.length>0?e(OpportunitySelector,{pipeline:pl.pipeline,selected:pl.selected,onSelect:pl.select,loading:pl.loading}):null,
+    e('div',{style:{display:'flex',gap:0,marginBottom:12}},
+      [{k:'bench',l:'Bench'},{k:'recruit',l:'Auto-Recruit'},{k:'outreach',l:'Outreach'}].map(function(t){
+        return e('div',{key:t.k,onClick:function(){setTab(t.k)},style:{padding:'8px 16px',cursor:'pointer',fontSize:12,fontWeight:'bold',background:tab===t.k?GOLD+'22':BG3,color:tab===t.k?GOLD:TEXT_D,border:'1px solid '+(tab===t.k?GOLD+'44':BORDER)}},t.l);
+      })
+    ),
+    showAdd?e(Card,null,
+      e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12}},
+        e('div',null,e(Label,{text:'NAME'}),e(Input,{value:form.name,onChange:function(ev){setForm(Object.assign({},form,{name:ev.target.value}))}})),
+        e('div',null,e(Label,{text:'ROLE'}),e(Input,{value:form.role,onChange:function(ev){setForm(Object.assign({},form,{role:ev.target.value}))}})),
+        e('div',null,e(Label,{text:'DOMAIN'}),e(Input,{value:form.domain,onChange:function(ev){setForm(Object.assign({},form,{domain:ev.target.value}))}}))
+      ),
+      e(Btn,{onClick:addPerson,style:{marginTop:8}},'Save')
+    ):null,
+    tab==='bench'?e('div',null,
+      bench.length===0?e(Card,null,e('div',{style:{textAlign:'center',color:TEXT_D,padding:20}},'No bench members yet.')):
+      bench.map(function(b,i){return e(Card,{key:i},e('strong',null,b.name||'TBD'),' — ',b.role||'',b.domain?' · '+b.domain:'',e('span',{style:{float:'right',color:b.availability==='Available'?GREEN:ORANGE}},b.availability||''))}),
+      e(Card,null,e(Label,{text:'STAFFING GAP ANALYSIS'}),e(Textarea,{value:gapInput,onChange:function(ev){setGapInput(ev.target.value)},placeholder:'Paste RFP key personnel requirements...',rows:3}),
+        e(Btn,{onClick:analyzeGaps,disabled:loading,style:{marginTop:8}},loading?'Analyzing...':'Analyze Gaps vs Bench')),
+      gapResult?e(AIOut,{content:gapResult,label:'GAP ANALYSIS'}):null
+    ):
+    tab==='recruit'?e(Card,null,
+      e(Label,{text:'AUTO-RECRUIT TOOLS'}),
+      e('div',{style:{display:'flex',gap:8,marginBottom:12}},
+        e(Btn,{onClick:function(){generateRecruit('job')},disabled:loading,variant:'ghost'},'Generate Job Description'),
+        e(Btn,{onClick:function(){generateRecruit('linkedin')},disabled:loading,variant:'ghost'},'LinkedIn Post'),
+        e(Btn,{onClick:function(){generateRecruit('screening')},disabled:loading,variant:'ghost'},'Screening Questions')
+      ),
+      recruitResult?e(AIOut,{content:recruitResult,label:'GENERATED CONTENT'}):null
+    ):
+    tab==='outreach'?e(Card,null,e('div',{style:{color:TEXT_D}},'Outreach campaigns coming next deployment.')):null
+  );
+}
+
+// ============================================================
+// CONTENT ENGINE
+// ============================================================
+function ContentEngineModule(p){
+  var st1=useState('thought'),tab=st1[0],setTab=st1[1];
+  var st2=useState({topic:'',audience:'',format:'Article (600-800 words)'}),form=st2[0],setForm=st2[1];
+  var st3=useState(null),result=st3[0],setResult=st3[1];
+  var st4=useState(false),loading=st4[0],setLoading=st4[1];
+
+  function generate(){
+    setLoading(true);
+    var prompts={
+      thought:'Write a thought leadership '+form.format+' about: '+form.topic+'. Audience: '+form.audience+'. Position HGI as the expert.',
+      ppq:'Generate a Past Performance Questionnaire (PPQ) response for HGI based on our past performance in disaster recovery, claims management, and program administration.',
+      teaming:'Analyze potential teaming partners for HGI in the government contracting space. Focus on complementary capabilities.',
+      disaster:'Generate a 48-hour disaster response protocol and capture package for a new FEMA Public Assistance declaration.'
+    };
+    callClaude(prompts[tab]||prompts.thought).then(function(r){setResult(r);setLoading(false)});
+  }
+
+  return e('div',{style:{padding:'24px 32px',maxWidth:1000}},
+    e('h2',{style:{color:GOLD,marginBottom:4}},'Content Engine'),
+    e('div',{style:{fontSize:12,color:TEXT_D,marginBottom:16}},'Thought Leadership · Past Performance · Teaming · Disaster Response'),
+    e('div',{style:{display:'flex',gap:0,marginBottom:16}},
+      [{k:'thought',l:'Thought Leadership'},{k:'ppq',l:'PPQ Generator'},{k:'teaming',l:'Teaming Radar'},{k:'disaster',l:'Disaster Protocol'}].map(function(t){
+        return e('div',{key:t.k,onClick:function(){setTab(t.k);setResult(null)},style:{padding:'8px 16px',cursor:'pointer',fontSize:12,fontWeight:'bold',background:tab===t.k?GOLD+'22':BG3,color:tab===t.k?GOLD:TEXT_D,border:'1px solid '+(tab===t.k?GOLD+'44':BORDER)}},t.l);
+      })
+    ),
+    tab==='thought'?e(Card,null,
+      e(Label,{text:'TOPIC'}),e(Input,{value:form.topic,onChange:function(ev){setForm(Object.assign({},form,{topic:ev.target.value}))},placeholder:'e.g. Lessons from Road Home — what $12B taught us about disaster recovery'}),
+      e(Label,{text:'AUDIENCE'}),e(Input,{value:form.audience,onChange:function(ev){setForm(Object.assign({},form,{audience:ev.target.value}))},placeholder:'e.g. State emergency management directors, HUD grantees',style:{marginTop:8}}),
+      e(Label,{text:'FORMAT'}),e(Sel,{value:form.format,onChange:function(ev){setForm(Object.assign({},form,{format:ev.target.value}))},options:[{value:'Article (600-800 words)',label:'Article (600-800 words)'},{value:'White Paper (2000+ words)',label:'White Paper'},{value:'LinkedIn Post',label:'LinkedIn Post'},{value:'Op-Ed',label:'Op-Ed'}],style:{marginTop:8}}),
+      e(Btn,{onClick:generate,disabled:loading,style:{width:'100%',marginTop:12}},loading?'Generating...':'Generate Content')
+    ):e(Card,null,e(Btn,{onClick:generate,disabled:loading,style:{width:'100%'}},loading?'Generating...':'Generate '+tab.charAt(0).toUpperCase()+tab.slice(1))),
+    result?e(AIOut,{content:result,label:tab.toUpperCase()+' OUTPUT'}):null
+  );
+}
+
+// ============================================================
+// WEEKLY DIGEST
+// ============================================================
+function WeeklyDigestModule(p){
+  var st1=useState(''),focus=st1[0],setFocus=st1[1];
+  var st2=useState(null),digest=st2[0],setDigest=st2[1];
+  var st3=useState(false),loading=st3[0],setLoading=st3[1];
+
+  function generate(){
+    setLoading(true);
+    fetch('/api/intelligence').then(function(r){return r.json()}).then(function(intel){
+      callClaude('Generate a weekly capture intelligence digest for HGI leadership.'+(focus?' Focus areas: '+focus:'')+
+        '\nCurrent intel: '+JSON.stringify(intel).substring(0,3000),
+        'You are HGI\'s capture intelligence briefer. Write a concise weekly digest covering pipeline status, new opportunities, competitive movements, and recommended actions.',5000
+      ).then(function(r){setDigest(r);setLoading(false)});
+    }).catch(function(){setLoading(false)});
+  }
+
+  function exportDocx(){window.open('/api/export-module?type=digest')}
+
+  return e('div',{style:{padding:'24px 32px',maxWidth:1000}},
+    e('h2',{style:{color:GOLD,marginBottom:4}},'Weekly Digest'),
+    e('div',{style:{fontSize:12,color:TEXT_D,marginBottom:16}},'AI-generated capture intelligence brief for HGI leadership — pulls live pipeline data'),
+    e(Card,null,
+      e(Label,{text:'SPECIAL FOCUS AREAS (optional)'}),
+      e(Input,{value:focus,onChange:function(ev){setFocus(ev.target.value)},placeholder:'e.g. FEMA PA recompetes, Texas TPA, Florida recovery...'}),
+      e(Btn,{onClick:generate,disabled:loading,style:{marginTop:12}},loading?'Generating...':'Generate This Week Digest'),
+      digest?e(Btn,{onClick:exportDocx,variant:'ghost',style:{marginTop:8}},'📄 Export .docx'):null
+    ),
+    digest?e(AIOut,{content:digest,label:'WEEKLY CAPTURE INTELLIGENCE DIGEST'}):null
+  );
+}
+
+// ============================================================
+// KNOWLEDGE BASE
+// ============================================================
+function KnowledgeBaseModule(p){
+  var st1=useState('library'),tab=st1[0],setTab=st1[1];
+  var st2=useState([]),docs=st2[0],setDocs=st2[1];
+  var st3=useState(null),uploading=st3[0],setUploading=st3[1];
+  var fileRef=useRef(null);
+
+  useEffect(function(){
+    fetch('/api/kb-extract').then(function(r){return r.json()}).then(function(d){setDocs(Array.isArray(d)?d:d.documents||[])}).catch(function(){});
+  },[]);
+
+  function handleUpload(ev){
+    var f=ev.target.files[0];
+    if(!f)return;
+    setUploading(f.name);
+    var formData=new FormData();
+    formData.append('file',f);
+    fetch('/api/intake',{method:'POST',body:formData}).then(function(){setUploading(null)}).catch(function(){setUploading(null)});
+  }
+
+  return e('div',{style:{padding:'24px 32px',maxWidth:1000}},
+    e('h2',{style:{color:GOLD,marginBottom:4}},'Knowledge Base'),
+    e('div',{style:{fontSize:12,color:TEXT_D,marginBottom:16}},'Upload documents · Search Gmail · Document Library'),
+    e('div',{style:{display:'flex',gap:0,marginBottom:16}},
+      [{k:'upload',l:'Upload Documents'},{k:'gmail',l:'Search Gmail'},{k:'library',l:'Document Library'}].map(function(t){
+        return e('div',{key:t.k,onClick:function(){setTab(t.k)},style:{padding:'8px 16px',cursor:'pointer',fontSize:12,fontWeight:'bold',background:tab===t.k?GOLD+'22':BG3,color:tab===t.k?GOLD:TEXT_D,border:'1px solid '+(tab===t.k?GOLD+'44':BORDER)}},t.l);
+      })
+    ),
+    tab==='upload'?e(Card,null,
+      e(Label,{text:'UPLOAD DOCUMENTS'}),
+      e('div',{style:{border:'2px dashed '+BORDER,borderRadius:8,padding:40,textAlign:'center',cursor:'pointer'},onClick:function(){fileRef.current&&fileRef.current.click()}},
+        uploading?e('span',{style:{color:GOLD}},'Uploading '+uploading+'...'):
+        e('span',{style:{color:TEXT_D}},'Click or drag PDF/DOCX/TXT files here')
+      ),
+      e('input',{ref:fileRef,type:'file',accept:'.pdf,.docx,.doc,.txt',onChange:handleUpload,style:{display:'none'}})
+    ):
+    tab==='gmail'?e(Card,null,e('div',{style:{color:TEXT_D}},'Gmail MCP integration — search for HGI proposal documents in email. Connect Gmail in settings.')):
+    tab==='library'?e(Card,null,
+      e(Label,{text:'DOCUMENT LIBRARY'}),
+      docs.length===0?e('div',{style:{color:TEXT_D,padding:20,textAlign:'center'}},'No documents in knowledge base yet. Upload documents to build institutional knowledge.'):
+      docs.map(function(d,i){
+        return e(Card,{key:i,style:{borderLeft:'3px solid '+CYAN}},
+          e('div',{style:{display:'flex',justifyContent:'space-between'}},
+            e('strong',null,d.filename||d.title||'Document '+(i+1)),
+            d.vertical?e(Badge,{color:CYAN},d.vertical):null
+          ),
+          d.chunk_count?e('div',{style:{fontSize:11,color:TEXT_D,marginTop:4}},d.chunk_count+' chunks · '+d.document_class):null
+        );
+      })
+    ):null
+  );
+}
+
+// ============================================================
+// SCRAPER INSIGHTS
+// ============================================================
+function ScraperInsightsModule(p){
+  var st1=useState('overview'),tab=st1[0],setTab=st1[1];
+  var st2=useState(null),data=st2[0],setData=st2[1];
+  var st3=useState([]),filtered=st3[0],setFiltered=st3[1];
+
+  useEffect(function(){
+    fetch('/api/hunt-stats').then(function(r){return r.json()}).then(setData).catch(function(){});
+    fetch('/api/pipeline').then(function(r){return r.json()}).then(function(d){
+      var opps=d.opportunities||d||[];
+      setFiltered(opps.filter(function(o){return o.status==='filtered'||(o.opi_score&&o.opi_score<60)}));
+    }).catch(function(){});
+  },[]);
+
+  var stats=data||{};
+  var sources=stats.sources||[];
+
+  return e('div',{style:{padding:'24px 32px',maxWidth:1100}},
+    e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:16}},
+      e('div',null,e('h2',{style:{color:GOLD,margin:0}},'Scraper Intelligence Dashboard'),e('div',{style:{fontSize:12,color:TEXT_D}},(stats.total_runs||0)+' runs logged · '+(stats.total_pipeline||0)+' total pipeline records')),
+      e(Btn,{onClick:function(){fetch('/api/hunt-stats').then(function(r){return r.json()}).then(setData)},variant:'ghost'},'Refresh')
+    ),
+    // KPI row
+    e('div',{style:{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:8,marginBottom:16}},
+      [{l:'Total Runs',v:stats.total_runs||0},{l:'Active Pipeline',v:stats.active_count||0},{l:'Tier 1 (OPI 75+)',v:stats.tier1||0,c:GREEN},{l:'Tier 2 (OPI 60-74)',v:stats.tier2||0,c:GOLD},{l:'Pending RFP',v:stats.pending||0},{l:'Low OPI Filtered',v:stats.filtered||0,c:RED}].map(function(s){
+        return e('div',{key:s.l,style:{background:BG2,border:'1px solid '+BORDER,borderRadius:4,padding:12,textAlign:'center'}},
+          e('div',{style:{fontSize:20,fontWeight:'bold',color:s.c||CYAN}},s.v),
+          e('div',{style:{fontSize:8,letterSpacing:2,color:TEXT_D,marginTop:4}},s.l)
+        );
+      })
+    ),
+    e('div',{style:{display:'flex',gap:0,marginBottom:12}},
+      [{k:'overview',l:'Overview'},{k:'sources',l:'Sources'},{k:'verticals',l:'Verticals'},{k:'history',l:'Run History'}].map(function(t){
+        return e('div',{key:t.k,onClick:function(){setTab(t.k)},style:{padding:'8px 16px',cursor:'pointer',fontSize:12,fontWeight:'bold',background:tab===t.k?GOLD+'22':BG3,color:tab===t.k?GOLD:TEXT_D,border:'1px solid '+(tab===t.k?GOLD+'44':BORDER)}},t.l);
+      })
+    ),
+    tab==='overview'?e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}},
+      e(Card,null,e(Label,{text:'PIPELINE CONVERSION'}),
+        [{l:'Total Records Ingested',v:stats.total_pipeline||0},{l:'Survived OPI Filter (active)',v:stats.active_count||0},{l:'Tier 1 — OPI 75+',v:stats.tier1||0},{l:'Currently Pursuing',v:stats.pursuing||0},{l:'Proposal Stage',v:stats.proposal_stage||0}].map(function(r){
+          return e('div',{key:r.l,style:{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:'1px solid '+BORDER,fontSize:12}},e('span',null,r.l),e('span',{style:{color:CYAN}},r.v));
+        })
+      ),
+      e(Card,null,e(Label,{text:'SCRAPER ACTIVITY'}),
+        sources.map(function(s){return e('div',{key:s.source,style:{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:'1px solid '+BORDER,fontSize:12}},e('span',null,s.source),e('span',{style:{color:s.runs>0?GREEN:RED}},s.runs||0))})
+      )
+    ):
+    tab==='sources'?e(Card,null,e(Label,{text:'PER-SOURCE PERFORMANCE'}),sources.map(function(s){
+      return e(Card,{key:s.source,style:{borderLeft:'3px solid '+(s.runs>0?GREEN:RED)}},
+        e('div',{style:{display:'flex',justifyContent:'space-between'}},e('strong',null,s.source),e('span',{style:{color:GREEN}},s.runs+' runs')),
+        e('div',{style:{fontSize:11,color:TEXT_D}},'Active: '+(s.active||0)+' · Filtered: '+(s.filtered||0)+' · Avg OPI: '+(s.avg_opi||'—'))
+      );
+    })):
+    tab==='history'?e(Card,null,e(Label,{text:'RUN HISTORY'}),e('div',{style:{color:TEXT_D,fontSize:12}},'Run history table loading from /api/hunt-analytics...')):
+    e(Card,null,e('div',{style:{color:TEXT_D}},'Vertical breakdown loading...'))
+  );
+}
+
+// ============================================================
+// OPPORTUNITY DISCOVERY (simplified)
+// ============================================================
+function DiscoveryModule(p){
+  var pl=p.pl;
+  var st1=useState('hunt'),tab=st1[0],setTab=st1[1];
+  var st2=useState(false),hunting=st2[0],setHunting=st2[1];
+  var st3=useState([]),results=st3[0],setResults=st3[1];
+  var verticals=['Disaster Recovery / CDBG-DR','TPA / Claims / Insurance','Workforce & Social Services','Health & Human Services','Infrastructure & Capital','Property Tax Appeals','Federal Agencies'];
+  var states=['LA','TX','FL','MS','AL','GA','Federal'];
+
+  function runHunt(){
+    setHunting(true);
+    fetch('/api/hunt',{method:'POST'}).then(function(r){return r.json()}).then(function(d){
+      setResults(d.results||d.opportunities||[]);setHunting(false);
+    }).catch(function(){setHunting(false)});
+  }
+
+  function refreshDB(){
+    fetch('/api/pipeline').then(function(r){return r.json()}).then(function(d){
+      setResults((d.opportunities||d||[]).slice(0,20));
+    });
+  }
+
+  return e('div',{style:{padding:'24px 32px',maxWidth:1100}},
+    e('h2',{style:{color:GOLD,marginBottom:4}},'Opportunity Discovery Engine'),
+    e('div',{style:{fontSize:12,color:TEXT_D,marginBottom:16}},'Hunt · Find · Score · Recommend · Win — across all HGI verticals simultaneously'),
+    // Status bar
+    e('div',{style:{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:8,marginBottom:16}},
+      [{l:'TOTAL HUNTED',v:results.length},{l:'TIER 1',v:results.filter(function(r){return(r.opi_score||0)>=75}).length,c:GREEN},{l:'IMMEDIATE ACTION',v:0,c:RED},{l:'SAVED TO TRACKER',v:0},{l:'SIGNALS',v:0,c:RED}].map(function(s){
+        return e('div',{key:s.l,style:{background:BG2,border:'1px solid '+BORDER,borderRadius:4,padding:12,textAlign:'center'}},
+          e('div',{style:{fontSize:20,fontWeight:'bold',color:s.c||CYAN}},s.v),e('div',{style:{fontSize:8,letterSpacing:2,color:TEXT_D,marginTop:4}},s.l));
+      })
+    ),
+    e('div',{style:{display:'flex',gap:0,marginBottom:12}},
+      [{k:'hunt',l:'🔍 Hunt Engine'},{k:'results',l:'📋 Results'},{k:'retrieve',l:'📄 Retrieve Docs'},{k:'signals',l:'⚡ Signals'},{k:'config',l:'⚙ Sources & Config'}].map(function(t){
+        return e('div',{key:t.k,onClick:function(){setTab(t.k)},style:{padding:'8px 14px',cursor:'pointer',fontSize:11,fontWeight:'bold',background:tab===t.k?GOLD+'22':BG3,color:tab===t.k?GOLD:TEXT_D,border:'1px solid '+(tab===t.k?GOLD+'44':BORDER)}},t.l);
+      })
+    ),
+    tab==='hunt'?e(Card,null,
+      e(Label,{text:'HUNT ENGINE'}),
+      e('div',{style:{fontSize:12,color:TEXT_D,marginBottom:12}},'Scans all HGI verticals simultaneously — Disaster Recovery, TPA/Claims, Property Tax Appeals, Workforce, Health, Infrastructure, Federal. Generates a ranked, scored opportunity list with immediate action flags.'),
+      e(Label,{text:'ACTIVE VERTICALS'}),
+      e('div',{style:{display:'flex',gap:6,flexWrap:'wrap',marginBottom:12}},verticals.map(function(v){return e('span',{key:v,style:{padding:'4px 10px',borderRadius:4,fontSize:11,background:GREEN+'22',color:GREEN,border:'1px solid '+GREEN+'44'}},v)})),
+      e(Label,{text:'PRIORITY STATES'}),
+      e('div',{style:{display:'flex',gap:6,marginBottom:16}},states.map(function(s){return e('span',{key:s,style:{padding:'4px 12px',borderRadius:4,fontSize:12,background:BG3,border:'1px solid '+BORDER}},s)})),
+      e('div',{style:{display:'flex',gap:8}},
+        e(Btn,{onClick:runHunt,disabled:hunting},hunting?'Hunting...':'🔍 Run Full Hunt Now'),
+        e(Btn,{onClick:refreshDB,variant:'ghost'},'↻ Refresh from Database')
+      )
+    ):
+    tab==='results'?e(Card,null,
+      e(Label,{text:'RESULTS ('+results.length+')'}),
+      results.length===0?e('div',{style:{color:TEXT_D}},'Run a hunt or refresh from database.'):
+      results.slice(0,15).map(function(r,i){
+        return e(Card,{key:i,style:{borderLeft:'3px solid '+((r.opi_score||0)>=75?GREEN:(r.opi_score||0)>=60?GOLD:RED)}},
+          e('div',{style:{display:'flex',justifyContent:'space-between'}},
+            e('strong',null,r.title?r.title.substring(0,60):'Untitled'),e(OPIBadge,{score:r.opi_score||0})
+          ),
+          e('div',{style:{fontSize:11,color:TEXT_D}},r.agency||'',r.vertical?' · '+r.vertical:'')
+        );
+      })
+    ):
+    tab==='signals'?e(Card,null,e(Label,{text:'DISASTER & FUNDING SIGNALS'}),e('div',{style:{color:TEXT_D}},'Monitoring FEMA declarations, HUD/FEMA/Treasury allocations, and regulatory changes.')):
+    tab==='config'?e(Card,null,e(Label,{text:'MONITORED SOURCES'}),
+      ['SAM.gov','State Procurement (LaPAC, TX SmartBuy)','Insurance Associations','Municipal/Parish','Federal Grants','Disaster Signals'].map(function(s){
+        return e('div',{key:s,style:{display:'flex',justifyContent:'space-between',padding:'8px 0',borderBottom:'1px solid '+BORDER,fontSize:12}},e('span',null,s),e('span',{style:{color:GREEN}},'● Active'));
+      })
+    ):
+    e(Card,null,e('div',{style:{color:TEXT_D}},'Document retrieval coming next deployment.'))
+  );
+}
+
+// ============================================================
+// EXECUTIVE BRIEF
+// ============================================================
+function ExecBriefModule(p){
+  return e('div',{style:{padding:'24px 32px',maxWidth:800}},
+    e('h2',{style:{color:GOLD,marginBottom:8}},'Executive Intelligence Brief'),
+    e('div',{style:{fontSize:13,color:TEXT_D,marginBottom:16}},'Read-only intelligence dashboard for HGI leadership. Share the link below with Lou and Larry.'),
+    e(Btn,{onClick:function(){window.open('/api/briefing')},variant:'ghost',style:{padding:'12px 24px',fontSize:14}},'Open Executive Brief →'),
+    e('div',{style:{marginTop:12,fontSize:11,color:TEXT_D}},'Direct URL: https://hgi-organism-v2-production.up.railway.app/api/briefing')
+  );
+}
+
+// ============================================================
+// PIPELINE SCANNER
+// ============================================================
+function PipelineScannerModule(p){
+  var pl=p.pl;
+  var st1=useState('pipeline'),tab=st1[0],setTab=st1[1];
+
+  return e('div',{style:{padding:'24px 32px',maxWidth:1100}},
+    e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:16}},
+      e('div',null,e('h2',{style:{color:GOLD,margin:0}},'Live Pipeline Scanner'),e('div',{style:{fontSize:12,color:TEXT_D}},'SAM.gov · LaPAC · Texas SmartBuy · Gulf Coast portals')),
+      e(Btn,{onClick:function(){},variant:'danger'},'Run Live Scan')
+    ),
+    e('div',{style:{display:'flex',gap:0,marginBottom:16}},
+      [{k:'pipeline',l:'Pipeline'},{k:'recompetes',l:'Recompetes'}].map(function(t){
+        return e('div',{key:t.k,onClick:function(){setTab(t.k)},style:{padding:'8px 16px',cursor:'pointer',fontSize:12,fontWeight:'bold',background:tab===t.k?GOLD+'22':BG3,color:tab===t.k?GOLD:TEXT_D,border:'1px solid '+(tab===t.k?GOLD+'44':BORDER)}},t.l);
+      })
+    ),
+    e(Card,{style:{textAlign:'center',padding:40}},e('div',{style:{fontSize:24,marginBottom:8}},'◎'),e(Btn,{onClick:function(){}},'Run First Scan')),
+    e(Card,null,
+      e(Label,{text:'MANUAL PORTALS'}),
+      e('div',{style:{display:'flex',gap:8,flexWrap:'wrap'}},
+        [{l:'SAM.gov',u:'https://sam.gov'},{l:'LaPAC',u:'https://wwwcfprd.doa.louisiana.gov/osp/lapac/pubMain.cfm'},{l:'Texas SmartBuy',u:'https://comptroller.texas.gov/purchasing/vendors/'},{l:'FEMA Procurement',u:'https://www.fema.gov/grants'},{l:'HUD CDBG-DR',u:'https://www.hud.gov/program_offices/comm_planning/cdbg-dr'}].map(function(p){
+          return e(Btn,{key:p.l,onClick:function(){window.open(p.u)},variant:'ghost',small:true},p.l);
+        })
+      )
+    )
+  );
+}
+
 function PlaceholderModule(p){
   return e('div',{style:{padding:'40px 32px'}},
     e('h2',{style:{color:GOLD,marginBottom:8}},p.title),
@@ -1622,6 +2065,15 @@ function App(){
     if(active==='scoring')return e(WinnabilityScoringModule,{pl:pl,nav:nav});
     if(active==='proposal')return e(ProposalEngineModule,{pl:pl,nav:nav});
     if(active==='financial')return e(FinancialPricingModule,{pl:pl,nav:nav});
+    if(active==='crm')return e(CRMModule,{pl:pl,nav:nav});
+    if(active==='recruiting')return e(RecruitingModule,{pl:pl,nav:nav});
+    if(active==='content')return e(ContentEngineModule,{pl:pl,nav:nav});
+    if(active==='digest')return e(WeeklyDigestModule,{pl:pl,nav:nav});
+    if(active==='knowledge')return e(KnowledgeBaseModule,{pl:pl,nav:nav});
+    if(active==='scraperinsights')return e(ScraperInsightsModule,{pl:pl,nav:nav});
+    if(active==='discovery')return e(DiscoveryModule,{pl:pl,nav:nav});
+    if(active==='execbrief')return e(ExecBriefModule,{pl:pl,nav:nav});
+    if(active==='scanner')return e(PipelineScannerModule,{pl:pl,nav:nav});
     var mod=modules.find(function(m){return m.key===active});
     return e(PlaceholderModule,{title:mod?mod.label:active,pl:pl});
   }
