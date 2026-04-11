@@ -888,6 +888,248 @@ function SystemChat(p){
   );
 }
 
+
+// ============================================================
+// OPPORTUNITY BRIEF — Single-opp deep view
+// ============================================================
+function OpportunityBriefModule(p){
+  var pl=p.pl;
+  var st1=useState(null),analysis=st1[0],setAnalysis=st1[1];
+  var st2=useState(false),loading=st2[0],setLoading=st2[1];
+  var st3=useState(false),orchLoading=st3[0],setOrchLoading=st3[1];
+  var st4=useState(null),orchResult=st4[0],setOrchResult=st4[1];
+
+  if(!pl.selected)return e('div',{style:{padding:'24px 32px'}},
+    e('h2',{style:{color:GOLD}},'Opportunity Brief'),
+    e('div',{style:{fontSize:12,color:TEXT_D,marginBottom:16}},'Select an opportunity from the pipeline for a deep-dive analysis.'),
+    pl.pipeline.length>0?e(OpportunitySelector,{pipeline:pl.pipeline,selected:pl.selected,onSelect:pl.select,loading:pl.loading}):
+    e(Card,null,e('div',{style:{color:TEXT_D,textAlign:'center',padding:20}},'No active opportunities in pipeline yet. The scraper is running — check back soon.'))
+  );
+
+  var o=pl.selected;
+  var sc=o.opi_score||0;
+  var daysLeft=o.deadline?Math.ceil((new Date(o.deadline)-new Date())/(1000*60*60*24)):null;
+
+  function runOrchestration(){
+    setOrchLoading(true);
+    fetch('/api/orchestrate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:o.id})})
+      .then(function(r){return r.json()}).then(function(d){setOrchResult(d);setOrchLoading(false);pl.refresh()})
+      .catch(function(){setOrchLoading(false)});
+  }
+
+  function runResearch(){
+    setLoading(true);
+    callClaude('Generate a comprehensive research and competitive intelligence brief for: '+o.title+' ('+o.agency+', '+(o.vertical||'')+').'+
+      (o.scope_analysis?'\n\nScope: '+o.scope_analysis.substring(0,2000):'')
+    ).then(function(r){setAnalysis(r);setLoading(false)});
+  }
+
+  return e('div',{style:{padding:'24px 32px',maxWidth:1100}},
+    e('h2',{style:{color:GOLD,marginBottom:12}},'Opportunity Brief'),
+    e(OpportunitySelector,{pipeline:pl.pipeline,selected:pl.selected,onSelect:pl.select,loading:pl.loading}),
+
+    // Hero card
+    e(Card,{style:{borderLeft:'4px solid '+(sc>=90?GREEN:sc>=75?CYAN:GOLD),marginTop:12}},
+      e('div',{style:{display:'flex',justifyContent:'space-between'}},
+        e('div',null,
+          e('div',{style:{fontSize:11,color:TEXT_D,marginBottom:4}},'OPI SCORE'),
+          e('div',{style:{fontSize:36,fontWeight:'bold',color:sc>=90?GREEN:sc>=75?CYAN:GOLD,marginBottom:4}},sc),
+          e('h3',{style:{margin:0}},o.title),
+          e('div',{style:{fontSize:12,color:TEXT_D,marginTop:4}},o.agency||'',' · ',o.vertical||'',daysLeft!==null?' · '+daysLeft+' days left':''),
+          o.source_url?e('a',{href:o.source_url,target:'_blank',style:{color:CYAN,fontSize:11,textDecoration:'none'}},'View Source →'):null
+        ),
+        e('div',{style:{textAlign:'right'}},
+          o.stage?e(Badge,{color:stageColor(o.stage)},o.stage):null,
+          o.estimated_value?e('div',{style:{fontSize:16,color:GOLD,marginTop:8}},o.estimated_value):null
+        )
+      )
+    ),
+
+    // Scope + Executive Summary
+    o.scope_analysis?e(Card,null,e(Label,{text:'SCOPE ANALYSIS'}),e('div',{style:{fontSize:12,whiteSpace:'pre-wrap',maxHeight:300,overflowY:'auto',lineHeight:1.6}},o.scope_analysis.substring(0,3000))):null,
+    o.description?e(Card,null,e(Label,{text:'EXECUTIVE SUMMARY'}),e('div',{style:{fontSize:12,whiteSpace:'pre-wrap',lineHeight:1.6}},o.description.substring(0,2000))):null,
+
+    // GO/NO-GO
+    (o.capture_action||o.why_hgi_wins)?e(Card,null,
+      e(Label,{text:'GO / NO-GO ASSESSMENT'}),
+      o.why_hgi_wins?e('div',{style:{marginBottom:8}},e('strong',{style:{color:GREEN}},'WHY HGI WINS: '),o.why_hgi_wins):null,
+      o.key_requirements?e('div',{style:{marginBottom:8}},e('strong',{style:{color:ORANGE}},'KEY REQUIREMENTS: '),o.key_requirements):null,
+      o.capture_action?e('div',null,e('strong',{style:{color:CYAN}},'CAPTURE ACTION: '),o.capture_action):null
+    ):null,
+
+    // Actions
+    e(Card,null,
+      e(Label,{text:'ACTIONS'}),
+      e('div',{style:{display:'flex',gap:8,flexWrap:'wrap'}},
+        e(Btn,{onClick:runOrchestration,disabled:orchLoading},'⚡ Re-Run Full Analysis'),
+        e(Btn,{onClick:runResearch,disabled:loading,variant:'ghost'},'◉ Run Full Research'),
+        e(Btn,{onClick:function(){p.nav('scoring');pl.select(o)},variant:'ghost'},'◆ Score Winnability'),
+        e(Btn,{onClick:function(){p.nav('proposal');pl.select(o)},variant:'ghost'},'✦ Start Proposal'),
+        o.source_url?e(Btn,{onClick:function(){window.open(o.source_url)},variant:'ghost'},'🔗 Source'):null
+      )
+    ),
+
+    orchResult?e(AIOut,{content:JSON.stringify(orchResult,null,2),label:'ORCHESTRATION RESULT'}):null,
+    analysis?e(AIOut,{content:analysis,loading:loading,label:'RESEARCH BRIEF'}):null
+  );
+}
+
+// ============================================================
+// RESEARCH & ANALYSIS
+// ============================================================
+function ResearchAnalysisModule(p){
+  var pl=p.pl;
+  var st1=useState(''),agencyInput=st1[0],setAgencyInput=st1[1];
+  var st2=useState(''),typeInput=st2[0],setTypeInput=st2[1];
+  var st3=useState(''),competitorsInput=st3[0],setCompetitorsInput=st3[1];
+  var st4=useState(''),contextInput=st4[0],setContextInput=st4[1];
+  var st5=useState(null),research=st5[0],setResearch=st5[1];
+  var st6=useState(false),loading=st6[0],setLoading=st6[1];
+
+  // Auto-populate from selected opp
+  useEffect(function(){
+    if(pl.selected){
+      setAgencyInput(pl.selected.agency||'');
+      setTypeInput(pl.selected.vertical||pl.selected.type||'');
+      if(pl.selected.research_brief)setResearch(pl.selected.research_brief);
+    }
+  },[pl.selected?pl.selected.id:null]);
+
+  function generate(){
+    setLoading(true);
+    var prompt='Generate a comprehensive 9-section research and competitive intelligence pack for:\n'+
+      'Agency: '+agencyInput+'\nOpportunity Type: '+typeInput+'\nKnown Competitors: '+competitorsInput+'\nContext: '+contextInput+
+      (pl.selected&&pl.selected.scope_analysis?'\n\nScope Analysis:\n'+pl.selected.scope_analysis.substring(0,2000):'');
+    
+    callClaude(prompt,'You are HGI\'s intelligence analyst. Generate a research pack with these 9 sections: 1) Agency Profile & Decision-Makers 2) Budget & Funding 3) Procurement History 4) Competitive Landscape 5) Incumbent Analysis 6) HGI Fit Assessment 7) Win Themes 8) Risk Factors 9) Recommended Capture Strategy',6000
+    ).then(function(r){
+      setResearch(r);setLoading(false);
+      if(pl.selected){pl.writeBack(pl.selected.id,{research_brief:r})}
+    });
+  }
+
+  function exportDocx(){
+    if(!pl.selected)return;
+    window.open('/api/export-module?type=research&id='+encodeURIComponent(pl.selected.id));
+  }
+
+  return e('div',{style:{padding:'24px 32px',maxWidth:1000}},
+    e('h2',{style:{color:GOLD,marginBottom:4}},'Research & Analysis'),
+    e('div',{style:{fontSize:12,color:TEXT_D,marginBottom:16}},'Select an opportunity from the pipeline — fields auto-populate from system intelligence. New research writes back to the database.'),
+
+    pl.pipeline.length>0?e(OpportunitySelector,{pipeline:pl.pipeline,selected:pl.selected,onSelect:pl.select,loading:pl.loading}):
+    e(Card,{style:{background:ORANGE+'15'}},e('div',{style:{color:ORANGE,fontSize:12}},'No active opportunities.')),
+
+    e(Card,null,
+      e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}},
+        e('div',null,e(Label,{text:'AGENCY / CLIENT'}),e(Input,{value:agencyInput,onChange:function(ev){setAgencyInput(ev.target.value)},placeholder:'e.g. City of St. George, HTHA'})),
+        e('div',null,e(Label,{text:'OPPORTUNITY TYPE / VERTICAL'}),e(Input,{value:typeInput,onChange:function(ev){setTypeInput(ev.target.value)},placeholder:'e.g. disaster, tpa, workforce'}))
+      ),
+      e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginTop:12}},
+        e('div',null,e(Label,{text:'KNOWN COMPETITORS'}),e(Input,{value:competitorsInput,onChange:function(ev){setCompetitorsInput(ev.target.value)},placeholder:'e.g. ICF, Witt, Hagerty, APTIM'})),
+        e('div',null,e(Label,{text:'ADDITIONAL CONTEXT'}),e(Input,{value:contextInput,onChange:function(ev){setContextInput(ev.target.value)},placeholder:'Disaster event, funding round, timeline...'}))
+      ),
+      e('div',{style:{marginTop:12,display:'flex',gap:8}},
+        e(Btn,{onClick:generate,disabled:loading},loading?'Generating...':'Generate Research Pack'),
+        research?e(Btn,{onClick:exportDocx,variant:'ghost'},'📄 Export .docx'):null
+      )
+    ),
+
+    research?e(AIOut,{content:research,loading:loading,label:'RESEARCH & INTELLIGENCE PACK'}):null
+  );
+}
+
+// ============================================================
+// WINNABILITY SCORING — Interactive sliders
+// ============================================================
+function WinnabilityScoringModule(p){
+  var pl=p.pl;
+  var st1=useState({title:'',agency:'',value:'$50M',type:'',incumbent:'',competitors:'',teaming:'',timeline:'near'}),form=st1[0],setForm=st1[1];
+  var st2=useState({pastPerf:5,budget:5,timeline:5}),factors=st2[0],setFactors=st2[1];
+  var st3=useState(''),addContext=st3[0],setAddContext=st3[1];
+  var st4=useState(null),result=st4[0],setResult=st4[1];
+  var st5=useState(false),loading=st5[0],setLoading=st5[1];
+
+  useEffect(function(){
+    if(pl.selected){
+      setForm({
+        title:pl.selected.title||'',agency:pl.selected.agency||'',
+        value:pl.selected.estimated_value||'$50M',type:pl.selected.vertical||pl.selected.type||'',
+        incumbent:'',competitors:'',teaming:'',timeline:'near'
+      });
+    }
+  },[pl.selected?pl.selected.id:null]);
+
+  function calculate(){
+    setLoading(true);
+    var prompt='Calculate Probability of Win (Pwin) and OPI score for this opportunity:\n'+
+      'Title: '+form.title+'\nAgency: '+form.agency+'\nValue: '+form.value+'\nType: '+form.type+
+      '\nIncumbent: '+form.incumbent+'\nCompetitors: '+form.competitors+'\nTeaming: '+form.teaming+
+      '\nTimeline: '+form.timeline+
+      '\nScoring Factors: Past Performance Match '+factors.pastPerf+'/10, Budget Certainty '+factors.budget+'/10, Timeline Feasibility '+factors.timeline+'/10'+
+      '\nAdditional Context: '+addContext+
+      (pl.selected&&pl.selected.scope_analysis?'\n\nScope: '+pl.selected.scope_analysis.substring(0,1500):'');
+
+    callClaude(prompt,'You are HGI\'s winnability analyst. Calculate Pwin (0-100%) and recommended OPI score. Include GO/NO-GO recommendation, key win themes, risk factors, and recommended next actions. Be direct and specific.',4000
+    ).then(function(r){setResult(r);setLoading(false)});
+  }
+
+  function exportDocx(){
+    if(!pl.selected)return;
+    window.open('/api/export-module?type=winnability&id='+encodeURIComponent(pl.selected.id));
+  }
+
+  function updateForm(k,v){setForm(Object.assign({},form,{[k]:v}))}
+  function updateFactor(k,v){setFactors(Object.assign({},factors,{[k]:parseInt(v)}))}
+
+  var timelineOpts=[{value:'immediate',label:'Immediate (0-90 days)'},{value:'near',label:'Near-term (90-180 days)'},{value:'medium',label:'Medium (6-12 months)'},{value:'long',label:'Long-term (12+ months)'}];
+
+  return e('div',{style:{padding:'24px 32px',maxWidth:1100}},
+    e('h2',{style:{color:GOLD,marginBottom:4}},'Winnability Scoring'),
+    e('div',{style:{fontSize:12,color:TEXT_D,marginBottom:16}},'Select an opportunity — auto-loads scope, financial, and research intelligence for informed scoring.'),
+
+    pl.pipeline.length>0?e(OpportunitySelector,{pipeline:pl.pipeline,selected:pl.selected,onSelect:pl.select,loading:pl.loading}):
+    e(Card,{style:{background:ORANGE+'15'}},e('div',{style:{color:ORANGE,fontSize:12}},'No active opportunities.')),
+
+    e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginTop:12}},
+      // LEFT: Opportunity Details
+      e(Card,null,
+        e(Label,{text:'OPPORTUNITY DETAILS'}),
+        [{k:'title',l:'TITLE',ph:'Opportunity name'},{k:'agency',l:'AGENCY',ph:'Agency/client'},{k:'value',l:'EST. VALUE',ph:'$50M'},{k:'type',l:'TYPE',ph:'FEMA PA, TPA, CDBG-DR...'},{k:'incumbent',l:'KNOWN INCUMBENT',ph:'ICF / None / Unknown'},{k:'competitors',l:'COMPETITORS',ph:'Witt, Hagerty, Dewberry...'},{k:'teaming',l:'TEAMING NEEDED',ph:'Yes — need construction sub / No'}].map(function(f){
+          return e('div',{key:f.k,style:{marginBottom:10}},
+            e(Label,{text:f.l}),
+            e(Input,{value:form[f.k],onChange:function(ev){updateForm(f.k,ev.target.value)},placeholder:f.ph})
+          );
+        }),
+        e('div',null,e(Label,{text:'REVENUE TIMELINE'}),e(Sel,{value:form.timeline,onChange:function(ev){updateForm('timeline',ev.target.value)},options:timelineOpts}))
+      ),
+
+      // RIGHT: Scoring Factors
+      e(Card,null,
+        e(Label,{text:'SCORING FACTORS'}),
+        [{k:'pastPerf',l:'HGI PAST PERFORMANCE MATCH'},{k:'budget',l:'BUDGET CERTAINTY'},{k:'timeline',l:'TIMELINE FEASIBILITY'}].map(function(f){
+          return e('div',{key:f.k,style:{marginBottom:16}},
+            e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:4}},
+              e(Label,{text:f.l}),
+              e('span',{style:{color:GOLD,fontWeight:'bold',fontSize:13}},factors[f.k]+'/10')
+            ),
+            e('input',{type:'range',min:0,max:10,value:factors[f.k],onChange:function(ev){updateFactor(f.k,ev.target.value)},
+              style:{width:'100%',accentColor:GOLD}})
+          );
+        }),
+        e('div',{style:{marginTop:8}},
+          e(Label,{text:'ADDITIONAL CONTEXT'}),
+          e(Textarea,{value:addContext,onChange:function(ev){setAddContext(ev.target.value)},placeholder:'Agency relationships, political context...',rows:4})
+        ),
+        e(Btn,{onClick:calculate,disabled:loading,style:{width:'100%',marginTop:12,padding:'12px 0'}},loading?'Calculating...':'Calculate Pwin + OPI'),
+        result?e(Btn,{onClick:exportDocx,variant:'ghost',style:{width:'100%',marginTop:8}},'📄 Export .docx'):null
+      )
+    ),
+
+    result?e(AIOut,{content:result,loading:loading,label:'WINNABILITY ASSESSMENT'}):null
+  );
+}
+
 function PlaceholderModule(p){
   return e('div',{style:{padding:'40px 32px'}},
     e('h2',{style:{color:GOLD,marginBottom:8}},p.title),
@@ -948,6 +1190,9 @@ function App(){
     if(active==='tracker')return e(PipelineTracker,{pl:pl,nav:nav});
     if(active==='intake')return e(ManualIntake,{pl:pl,nav:nav});
     if(active==='chat')return e(SystemChat,{pl:pl,nav:nav});
+    if(active==='brief')return e(OpportunityBriefModule,{pl:pl,nav:nav});
+    if(active==='research')return e(ResearchAnalysisModule,{pl:pl,nav:nav});
+    if(active==='scoring')return e(WinnabilityScoringModule,{pl:pl,nav:nav});
     var mod=modules.find(function(m){return m.key===active});
     return e(PlaceholderModule,{title:mod?mod.label:active,pl:pl});
   }
