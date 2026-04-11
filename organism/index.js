@@ -1965,6 +1965,36 @@ if (url.startsWith('/api/kb-documents')) {
 
 // === KB DOCTRINE/DNA EXTRACTION — /api/kb-extract ===
 if (url.startsWith('/api/kb-extract')) {
+  if (req.method === 'POST') {
+    var body = '';
+    req.on('data', function(c) { body += c; });
+    req.on('end', async function() {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      try {
+        var p = JSON.parse(body);
+        if (!p.content || !p.filename) { res.end(JSON.stringify({error:'filename and content required'})); return; }
+        // Create knowledge_document record
+        var docId = 'kb-upload-' + Date.now();
+        await supabase.from('knowledge_documents').insert({ id: docId, filename: p.filename, document_class: p.document_class || 'uploaded', vertical: p.vertical || 'general', status: 'chunked', uploaded_at: new Date().toISOString() });
+        // Chunk the content (2000 char chunks with 200 char overlap)
+        var text = p.content;
+        var chunkSize = 2000, overlap = 200, chunks = [], ci = 0, pos = 0;
+        while (pos < text.length) {
+          var end = Math.min(pos + chunkSize, text.length);
+          chunks.push({ document_id: docId, chunk_index: ci, chunk_text: text.substring(pos, end), vertical: p.vertical || 'general', filename: p.filename });
+          pos = end - overlap; ci++;
+          if (end >= text.length) break;
+        }
+        if (chunks.length > 0) {
+          await supabase.from('knowledge_chunks').insert(chunks);
+          await supabase.from('knowledge_documents').update({ chunk_count: chunks.length, status: 'chunked' }).eq('id', docId);
+        }
+        log('KB UPLOAD: ' + p.filename + ' → ' + chunks.length + ' chunks');
+        res.end(JSON.stringify({success:true, document_id:docId, chunks:chunks.length}));
+      } catch(e) { res.end(JSON.stringify({error:e.message})); }
+    });
+    return;
+  }
   res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
   try {
     var kbParams = new URLSearchParams(url.split('?')[1] || '');
