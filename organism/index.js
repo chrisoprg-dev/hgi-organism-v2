@@ -2519,7 +2519,6 @@ if (url === '/api/notify' || url.startsWith('/api/notify?')) {
       var nDisplayTitle = tmpl.title || nTitle;
 
       await supabase.from('hunt_runs').insert({
-        id: 'notify-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
         source: 'notify:' + nType,
         status: nPriority + '|' + nOppId + '|unread|' + nDisplayTitle,
         run_at: new Date().toISOString(),
@@ -4991,6 +4990,19 @@ var RATE_CARD = 'HGI Rate Card (burdened/hr): Principal ' + String.fromCharCode(
 
 async function agentIntelligence(opp, state, cycleBrief) {
   log('INTEL: ' + (opp.title || '?').slice(0, 50));
+
+  // MATERIAL CHANGE CHECK: skip if competitor landscape hasn't shifted
+  var lastIntel = state.memories.filter(function(m) { return m.agent === 'intelligence_engine' && m.opportunity_id === opp.id; })[0];
+  if (lastIntel) {
+    var hoursSince = (Date.now() - new Date(lastIntel.created_at).getTime()) / 3600000;
+    // Re-run only if: >72 hours old, or stage changed to pursuing/proposal, or RFP just retrieved
+    var stageEscalated = (opp.stage === 'pursuing' || opp.stage === 'proposal') && lastIntel.observation && lastIntel.observation.indexOf('pursuing') === -1 && lastIntel.observation.indexOf('proposal') === -1;
+    if (hoursSince < 72 && !stageEscalated) {
+      log('INTEL: Skip — last run ' + Math.round(hoursSince) + 'h ago, no stage escalation');
+      return null;
+    }
+  }
+
   var ctx = buildAgentCtx(state, 'intelligence_engine', opp.id);
 
   // PRE-RESEARCH: 5 targeted searches before reasoning
@@ -5036,6 +5048,18 @@ async function agentIntelligence(opp, state, cycleBrief) {
 
 async function agentFinancial(opp, state, cycleBrief) {
   log('FINANCIAL: ' + (opp.title || '?').slice(0, 50));
+
+  // MATERIAL CHANGE CHECK: skip if pricing landscape hasn't shifted
+  var lastFin = state.memories.filter(function(m) { return m.agent === 'financial_agent' && m.opportunity_id === opp.id; })[0];
+  if (lastFin) {
+    var hoursSinceFin = (Date.now() - new Date(lastFin.created_at).getTime()) / 3600000;
+    var stageEscalatedFin = (opp.stage === 'pursuing' || opp.stage === 'proposal') && lastFin.observation && lastFin.observation.indexOf('pursuing') === -1 && lastFin.observation.indexOf('proposal') === -1;
+    if (hoursSinceFin < 72 && !stageEscalatedFin) {
+      log('FINANCIAL: Skip — last run ' + Math.round(hoursSinceFin) + 'h ago, no stage escalation');
+      return null;
+    }
+  }
+
   var ctx = buildAgentCtx(state, 'financial_agent', opp.id);
 
   // PRE-RESEARCH: 3 targeted searches for real pricing data
@@ -7201,12 +7225,14 @@ async function runSession(trigger) {
       var costSummary = JSON.stringify({ session: id, total_usd: Math.round(sessionCost * 10000) / 10000, calls: costLog.length, by_agent: costByAgent });
       try {
         await supabase.from('hunt_runs').insert({
-          id: 'hr-cost-' + Date.now(), source: 'api_cost',
-          status: costSummary,
+          source: 'api_cost',
+          status: costSummary.slice(0, 5000),
           run_at: new Date().toISOString(), opportunities_found: 0
         });
-        log('COST TRACKER: Session cost ' + sessionCost.toFixed(4) + ' USD across ' + costLog.length + ' API calls');
-      } catch(ce) { log('COST TRACKER ERROR: ' + ce.message); }
+        log('COST TRACKER: Session cost $' + sessionCost.toFixed(4) + ' across ' + costLog.length + ' API calls');
+        // Backup cost to organism_memory (always works)
+        await storeMemory('cost_tracker', null, 'cost,session', 'SESSION COST: $' + sessionCost.toFixed(4) + ' | ' + costLog.length + ' calls | Top: ' + Object.keys(costByAgent).sort(function(a,b) { return costByAgent[b].cost - costByAgent[a].cost; }).slice(0,5).map(function(a) { return a + '=$' + costByAgent[a].cost.toFixed(4); }).join(', '), 'analysis', null, 'high');
+      } catch(ce) { log('COST TRACKER ERROR: ' + ce.message); try { await storeMemory('cost_tracker', null, 'cost,error', 'Cost flush failed: ' + ce.message + '. Session had ' + costLog.length + ' calls totaling $' + sessionCost.toFixed(4), 'analysis', null, 'high'); } catch(e2){} }
       costLog = [];
     }
 
