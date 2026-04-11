@@ -3022,7 +3022,7 @@ if (url.startsWith('/api/proposal-review')) {
 }
 
 // === INTERACTIVE SECTION IMPROVE/RED TEAM — /api/proposal-improve ===
-if (url.startsWith('/api/proposal-improve') && method === 'POST') {
+if (url.startsWith('/api/proposal-improve') && req.method === 'POST') {
   res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
   try {
     var piBody = '';
@@ -3031,7 +3031,7 @@ if (url.startsWith('/api/proposal-improve') && method === 'POST') {
     var piSection = piData.section_content || '';
     var piAction = piData.action || 'improve';
     if (!piSection) { res.end(JSON.stringify({ error: 'section_content required' })); return; }
-    var piCtx = 'RFP: ' + (piData.rfp_context || '').slice(0, 1000) + '\nAgency: ' + (piData.agency || '') + '\nVertical: ' + (piData.vertical || '') + '\nSection: ' + (piData.section_name || '');
+    var piCtx = 'RFP: ' + (piData.rfp_context || '') + '\nAgency: ' + (piData.agency || '') + '\nVertical: ' + (piData.vertical || '') + '\nSection: ' + (piData.section_name || '');
     var piResult = {};
     if (piAction === 'improve' || piAction === 'both') {
       var piImproved = await claudeCall('Improve proposal section', piCtx + '\n\nSection to improve:\n' + piSection, 2000, { model: SONNET, system: 'You are a senior proposal writer for HGI. Improve this section: more specific, more compelling, evaluator-aligned. Use real HGI past performance. Remove generic language. Add metrics and outcomes. Return only the improved section text.' });
