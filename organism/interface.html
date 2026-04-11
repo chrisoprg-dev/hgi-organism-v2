@@ -15,7 +15,7 @@ textarea::placeholder,input::placeholder{color:#555048}
 select option{background:#191919}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
 @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
-@media(max-width:768px){body{font-size:14px}}
+@media(max-width:768px){body{font-size:14px} #mobile-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:99}}
 </style>
 </head>
 <body>
@@ -215,7 +215,7 @@ function Dashboard(p){
     ),
 
     // Stats grid
-    e('div',{style:{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:8,margin:'16px 0'}},
+    e('div',{style:{display:'grid',gridTemplateColumns:window.innerWidth<=768?'repeat(4,1fr)':'repeat(7,1fr)',gap:8,margin:'16px 0'}},
       stats.map(function(s){
         return e('div',{key:s.label,onClick:function(){if(s.label==='ACTIVE')p.nav('tracker')},style:{
           background:BG2,border:'1px solid '+BORDER,borderRadius:4,padding:'12px 8px',textAlign:'center',cursor:'pointer'
@@ -236,7 +236,7 @@ function Dashboard(p){
     ),
 
     // Two-column: Scraper Status + Quick Start
-    e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}},
+    e('div',{style:{display:'grid',gridTemplateColumns:window.innerWidth<=768?'1fr':'1fr 1fr',gap:12}},
       // Scraper Status
       e(Card,null,
         e('div',{style:{fontSize:12,fontWeight:'bold',letterSpacing:2,color:GOLD,marginBottom:8}},'SCRAPER STATUS'),
@@ -387,7 +387,7 @@ function PipelineTracker(p){
 
     // Add form
     showAdd?e(Card,null,
-      e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}},
+      e('div',{style:{display:'grid',gridTemplateColumns:window.innerWidth<=768?'1fr':'1fr 1fr',gap:12}},
         e('div',null,e(Label,{text:'TITLE'}),e(Input,{value:addForm.title,onChange:function(ev){setAddForm(Object.assign({},addForm,{title:ev.target.value}))},placeholder:'Opportunity title'})),
         e('div',null,e(Label,{text:'AGENCY'}),e(Input,{value:addForm.agency,onChange:function(ev){setAddForm(Object.assign({},addForm,{agency:ev.target.value}))},placeholder:'Agency name'})),
         e('div',null,e(Label,{text:'TYPE'}),e(Input,{value:addForm.type,onChange:function(ev){setAddForm(Object.assign({},addForm,{type:ev.target.value}))},placeholder:'FEMA PA, TPA, CDBG-DR...'})),
@@ -1021,7 +1021,7 @@ function ResearchAnalysisModule(p){
     e(Card,{style:{background:ORANGE+'15'}},e('div',{style:{color:ORANGE,fontSize:12}},'No active opportunities.')),
 
     e(Card,null,
-      e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}},
+      e('div',{style:{display:'grid',gridTemplateColumns:window.innerWidth<=768?'1fr':'1fr 1fr',gap:12}},
         e('div',null,e(Label,{text:'AGENCY / CLIENT'}),e(Input,{value:agencyInput,onChange:function(ev){setAgencyInput(ev.target.value)},placeholder:'e.g. City of St. George, HTHA'})),
         e('div',null,e(Label,{text:'OPPORTUNITY TYPE / VERTICAL'}),e(Input,{value:typeInput,onChange:function(ev){setTypeInput(ev.target.value)},placeholder:'e.g. disaster, tpa, workforce'}))
       ),
@@ -1251,7 +1251,7 @@ function ProposalEngineModule(p){
 
     // Single Section mode
     mode==='single'?e('div',null,
-      e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}},
+      e('div',{style:{display:'grid',gridTemplateColumns:window.innerWidth<=768?'1fr':'1fr 1fr',gap:12}},
         e('div',null,e(Label,{text:'SECTION'}),e(Sel,{value:section,onChange:function(ev){setSection(ev.target.value)},options:sectionList.map(function(s){return{value:s,label:s}})})),
         e('div',null,e(Label,{text:'ADDITIONAL CONTEXT'}),e(Input,{value:addContext,onChange:function(ev){setAddContext(ev.target.value)},placeholder:'Agency, key win themes, incumbent...'}))
       ),
@@ -1597,7 +1597,7 @@ function CRMModule(p){
       e(Sel,{value:agencyFilter,onChange:function(ev){setAgencyFilter(ev.target.value)},options:agencies.map(function(a){return{value:a,label:a}})})
     ),
     showAdd?e(Card,null,
-      e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}},
+      e('div',{style:{display:'grid',gridTemplateColumns:window.innerWidth<=768?'1fr':'1fr 1fr',gap:12}},
         e('div',null,e(Label,{text:'NAME'}),e(Input,{value:form.name,onChange:function(ev){setForm(Object.assign({},form,{name:ev.target.value}))}})),
         e('div',null,e(Label,{text:'TITLE'}),e(Input,{value:form.title,onChange:function(ev){setForm(Object.assign({},form,{title:ev.target.value}))}})),
         e('div',null,e(Label,{text:'ORGANIZATION'}),e(Input,{value:form.org,onChange:function(ev){setForm(Object.assign({},form,{org:ev.target.value}))}})),
@@ -1865,7 +1865,7 @@ function ScraperInsightsModule(p){
         return e('div',{key:t.k,onClick:function(){setTab(t.k)},style:{padding:'8px 16px',cursor:'pointer',fontSize:12,fontWeight:'bold',background:tab===t.k?GOLD+'22':BG3,color:tab===t.k?GOLD:TEXT_D,border:'1px solid '+(tab===t.k?GOLD+'44':BORDER)}},t.l);
       })
     ),
-    tab==='overview'?e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}},
+    tab==='overview'?e('div',{style:{display:'grid',gridTemplateColumns:window.innerWidth<=768?'1fr':'1fr 1fr',gap:12}},
       e(Card,null,e(Label,{text:'PIPELINE CONVERSION'}),
         [{l:'Total Records Ingested',v:stats.total_pipeline||0},{l:'Survived OPI Filter (active)',v:stats.active_count||0},{l:'Tier 1 — OPI 75+',v:stats.tier1||0},{l:'Currently Pursuing',v:stats.pursuing||0},{l:'Proposal Stage',v:stats.proposal_stage||0}].map(function(r){
           return e('div',{key:r.l,style:{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:'1px solid '+BORDER,fontSize:12}},e('span',null,r.l),e('span',{style:{color:CYAN}},r.v));
@@ -2014,7 +2014,7 @@ function PlaceholderModule(p){
 function App(){
   var pl=usePipeline();
   var st1=useState('dashboard'),active=st1[0],setActive=st1[1];
-  var st2=useState(true),sidebarOpen=st2[0],setSidebarOpen=st2[1];
+  var st2=useState(window.innerWidth>768),sidebarOpen=st2[0],setSidebarOpen=st2[1];
   var st3=useState([]),notifs=st3[0],setNotifs=st3[1];
   var st4=useState(false),bellOpen=st4[0],setBellOpen=st4[1];
   var st5=useState(null),health=st5[0],setHealth=st5[1];
@@ -2086,14 +2086,14 @@ function App(){
       // Header
       e('div',{style:{padding:'16px 16px 12px'}},
         e('div',{style:{fontSize:18,fontWeight:'bold',color:GOLD,letterSpacing:2}},'HGI'),
-        e('div',{style:{fontSize:9,letterSpacing:2,color:TEXT_D}},'AI CAPTURE SYSTEM '+(health?health.version||'':'v1.1')),
+        e('div',{style:{fontSize:9,letterSpacing:2,color:TEXT_D}},'AI CAPTURE SYSTEM '+(health&&health.version?health.version:'')),
         e('div',{style:{fontSize:10,color:TEXT_D}},'Hammerman & Gainer LLC · 97 Years')
       ),
       // Module list
       e('div',{style:{flex:1}},
         modules.map(function(m){
           var isActive=active===m.key;
-          return e('div',{key:m.key,onClick:function(){setActive(m.key)},style:{
+          return e('div',{key:m.key,onClick:function(){setActive(m.key);if(window.innerWidth<=768)setSidebarOpen(false)},style:{
             display:'flex',alignItems:'center',padding:'10px 16px',cursor:'pointer',
             background:isActive?GOLD+'15':'transparent',borderLeft:isActive?'3px solid '+GOLD:'3px solid transparent',
             color:isActive?GOLD:TEXT_D,fontSize:13,gap:8
