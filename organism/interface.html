@@ -1419,7 +1419,7 @@ function ManualIntake(p){
 
     result?e(Card,{style:{marginTop:16,background:result.error?RED+'15':GREEN+'15',borderColor:result.error?RED+'44':GREEN+'44'}},
       e('div',{style:{color:result.error?RED:GREEN,fontSize:13,fontWeight:'bold'}},
-        result.error||'✓ Opportunity submitted successfully. OPI: '+(result.opi_score||result.opi||'scoring...')
+        result.error||'✓ Opportunity submitted successfully. ID: '+(result.id||'created')+'. OPI scoring runs automatically.'
       ),
       !result.error?e(Btn,{onClick:function(){p.nav('tracker')},variant:'ghost',small:true,style:{marginTop:8}},'View in Pipeline →'):null
     ):null
@@ -1456,14 +1456,9 @@ function SystemChat(p){
     setInput('');
     setSending(true);
 
-    var oppCtx='';
-    if(pl.selected){
-      oppCtx='\n\nCurrently focused opportunity: '+pl.selected.title+' (OPI: '+(pl.selected.opi_score||'?')+', Agency: '+(pl.selected.agency||'?')+')';
-    }
-
     fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
-        message:text+oppCtx,
+        message:text,
         history:messages.slice(-6).map(function(m){return{role:m.role,content:m.content}}),
         opportunityId:pl.selected?pl.selected.id:null
       })
@@ -1982,24 +1977,6 @@ function ProposalEngineModule(p){
           if(Object.keys(parsed).length>0)setSections(parsed);
         }
       }).catch(function(){});
-    }
-  },[pl.selected?pl.selected.id:null]);
-
-  // Legacy: also try from pl.selected directly (in case detail already loaded)
-  useEffect(function(){
-    if(pl.selected){
-      if(pl.selected.rfp_text&&!rfpContext)setRfpContext(pl.selected.rfp_text);
-      else if(pl.selected.scope_analysis&&!rfpContext)setRfpContext(pl.selected.scope_analysis);
-      if(pl.selected.proposal_content){
-        var parsed={};
-        var parts=pl.selected.proposal_content.split(/(?=^#{1,3}\s)/m);
-        parts.forEach(function(part){
-          sectionList.forEach(function(s){
-            if(part.toLowerCase().includes(s.toLowerCase()))parsed[s]=part.trim();
-          });
-        });
-        if(Object.keys(parsed).length>0)setSections(parsed);
-      }
     }
   },[pl.selected?pl.selected.id:null]);
 
