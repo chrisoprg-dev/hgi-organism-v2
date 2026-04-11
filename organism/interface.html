@@ -573,6 +573,9 @@ function PTModal(pp){
 function PipelineTracker(p){
   var pl=p.pl;
   var st1=useState('all'),stageFilter=st1[0],setStageFilter=st1[1];
+  var stF1=useState(''),searchText=stF1[0],setSearchText=stF1[1];
+  var stF2=useState('all'),vertFilter=stF2[0],setVertFilter=stF2[1];
+  var stF3=useState('all'),opiFilter=stF3[0],setOpiFilter=stF3[1];
   var st2=useState(null),expanded=st2[0],setExpanded=st2[1];
   var st3=useState(false),showAdd=st3[0],setShowAdd=st3[1];
   var st6=useState(null),detailOpp=st6[0],setDetailOpp=st6[1];
@@ -600,7 +603,16 @@ function PipelineTracker(p){
 
   var pipeline=pl.pipeline||[];
   var stages=['all','identified','pursuing','proposal','submitted','won','lost'];
-  var filtered=stageFilter==='all'?pipeline:pipeline.filter(function(o){return o.stage===stageFilter});
+  var allVerticals=pipeline.reduce(function(a,o){var v=o.vertical||'Unknown';if(a.indexOf(v)===-1)a.push(v);return a},[]).sort();
+  var filtered=pipeline.filter(function(o){
+    if(stageFilter!=='all'&&o.stage!==stageFilter)return false;
+    if(vertFilter!=='all'&&(o.vertical||'Unknown')!==vertFilter)return false;
+    if(opiFilter==='high'&&(o.opi_score||0)<75)return false;
+    if(opiFilter==='mid'&&((o.opi_score||0)<60||(o.opi_score||0)>=75))return false;
+    if(opiFilter==='low'&&(o.opi_score||0)>=60)return false;
+    if(searchText){var q=searchText.toLowerCase();if((o.title||'').toLowerCase().indexOf(q)===-1&&(o.agency||'').toLowerCase().indexOf(q)===-1)return false}
+    return true;
+  });
 
   function stageCounts(){
     var c={all:pipeline.length};
@@ -881,7 +893,7 @@ function PipelineTracker(p){
     ):null,
 
     // Stage filter pills
-    e('div',{style:{display:'flex',gap:6,marginBottom:16,flexWrap:'wrap'}},
+    e('div',{style:{display:'flex',gap:6,marginBottom:8,flexWrap:'wrap'}},
       stages.map(function(s){
         var isActive=stageFilter===s;var c=counts[s]||0;
         return e('div',{key:s,onClick:function(){setStageFilter(s)},style:{
@@ -889,6 +901,22 @@ function PipelineTracker(p){
           background:isActive?stageColor(s)+'22':BG3,color:isActive?stageColor(s):TEXT_D,border:'1px solid '+(isActive?stageColor(s)+'44':BORDER)
         }},s.charAt(0).toUpperCase()+s.slice(1)+' ('+c+')');
       })
+    ),
+
+    // Search + vertical + OPI filters
+    e('div',{style:{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap',alignItems:'center'}},
+      e(Input,{value:searchText,onChange:function(ev){setSearchText(ev.target.value)},placeholder:'Search title or agency...',style:{flex:'1 1 200px',minWidth:150}}),
+      e('select',{value:vertFilter,onChange:function(ev){setVertFilter(ev.target.value)},style:{padding:'6px 10px',background:BG3,border:'1px solid '+BORDER,color:'#fff',borderRadius:4,fontSize:11}},
+        e('option',{value:'all'},'All Verticals'),
+        allVerticals.map(function(v){return e('option',{key:v,value:v},v)})
+      ),
+      e('select',{value:opiFilter,onChange:function(ev){setOpiFilter(ev.target.value)},style:{padding:'6px 10px',background:BG3,border:'1px solid '+BORDER,color:'#fff',borderRadius:4,fontSize:11}},
+        e('option',{value:'all'},'All OPI'),
+        e('option',{value:'high'},'OPI 75+ (Tier 1)'),
+        e('option',{value:'mid'},'OPI 60-74 (Tier 2)'),
+        e('option',{value:'low'},'OPI < 60')
+      ),
+      (searchText||vertFilter!=='all'||opiFilter!=='all')?e(Btn,{onClick:function(){setSearchText('');setVertFilter('all');setOpiFilter('all')},variant:'ghost',small:true},'Clear Filters'):null
     ),
 
     // Empty state
@@ -2579,7 +2607,29 @@ function RecruitingModule(p){
       ),
       recruitResult?e(AIOut,{content:recruitResult,label:'GENERATED CONTENT'}):null
     ):
-    tab==='outreach'?e(Card,null,e('div',{style:{color:TEXT_D}},'Outreach campaigns coming next deployment.')):null
+    tab==='outreach'?e(Card,null,
+      e(Label,{text:'OUTREACH & OPPORTUNITY MATCHING'}),
+      e('div',{style:{fontSize:12,color:TEXT_D,marginBottom:12}},'Match bench members to active pipeline opportunities based on skills, domain, and availability.'),
+      pl.pipeline&&pl.pipeline.filter(function(o){return o.stage==='pursuing'||o.stage==='proposal'}).length>0?
+        e('div',null,
+          pl.pipeline.filter(function(o){return o.stage==='pursuing'||o.stage==='proposal'}).slice(0,5).map(function(o){
+            return e(Card,{key:o.id,style:{background:BG3,marginBottom:8}},
+              e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:4}},
+                e('strong',{style:{fontSize:12}},o.title?o.title.substring(0,50):''),e(OPIBadge,{score:o.opi_score||0})
+              ),
+              e('div',{style:{fontSize:11,color:TEXT_D,marginBottom:8}},o.agency||''),
+              e(Btn,{onClick:function(){
+                setLoading(true);
+                callClaude('Match HGI bench members to this opportunity. Bench: '+JSON.stringify(bench.map(function(b){return{name:b.name,role:b.role,domain:b.domain,availability:b.availability}}))+'. Opportunity: '+o.title+' for '+o.agency+'. Vertical: '+(o.vertical||'unknown')+'. Requirements: '+(o.scope_analysis||'Not analyzed yet').substring(0,500)+'. Recommend: who fits, gaps to fill, outreach messages for recruiting missing roles.',
+                  'You are HGI staffing strategist. Be specific about who matches and what gaps exist.',3000
+                ).then(function(r){setRecruitResult(r);setLoading(false)});
+              },disabled:loading,variant:'ghost',small:true},loading?'Matching...':'Match to Bench')
+            );
+          }),
+          recruitResult?e(AIOut,{content:recruitResult,label:'MATCH RESULTS'}):null
+        ):
+      e('div',{style:{color:TEXT_D,textAlign:'center',padding:20}},'No pursuing/proposal stage opportunities to match against.')
+    ):null
   );
 }
 
@@ -2722,27 +2772,27 @@ function KnowledgeBaseModule(p){
 function ScraperInsightsModule(p){
   var st1=useState('overview'),tab=st1[0],setTab=st1[1];
   var st2=useState(null),data=st2[0],setData=st2[1];
-  var st3=useState([]),filtered=st3[0],setFiltered=st3[1];
+  var st3=useState(false),loading=st3[0],setLoading=st3[1];
 
-  useEffect(function(){
-    fetch('/api/hunt-stats').then(function(r){return r.json()}).then(setData).catch(function(){});
-    fetch('/api/pipeline').then(function(r){return r.json()}).then(function(d){
-      var opps=d.opportunities||d||[];
-      setFiltered(opps.filter(function(o){return o.status==='filtered'||(o.opi_score&&o.opi_score<60)}));
-    }).catch(function(){});
-  },[]);
+  useEffect(function(){loadData()},[]);
+
+  function loadData(){
+    setLoading(true);
+    fetch('/api/hunt-analytics').then(function(r){return r.json()}).then(function(d){setData(d);setLoading(false)}).catch(function(){setLoading(false)});
+  }
 
   var stats=data||{};
   var sources=stats.sources||[];
+  var verticals=stats.verticals||[];
+  var recent=stats.recent_runs||[];
 
   return e('div',{style:{padding:'24px 32px',maxWidth:1100}},
     e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:16}},
-      e('div',null,e('h2',{style:{color:GOLD,margin:0}},'Scraper Intelligence Dashboard'),e('div',{style:{fontSize:12,color:TEXT_D}},(stats.total_runs||0)+' runs logged · '+(stats.total_pipeline||0)+' total pipeline records')),
-      e(Btn,{onClick:function(){fetch('/api/hunt-stats').then(function(r){return r.json()}).then(setData)},variant:'ghost'},'Refresh')
+      e('div',null,e('h2',{style:{color:GOLD,margin:0}},'Scraper Intelligence Dashboard'),e('div',{style:{fontSize:12,color:TEXT_D}},(stats.total_runs||0)+' runs logged · '+(stats.active_count||0)+' active pipeline · '+(stats.pipeline_total||0)+' total records')),
+      e(Btn,{onClick:loadData,variant:'ghost',disabled:loading},loading?'Loading...':'Refresh')
     ),
-    // KPI row
-    e('div',{style:{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:8,marginBottom:16}},
-      [{l:'Total Runs',v:stats.total_runs||0},{l:'Active Pipeline',v:stats.active_count||0},{l:'Tier 1 (OPI 75+)',v:stats.tier1||0,c:GREEN},{l:'Tier 2 (OPI 60-74)',v:stats.tier2||0,c:GOLD},{l:'Pending RFP',v:stats.pending||0},{l:'Low OPI Filtered',v:stats.filtered||0,c:RED}].map(function(s){
+    e('div',{style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8,marginBottom:16}},
+      [{l:'Total Runs',v:stats.total_runs||0},{l:'Active Pipeline',v:stats.active_count||0,c:GREEN},{l:'Sources Tracked',v:sources.length,c:CYAN},{l:'Verticals',v:verticals.length,c:GOLD}].map(function(s){
         return e('div',{key:s.l,style:{background:BG2,border:'1px solid '+BORDER,borderRadius:4,padding:12,textAlign:'center'}},
           e('div',{style:{fontSize:20,fontWeight:'bold',color:s.c||CYAN}},s.v),
           e('div',{style:{fontSize:8,letterSpacing:2,color:TEXT_D,marginTop:4}},s.l)
@@ -2755,23 +2805,143 @@ function ScraperInsightsModule(p){
       })
     ),
     tab==='overview'?e('div',{style:{display:'grid',gridTemplateColumns:window.innerWidth<=768?'1fr':'1fr 1fr',gap:12}},
-      e(Card,null,e(Label,{text:'PIPELINE CONVERSION'}),
-        [{l:'Total Records Ingested',v:stats.total_pipeline||0},{l:'Survived OPI Filter (active)',v:stats.active_count||0},{l:'Tier 1 — OPI 75+',v:stats.tier1||0},{l:'Currently Pursuing',v:stats.pursuing||0},{l:'Proposal Stage',v:stats.proposal_stage||0}].map(function(r){
-          return e('div',{key:r.l,style:{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:'1px solid '+BORDER,fontSize:12}},e('span',null,r.l),e('span',{style:{color:CYAN}},r.v));
-        })
+      e(Card,null,e(Label,{text:'SOURCE PERFORMANCE'}),
+        sources.map(function(s){return e('div',{key:s.source,style:{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:'1px solid '+BORDER,fontSize:12}},
+          e('span',null,s.source),e('span',null,
+            e('span',{style:{color:CYAN,marginRight:8}},s.total_runs+' runs'),
+            e('span',{style:{color:GREEN,marginRight:8}},s.total_found+' found'),
+            e('span',{style:{color:GOLD}},s.total_new+' new')
+          )
+        )})
       ),
-      e(Card,null,e(Label,{text:'SCRAPER ACTIVITY'}),
-        sources.map(function(s){return e('div',{key:s.source,style:{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:'1px solid '+BORDER,fontSize:12}},e('span',null,s.source),e('span',{style:{color:s.runs>0?GREEN:RED}},s.runs||0))})
+      e(Card,null,e(Label,{text:'VERTICAL DISTRIBUTION'}),
+        verticals.sort(function(a,b){return b.total-a.total}).map(function(v){return e('div',{key:v.vertical,style:{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:'1px solid '+BORDER,fontSize:12}},
+          e('span',null,v.vertical),e('span',null,
+            e('span',{style:{color:CYAN,marginRight:8}},v.total+' total'),
+            e('span',{style:{color:GREEN,marginRight:8}},v.active+' active'),
+            e('span',{style:{color:GOLD}},'avg OPI '+v.avg_opi)
+          )
+        )})
       )
     ):
-    tab==='sources'?e(Card,null,e(Label,{text:'PER-SOURCE PERFORMANCE'}),sources.map(function(s){
-      return e(Card,{key:s.source,style:{borderLeft:'3px solid '+(s.runs>0?GREEN:RED)}},
-        e('div',{style:{display:'flex',justifyContent:'space-between'}},e('strong',null,s.source),e('span',{style:{color:GREEN}},s.runs+' runs')),
-        e('div',{style:{fontSize:11,color:TEXT_D}},'Active: '+(s.active||0)+' · Filtered: '+(s.filtered||0)+' · Avg OPI: '+(s.avg_opi||'—'))
+    tab==='sources'?e(Card,null,e(Label,{text:'PER-SOURCE DETAIL'}),sources.map(function(s){
+      return e(Card,{key:s.source,style:{borderLeft:'3px solid '+(s.total_runs>0?GREEN:RED),background:BG3}},
+        e('div',{style:{display:'flex',justifyContent:'space-between'}},e('strong',{style:{color:'#fff'}},s.source),e('span',{style:{color:GREEN}},s.total_runs+' runs')),
+        e('div',{style:{fontSize:11,color:TEXT_D,marginTop:4}},'Found: '+s.total_found+' · New: '+s.total_new+(s.last_run?' · Last: '+new Date(s.last_run).toLocaleDateString():''))
       );
     })):
-    tab==='history'?e(Card,null,e(Label,{text:'RUN HISTORY'}),e('div',{style:{color:TEXT_D,fontSize:12}},'Run history table loading from /api/hunt-analytics...')):
-    e(Card,null,e('div',{style:{color:TEXT_D}},'Vertical breakdown loading...'))
+    tab==='verticals'?e(Card,null,e(Label,{text:'VERTICAL BREAKDOWN'}),verticals.sort(function(a,b){return b.total-a.total}).map(function(v){
+      var pct=stats.pipeline_total>0?Math.round(v.total/stats.pipeline_total*100):0;
+      return e(Card,{key:v.vertical,style:{background:BG3}},
+        e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:4}},
+          e('strong',{style:{color:'#fff'}},v.vertical),e('span',{style:{color:GOLD}},pct+'%')
+        ),
+        e('div',{style:{height:6,background:BORDER,borderRadius:3,marginBottom:4}},e('div',{style:{height:6,background:CYAN,borderRadius:3,width:pct+'%'}})),
+        e('div',{style:{fontSize:11,color:TEXT_D}},v.total+' total · '+v.active+' active · avg OPI: '+v.avg_opi)
+      );
+    })):
+    tab==='history'?e(Card,null,e(Label,{text:'RECENT RUNS ('+recent.length+')'}),
+      recent.length===0?e('div',{style:{color:TEXT_D,textAlign:'center',padding:20}},'No run history available.'):
+      e('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:11}},
+        e('thead',null,e('tr',null,
+          ['Source','Found','New','Status','Time'].map(function(h){return e('th',{key:h,style:{textAlign:'left',padding:'6px 8px',borderBottom:'1px solid '+BORDER,color:TEXT_D,fontWeight:'bold',letterSpacing:1,fontSize:9}},h)})
+        )),
+        e('tbody',null,recent.map(function(r,i){return e('tr',{key:i,style:{borderBottom:'1px solid '+BORDER}},
+          e('td',{style:{padding:'6px 8px',color:CYAN}},r.source),
+          e('td',{style:{padding:'6px 8px'}},r.found||0),
+          e('td',{style:{padding:'6px 8px',color:GREEN}},r.new_opps||0),
+          e('td',{style:{padding:'6px 8px',color:TEXT_D}},(r.status||'').substring(0,30)),
+          e('td',{style:{padding:'6px 8px',color:TEXT_D}},r.when?new Date(r.when).toLocaleString():'')
+        )}))
+      )
+    ):null
+  );
+}
+
+// ============================================================
+// DISCOVERY SUB-COMPONENTS
+// ============================================================
+function DiscoverySignals(){
+  var st1=useState([]),signals=st1[0],setSignals=st1[1];
+  var st2=useState(false),loading=st2[0],setLoading=st2[1];
+  useEffect(function(){
+    setLoading(true);
+    Promise.all([
+      fetch('/api/memories?agent=disaster_monitor&limit=10').then(function(r){return r.json()}),
+      fetch('/api/memories?agent=budget_tracker&limit=10').then(function(r){return r.json()}),
+      fetch('/api/memories?agent=regulatory_monitor&limit=10').then(function(r){return r.json()})
+    ]).then(function(results){
+      var all=[];
+      results.forEach(function(d){var a=Array.isArray(d)?d:d.memories||[];all=all.concat(a)});
+      all.sort(function(a,b){return new Date(b.created_at)-new Date(a.created_at)});
+      setSignals(all);setLoading(false);
+    }).catch(function(){setLoading(false)});
+  },[]);
+  var icons={'disaster_monitor':'🌊','budget_tracker':'💰','regulatory_monitor':'📋'};
+  return e('div',null,
+    e(Card,null,e(Label,{text:'DISASTER · BUDGET · REGULATORY SIGNALS ('+signals.length+')'}),
+      loading?e('div',{style:{color:TEXT_D,textAlign:'center',padding:20}},'Loading signals...'):
+      signals.length===0?e('div',{style:{color:TEXT_D,textAlign:'center',padding:20}},'No signals detected yet.'):
+      signals.slice(0,15).map(function(s,i){
+        return e('div',{key:i,style:{padding:'8px 0',borderBottom:'1px solid '+BORDER}},
+          e('div',{style:{display:'flex',justifyContent:'space-between',fontSize:12}},
+            e('span',null,(icons[s.agent]||'📡')+' ',e('strong',null,s.agent||'unknown')),
+            e('span',{style:{color:TEXT_D,fontSize:10}},s.created_at?new Date(s.created_at).toLocaleDateString():'')
+          ),
+          e('div',{style:{fontSize:11,color:TEXT_D,marginTop:2}},(s.observation||'').substring(0,300))
+        );
+      })
+    )
+  );
+}
+
+function DiscoveryRetrieve(p){
+  var pl=p.pl;
+  var st1=useState(''),url=st1[0],setUrl=st1[1];
+  var st2=useState(null),result=st2[0],setResult=st2[1];
+  var st3=useState(false),loading=st3[0],setLoading=st3[1];
+  var st4=useState(null),selOpp=st4[0],setSelOpp=st4[1];
+
+  function fetchDoc(){
+    if(!url)return;
+    setLoading(true);setResult(null);
+    fetch('/api/fetch-rfp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:url,opportunity_id:selOpp})}).then(function(r){return r.json()}).then(function(d){
+      setResult(d);setLoading(false);
+    }).catch(function(err){setResult({error:err.message});setLoading(false)});
+  }
+
+  var pipeline=pl&&pl.pipeline?pl.pipeline:[];
+  var noDoc=pipeline.filter(function(o){return o.status==='active'&&(!o.rfp_text||o.rfp_text.length<500)});
+
+  return e('div',null,
+    e(Label,{text:'RETRIEVE & ANALYZE DOCUMENTS'}),
+    e('div',{style:{display:'flex',gap:8,marginBottom:12}},
+      e(Input,{value:url,onChange:function(ev){setUrl(ev.target.value)},placeholder:'Paste RFP/solicitation URL...',style:{flex:1}}),
+      e(Btn,{onClick:fetchDoc,disabled:loading||!url},loading?'Fetching...':'Retrieve')
+    ),
+    pipeline.length>0?e('div',{style:{marginBottom:12}},
+      e(Label,{text:'LINK TO OPPORTUNITY (OPTIONAL)'}),
+      e('select',{value:selOpp||'',onChange:function(ev){setSelOpp(ev.target.value||null)},style:{width:'100%',padding:8,background:BG3,border:'1px solid '+BORDER,color:'#fff',borderRadius:4,fontSize:12}},
+        e('option',{value:''},'— Select opportunity —'),
+        pipeline.map(function(o){return e('option',{key:o.id,value:o.id},(o.title||'').substring(0,60)+' (OPI '+(o.opi_score||0)+')')})
+      )
+    ):null,
+    result?e(Card,{style:{borderLeft:'3px solid '+(result.error?RED:GREEN)}},
+      result.error?e('div',{style:{color:RED,fontSize:12}},result.error):
+      e('div',null,
+        e('div',{style:{color:GREEN,fontSize:12,marginBottom:4}},result.message||'Document retrieved successfully'),
+        result.text_length?e('div',{style:{fontSize:11,color:TEXT_D}},'Extracted '+result.text_length+' characters'):null
+      )
+    ):null,
+    noDoc.length>0?e('div',{style:{marginTop:12}},
+      e(Label,{text:'OPPORTUNITIES MISSING DOCUMENTS ('+noDoc.length+')'}),
+      noDoc.slice(0,5).map(function(o){
+        return e('div',{key:o.id,style:{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:'1px solid '+BORDER,fontSize:11}},
+          e('span',null,o.title?(o.title).substring(0,45):'Untitled',' · ',o.agency||''),
+          e('span',null,e(OPIBadge,{score:o.opi_score||0}),o.source_url?e(Btn,{onClick:function(){setUrl(o.source_url);setSelOpp(o.id)},variant:'ghost',small:true},'Use Source URL'):null)
+        );
+      })
+    ):null
   );
 }
 
@@ -2838,13 +3008,13 @@ function DiscoveryModule(p){
         );
       })
     ):
-    tab==='signals'?e(Card,null,e(Label,{text:'DISASTER & FUNDING SIGNALS'}),e('div',{style:{color:TEXT_D}},'Monitoring FEMA declarations, HUD/FEMA/Treasury allocations, and regulatory changes.')):
+    tab==='signals'?e(DiscoverySignals,null):
     tab==='config'?e(Card,null,e(Label,{text:'MONITORED SOURCES'}),
       ['SAM.gov','State Procurement (LaPAC, TX SmartBuy)','Insurance Associations','Municipal/Parish','Federal Grants','Disaster Signals'].map(function(s){
         return e('div',{key:s,style:{display:'flex',justifyContent:'space-between',padding:'8px 0',borderBottom:'1px solid '+BORDER,fontSize:12}},e('span',null,s),e('span',{style:{color:GREEN}},'● Active'));
       })
     ):
-    e(Card,null,e('div',{style:{color:TEXT_D}},'Document retrieval coming next deployment.'))
+    e(Card,null,e(DiscoveryRetrieve,{pl:pl}))
   );
 }
 
@@ -2865,23 +3035,105 @@ function ExecBriefModule(p){
 // ============================================================
 function PipelineScannerModule(p){
   var pl=p.pl;
-  var st1=useState('pipeline'),tab=st1[0],setTab=st1[1];
+  var st1=useState('deadlines'),tab=st1[0],setTab=st1[1];
+  var st2=useState(false),scanning=st2[0],setScanning=st2[1];
+  var st3=useState(null),scanResult=st3[0],setScanResult=st3[1];
+  var st4=useState([]),scannerMems=st4[0],setScannerMems=st4[1];
+  var st5=useState(null),lastScan=st5[0],setLastScan=st5[1];
+
+  useEffect(function(){
+    fetch('/api/memories?agent=pipeline_scanner&limit=5').then(function(r){return r.json()}).then(function(d){
+      var mems=Array.isArray(d)?d:d.memories||[];
+      setScannerMems(mems);
+      if(mems.length>0)setLastScan(mems[0].created_at);
+    }).catch(function(){});
+  },[]);
+
+  function runScan(){
+    setScanning(true);setScanResult(null);
+    fetch('/api/trigger',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:'manual_scan'})}).then(function(r){return r.json()}).then(function(d){
+      setScanResult(d);setScanning(false);
+      setTimeout(function(){pl.refresh()},5000);
+    }).catch(function(err){setScanResult({error:err.message});setScanning(false)});
+  }
+
+  var pipeline=pl.pipeline||[];
+  var now=new Date();
+  var deadlines=pipeline.filter(function(o){return o.deadline&&o.status==='active'}).map(function(o){
+    var d=new Date(o.deadline),diff=Math.ceil((d-now)/(1000*60*60*24));
+    return Object.assign({},o,{days_left:diff});
+  }).sort(function(a,b){return a.days_left-b.days_left});
+  var urgent=deadlines.filter(function(o){return o.days_left<=14&&o.days_left>0});
+  var overdue=deadlines.filter(function(o){return o.days_left<=0});
+  var recompetes=pipeline.filter(function(o){return(o.scope_analysis||'').toLowerCase().indexOf('recompete')>-1||(o.title||'').toLowerCase().indexOf('recompete')>-1});
+  var noRfp=pipeline.filter(function(o){return o.status==='active'&&(!o.rfp_text||o.rfp_text.length<500)&&(o.stage==='identified'||o.stage==='pursuing')});
 
   return e('div',{style:{padding:'24px 32px',maxWidth:1100}},
     e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:16}},
-      e('div',null,e('h2',{style:{color:GOLD,margin:0}},'Live Pipeline Scanner'),e('div',{style:{fontSize:12,color:TEXT_D}},'SAM.gov · LaPAC · Texas SmartBuy · Gulf Coast portals')),
-      e(Btn,{onClick:function(){},variant:'danger'},'Run Live Scan')
+      e('div',null,e('h2',{style:{color:GOLD,margin:0}},'Live Pipeline Scanner'),
+        e('div',{style:{fontSize:12,color:TEXT_D}},lastScan?'Last scan: '+new Date(lastScan).toLocaleString():'No scans recorded yet')),
+      e(Btn,{onClick:runScan,disabled:scanning,variant:'danger'},scanning?'Scanning...':'Run Live Scan')
+    ),
+    scanResult?e(Card,{style:{borderLeft:'3px solid '+(scanResult.error?RED:GREEN),marginBottom:12}},
+      e('div',{style:{fontSize:12,color:scanResult.error?RED:GREEN}},scanResult.error||scanResult.message||'Scan triggered successfully. Results will appear in pipeline shortly.')
+    ):null,
+    e('div',{style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8,marginBottom:16}},
+      [{l:'URGENT (≤14d)',v:urgent.length,c:urgent.length>0?RED:GREEN},{l:'OVERDUE',v:overdue.length,c:overdue.length>0?RED:GREEN},{l:'MISSING RFP',v:noRfp.length,c:noRfp.length>0?ORANGE:GREEN},{l:'RECOMPETES',v:recompetes.length,c:CYAN}].map(function(s){
+        return e('div',{key:s.l,style:{background:BG2,border:'1px solid '+BORDER,borderRadius:4,padding:12,textAlign:'center'}},
+          e('div',{style:{fontSize:20,fontWeight:'bold',color:s.c}},s.v),e('div',{style:{fontSize:8,letterSpacing:2,color:TEXT_D,marginTop:4}},s.l));
+      })
     ),
     e('div',{style:{display:'flex',gap:0,marginBottom:16}},
-      [{k:'pipeline',l:'Pipeline'},{k:'recompetes',l:'Recompetes'}].map(function(t){
+      [{k:'deadlines',l:'Deadlines'},{k:'missing',l:'Missing RFP'},{k:'recompetes',l:'Recompetes'},{k:'history',l:'Scan History'}].map(function(t){
         return e('div',{key:t.k,onClick:function(){setTab(t.k)},style:{padding:'8px 16px',cursor:'pointer',fontSize:12,fontWeight:'bold',background:tab===t.k?GOLD+'22':BG3,color:tab===t.k?GOLD:TEXT_D,border:'1px solid '+(tab===t.k?GOLD+'44':BORDER)}},t.l);
       })
     ),
-    e(Card,{style:{textAlign:'center',padding:40}},e('div',{style:{fontSize:24,marginBottom:8}},'◎'),e(Btn,{onClick:function(){}},'Run First Scan')),
+    tab==='deadlines'?e('div',null,
+      overdue.length>0?e(Card,{style:{borderLeft:'3px solid '+RED}},e(Label,{text:'OVERDUE'}),overdue.map(function(o){
+        return e('div',{key:o.id,style:{display:'flex',justifyContent:'space-between',padding:'8px 0',borderBottom:'1px solid '+BORDER,fontSize:12}},
+          e('div',null,e('strong',{style:{color:'#fff'}},o.title?o.title.substring(0,50):''),e('div',{style:{fontSize:10,color:TEXT_D}},o.agency||'')),
+          e('div',{style:{textAlign:'right'}},e('div',{style:{color:RED,fontWeight:'bold'}},Math.abs(o.days_left)+' days overdue'),e(OPIBadge,{score:o.opi_score||0}))
+        );
+      })):null,
+      urgent.length>0?e(Card,{style:{borderLeft:'3px solid '+ORANGE}},e(Label,{text:'DUE WITHIN 14 DAYS'}),urgent.map(function(o){
+        return e('div',{key:o.id,style:{display:'flex',justifyContent:'space-between',padding:'8px 0',borderBottom:'1px solid '+BORDER,fontSize:12}},
+          e('div',null,e('strong',{style:{color:'#fff'}},o.title?o.title.substring(0,50):''),e('div',{style:{fontSize:10,color:TEXT_D}},o.agency||'')),
+          e('div',{style:{textAlign:'right'}},e('div',{style:{color:o.days_left<=7?RED:ORANGE,fontWeight:'bold'}},o.days_left+' days left'),e(OPIBadge,{score:o.opi_score||0}))
+        );
+      })):null,
+      urgent.length===0&&overdue.length===0?e(Card,null,e('div',{style:{color:GREEN,textAlign:'center',padding:20}},'No urgent deadlines. Pipeline is clear.')):null
+    ):
+    tab==='missing'?e(Card,null,e(Label,{text:'OPPORTUNITIES MISSING RFP DOCUMENT ('+noRfp.length+')'}),
+      noRfp.length===0?e('div',{style:{color:GREEN,textAlign:'center',padding:20}},'All active opportunities have RFP documents.'):
+      noRfp.map(function(o){
+        return e('div',{key:o.id,style:{display:'flex',justifyContent:'space-between',padding:'8px 0',borderBottom:'1px solid '+BORDER,fontSize:12}},
+          e('div',null,e('strong',{style:{color:'#fff'}},o.title?o.title.substring(0,50):''),e('div',{style:{fontSize:10,color:TEXT_D}},o.agency||'',' · ',o.stage||'')),
+          e('div',null,e(OPIBadge,{score:o.opi_score||0}),o.source_url?e(Btn,{onClick:function(){window.open(o.source_url)},variant:'ghost',small:true},'View Source'):null)
+        );
+      })
+    ):
+    tab==='recompetes'?e(Card,null,e(Label,{text:'RECOMPETE SIGNALS ('+recompetes.length+')'}),
+      recompetes.length===0?e('div',{style:{color:TEXT_D,textAlign:'center',padding:20}},'No recompete signals detected.'):
+      recompetes.map(function(o){
+        return e('div',{key:o.id,style:{display:'flex',justifyContent:'space-between',padding:'8px 0',borderBottom:'1px solid '+BORDER,fontSize:12}},
+          e('div',null,e('strong',{style:{color:'#fff'}},o.title?o.title.substring(0,50):''),e('div',{style:{fontSize:10,color:TEXT_D}},o.agency||'')),
+          e(OPIBadge,{score:o.opi_score||0})
+        );
+      })
+    ):
+    tab==='history'?e(Card,null,e(Label,{text:'RECENT SCAN REPORTS'}),
+      scannerMems.length===0?e('div',{style:{color:TEXT_D,textAlign:'center',padding:20}},'No scan history yet. Run a scan to populate.'):
+      scannerMems.map(function(m,i){
+        return e(Card,{key:i,style:{background:BG3}},
+          e('div',{style:{fontSize:10,color:TEXT_D,marginBottom:4}},new Date(m.created_at).toLocaleString()),
+          e('div',{style:{fontSize:12,whiteSpace:'pre-wrap'}},(m.observation||'').substring(0,500))
+        );
+      })
+    ):null,
     e(Card,null,
       e(Label,{text:'MANUAL PORTALS'}),
       e('div',{style:{display:'flex',gap:8,flexWrap:'wrap'}},
-        [{l:'SAM.gov',u:'https://sam.gov'},{l:'LaPAC',u:'https://wwwcfprd.doa.louisiana.gov/osp/lapac/pubMain.cfm'},{l:'Texas SmartBuy',u:'https://comptroller.texas.gov/purchasing/vendors/'},{l:'FEMA Procurement',u:'https://www.fema.gov/grants'},{l:'HUD CDBG-DR',u:'https://www.hud.gov/program_offices/comm_planning/cdbg-dr'}].map(function(p){
+        [{l:'SAM.gov',u:'https://sam.gov'},{l:'LaPAC',u:'https://lapac.doa.louisiana.gov'},{l:'Texas SmartBuy',u:'https://comptroller.texas.gov/purchasing/vendors/'},{l:'FEMA',u:'https://www.fema.gov/grants'},{l:'HUD CDBG-DR',u:'https://www.hud.gov/program_offices/comm_planning/cdbg-dr'}].map(function(p){
           return e(Btn,{key:p.l,onClick:function(){window.open(p.u)},variant:'ghost',small:true},p.l);
         })
       )
