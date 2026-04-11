@@ -3913,7 +3913,7 @@ if (url.startsWith('/api/export-opportunity')) {
     var eoBody = '';
     var eoId = '';
     if (req.method === 'GET') {
-      eoId = (url.split('?id=')[1] || '').split('&')[0];
+      eoId = (req.url.split('?id=')[1] || '').split('&')[0];
     } else {
       await new Promise(function(resolve) { req.on('data', function(c) { eoBody += c; }); req.on('end', resolve); });
       var eoData = JSON.parse(eoBody || '{}');
