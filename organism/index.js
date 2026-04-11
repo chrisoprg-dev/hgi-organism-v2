@@ -22,6 +22,7 @@ const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_KEY;
 const AK = process.env.ANTHROPIC_API_KEY;
 const PORT = process.env.PORT || 3000;
+var SONNET = 'claude-sonnet-4-6';
 
 const supabase = createClient(SB_URL, SB_KEY);
 const anthropic = new Anthropic({ apiKey: AK });
