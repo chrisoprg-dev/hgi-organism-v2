@@ -48,11 +48,17 @@ function Btn(p){
 }
 
 function Input(p){
-  return e('input',{value:p.value,onChange:p.onChange,placeholder:p.placeholder,style:Object.assign({background:BG3,color:TEXT,border:'1px solid '+BORDER,borderRadius:4,padding:'8px 12px',width:'100%',fontSize:13,fontFamily:'Georgia,serif',outline:'none'},p.style||{})});
+  var props={onChange:p.onChange,placeholder:p.placeholder,style:Object.assign({background:BG3,color:TEXT,border:'1px solid '+BORDER,borderRadius:4,padding:'8px 12px',width:'100%',fontSize:13,fontFamily:'Georgia,serif',outline:'none'},p.style||{})};
+  if(p.onBlur)props.onBlur=p.onBlur;
+  if(p.defaultValue!==undefined){props.defaultValue=p.defaultValue}else{props.value=p.value}
+  return e('input',props);
 }
 
 function Textarea(p){
-  return e('textarea',{value:p.value,onChange:p.onChange,placeholder:p.placeholder,rows:p.rows||4,style:Object.assign({background:BG3,color:TEXT,border:'1px solid '+BORDER,borderRadius:4,padding:'8px 12px',width:'100%',fontSize:13,fontFamily:'Georgia,serif',outline:'none',resize:'vertical'},p.style||{})});
+  var props={onChange:p.onChange,placeholder:p.placeholder,rows:p.rows||4,style:Object.assign({background:BG3,color:TEXT,border:'1px solid '+BORDER,borderRadius:4,padding:'8px 12px',width:'100%',fontSize:13,fontFamily:'Georgia,serif',outline:'none',resize:'vertical'},p.style||{})};
+  if(p.onBlur)props.onBlur=p.onBlur;
+  if(p.defaultValue!==undefined){props.defaultValue=p.defaultValue}else{props.value=p.value}
+  return e('textarea',props);
 }
 
 function Sel(p){
@@ -121,8 +127,8 @@ function usePipeline(){
   }
 
   function writeBack(id,updates){
-    return fetch('/api/opportunities',{method:'PATCH',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({id:id,updates:updates})
+    return fetch('/api/update-opportunity',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(Object.assign({id:id},updates))
     }).then(function(){_plCache.data=null;return fetchPipelineData().then(function(d){setPipeline(d)})}).catch(function(){});
   }
 
@@ -710,7 +716,7 @@ function PipelineTracker(p){
   }
   function saveEdit(){
     if(!editModal)return;
-    fetch('/api/opportunities',{method:'PATCH',headers:{'Content-Type':'application/json'},
+    fetch('/api/update-opportunity',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({id:editModal.id,title:editForm.title,agency:editForm.agency,vertical:editForm.type,estimated_value:editForm.value,due_date:editForm.deadline,description:editForm.notes,stage:editForm.stage,opi_score:parseInt(editForm.opi)||50})
     }).then(function(){pl.refresh();setEditModal(null);showToast('Opportunity updated.')}).catch(function(){showToast('Update failed — check API.')});
   }
@@ -718,7 +724,7 @@ function PipelineTracker(p){
   // Delete opportunity (archive)
   function confirmDelete(){
     if(!deleteModal)return;
-    fetch('/api/opportunities',{method:'PATCH',headers:{'Content-Type':'application/json'},
+    fetch('/api/update-opportunity',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({id:deleteModal.id,status:'archived'})
     }).then(function(){pl.refresh();setDeleteModal(null);setExpanded(null);showToast('Opportunity archived.')});
   }
@@ -728,7 +734,7 @@ function PipelineTracker(p){
     var testItems=pipeline.filter(function(o){return !o.title||o.title.toLowerCase().indexOf('test')>=0||o.title.toLowerCase().indexOf('untitled')>=0||o.title.trim()===''});
     if(testItems.length===0){showToast('No test data found.');return}
     Promise.all(testItems.map(function(o){
-      return fetch('/api/opportunities',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:o.id,status:'archived'})});
+      return fetch('/api/update-opportunity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:o.id,status:'archived'})});
     })).then(function(){pl.refresh();showToast(testItems.length+' test items archived.')});
   }
 
@@ -742,8 +748,9 @@ function PipelineTracker(p){
 
   // Save field on blur (post-submission tracking)
   function saveFieldOnBlur(opp,field,value){
-    fetch('/api/opportunities',{method:'PATCH',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({id:opp.id,[field]:value})
+    var body={id:opp.id};body[field]=value;
+    fetch('/api/update-opportunity',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body)
     }).catch(function(){});
   }
 
@@ -964,7 +971,7 @@ function PipelineTracker(p){
                   })
                 ),
                 e(Label,{text:'NOTES'}),
-                e(Textarea,{value:det.description||o.description||'',onChange:function(){},onBlur:function(ev){saveFieldOnBlur(o,'description',ev.target.value)},placeholder:'Add notes...',rows:4,style:{width:'100%'}}),
+                e(Textarea,{defaultValue:det.description||o.description||'',onBlur:function(ev){saveFieldOnBlur(o,'description',ev.target.value)},placeholder:'Add notes...',rows:4,style:{width:'100%'}}),
                 e('div',{style:{fontSize:9,color:TEXT_D,marginTop:4}},'Fields save automatically on blur')
               )
             ),
@@ -1024,7 +1031,7 @@ function PipelineTracker(p){
               ),
               // Red team display
               (function(){
-                var rtMems=mems.filter(function(m){return m.agent_name==='red_team_agent'||m.agent_name==='agentRedTeam'});
+                var rtMems=mems.filter(function(m){return (m.agent_name||m.agent)==='red_team_agent'||(m.agent_name||m.agent)==='agentRedTeam'});
                 if(!rtMems.length)return null;
                 return e('div',{style:{marginTop:12}},
                   e(Label,{text:'RED TEAM ANALYSIS'}),
@@ -1040,10 +1047,10 @@ function PipelineTracker(p){
           // ---- ACTIVITY sub-tab (per-opp agent memories) ----
           expSubTab==='activity'?e('div',null,
             mems.length>0?e('div',null,
-              e('div',{style:{fontSize:12,color:TEXT_D,marginBottom:8}},mems.length+' memories from '+(new Set(mems.map(function(m){return m.agent_name}))).size+' agents'),
+              e('div',{style:{fontSize:12,color:TEXT_D,marginBottom:8}},mems.length+' memories from '+(new Set(mems.map(function(m){return (m.agent_name||m.agent)}))).size+' agents'),
               (function(){
                 var grouped={};
-                mems.forEach(function(m){var n=m.agent_name||'unknown';if(!grouped[n])grouped[n]=[];grouped[n].push(m)});
+                mems.forEach(function(m){var n=(m.agent_name||m.agent)||'unknown';if(!grouped[n])grouped[n]=[];grouped[n].push(m)});
                 return Object.keys(grouped).map(function(agent){
                   return e(Card,{key:agent,style:{marginBottom:8}},
                     e('div',{style:{fontSize:11,color:CYAN,fontWeight:'bold',marginBottom:6}},agent.replace(/_/g,' ').toUpperCase()+' ('+grouped[agent].length+')'),
@@ -1064,7 +1071,7 @@ function PipelineTracker(p){
             e('span',{style:{fontSize:10,color:TEXT_D,fontWeight:'bold',letterSpacing:1,marginRight:8}},'RECORD OUTCOME:'),
             e(Btn,{onClick:function(){setOutcomeModal({opp:o,outcome:'won'})},variant:'primary',small:true},'🏆 WON'),
             e(Btn,{onClick:function(){setOutcomeModal({opp:o,outcome:'lost'})},variant:'danger',small:true},'LOST'),
-            e(Btn,{onClick:function(){setOutcomeModal({opp:o,outcome:'no-bid'})},variant:'ghost',small:true},'NO-BID'),
+            e(Btn,{onClick:function(){setOutcomeModal({opp:o,outcome:'no_bid'})},variant:'ghost',small:true},'NO-BID'),
             e(Btn,{onClick:function(){setOutcomeModal({opp:o,outcome:'cancelled'})},variant:'ghost',small:true},'CANCELLED'),
             o.outcome?e('span',{style:{fontSize:11,color:o.outcome==='won'?GREEN:o.outcome==='lost'?RED:GOLD,marginLeft:8,fontWeight:'bold'}},'Recorded: '+o.outcome.toUpperCase()+(o.outcome_notes?' — '+o.outcome_notes:'')):null
           )
@@ -1109,7 +1116,7 @@ function OpportunityDetail(p){
 
   // Check red team from memories
   if(memories){
-    var rtMems=memories.filter(function(m){return m.agent_name==='red_team_agent'||m.agent_name==='agentRedTeam'});
+    var rtMems=memories.filter(function(m){return (m.agent_name||m.agent)==='red_team_agent'||(m.agent_name||m.agent)==='agentRedTeam'});
     if(rtMems.length>0){steps[6].done=true;steps[6].data=rtMems.map(function(m){return m.observation}).join('\n\n');}
   }
 
@@ -1196,7 +1203,7 @@ function OpportunityDetail(p){
 
     subTab==='intel'?e('div',null,
       memories?['intelligence_engine','crm_agent','winnability_agent','financial_agent','price_to_win'].map(function(agent){
-        var agentMems=memories.filter(function(m){return m.agent_name===agent});
+        var agentMems=memories.filter(function(m){return (m.agent_name||m.agent)===agent});
         if(!agentMems.length)return null;
         return e(Card,{key:agent},
           e(Label,{text:agent.replace(/_/g,' ').toUpperCase()}),
@@ -1224,11 +1231,11 @@ function OpportunityDetail(p){
 
     subTab==='activity'?e('div',null,
       memories&&memories.length>0?e('div',null,
-        e('div',{style:{fontSize:12,color:TEXT_D,marginBottom:8}},memories.length+' memories from '+(new Set(memories.map(function(m){return m.agent_name}))).size+' agents'),
+        e('div',{style:{fontSize:12,color:TEXT_D,marginBottom:8}},memories.length+' memories from '+(new Set(memories.map(function(m){return (m.agent_name||m.agent)}))).size+' agents'),
         memories.slice(0,20).map(function(m,i){
           return e(Card,{key:i},
             e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:4}},
-              e('span',{style:{fontSize:11,color:CYAN,fontWeight:'bold'}},m.agent_name||'unknown'),
+              e('span',{style:{fontSize:11,color:CYAN,fontWeight:'bold'}},(m.agent_name||m.agent)||'unknown'),
               m.created_at?e('span',{style:{fontSize:10,color:TEXT_D}},new Date(m.created_at).toLocaleString()):null
             ),
             e('div',{style:{fontSize:12,whiteSpace:'pre-wrap'}},m.observation?m.observation.substring(0,500):'')
@@ -1290,7 +1297,7 @@ function OpportunityDetail(p){
     e('div',{style:{display:'flex',gap:8,marginTop:8}},
       e(Btn,{onClick:function(){setDetOutcomeModal('won')},variant:'primary',small:true},'🏆 WON'),
       e(Btn,{onClick:function(){setDetOutcomeModal('lost')},variant:'danger',small:true},'LOST'),
-      e(Btn,{onClick:function(){setDetOutcomeModal('no-bid')},variant:'ghost',small:true},'NO-BID'),
+      e(Btn,{onClick:function(){setDetOutcomeModal('no_bid')},variant:'ghost',small:true},'NO-BID'),
       e(Btn,{onClick:function(){setDetOutcomeModal('cancelled')},variant:'ghost',small:true},'CANCELLED')
     )
   );
