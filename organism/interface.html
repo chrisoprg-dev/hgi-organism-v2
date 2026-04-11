@@ -173,6 +173,8 @@ function Dashboard(p){
   var st6=useState({}),expanded=st6[0],setExpanded=st6[1];
   var st7=useState(null),cycleHist=st7[0],setCycleHist=st7[1];
   var st8=useState(''),timeStr=st8[0],setTimeStr=st8[1];
+  var st9=useState(null),decisions=st9[0],setDecisions=st9[1];
+  var st10=useState(null),executing=st10[0],setExecuting=st10[1];
 
   useEffect(function(){
     function loadAll(){
@@ -181,6 +183,7 @@ function Dashboard(p){
       fetch('/api/exec-brief').then(function(r){return r.json()}).then(setExecBrief).catch(function(){});
       fetch('/api/hunt-stats').then(function(r){return r.json()}).then(setHuntStats).catch(function(){});
       fetch('/api/cycle-history').then(function(r){return r.json()}).then(setCycleHist).catch(function(){});
+      fetch('/api/organism-decisions').then(function(r){return r.json()}).then(setDecisions).catch(function(){});
     }
     loadAll();
     var iv=setInterval(loadAll,300000);
@@ -206,7 +209,26 @@ function Dashboard(p){
 
   function triggerThink(){
     setThinking(true);
-    fetch('/api/trigger',{method:'POST'}).then(function(){setTimeout(function(){setThinking(false)},3000)}).catch(function(){setThinking(false)});
+    fetch('/api/trigger',{method:'POST'}).then(function(){setTimeout(function(){setThinking(false);fetch('/api/organism-decisions').then(function(r){return r.json()}).then(setDecisions).catch(function(){})},3000)}).catch(function(){setThinking(false)});
+  }
+
+  function dismissDecision(id){
+    fetch('/api/organism-decisions',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})}).then(function(){
+      if(decisions&&decisions.decisions){setDecisions({decisions:decisions.decisions.filter(function(d){return d.id!==id}),count:decisions.count-1,last_think_run:decisions.last_think_run})}
+    }).catch(function(){});
+  }
+
+  function executeDecision(dp){
+    if(!dp.action_endpoint)return;
+    setExecuting(dp.id);
+    var ctrl=new AbortController();
+    setTimeout(function(){ctrl.abort()},8000);
+    fetch(dp.action_endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(dp.action_payload||{}),signal:ctrl.signal}).then(function(r){return r.json()}).then(function(){
+      setExecuting(null);dismissDecision(dp.id);
+    }).catch(function(err){
+      setExecuting(null);
+      if(err.name==='AbortError'){dismissDecision(dp.id)}
+    });
   }
 
   function toggleExp(k){var n={};for(var x in expanded)n[x]=expanded[x];n[k]=!n[k];setExpanded(n)}
@@ -357,6 +379,49 @@ function Dashboard(p){
         e(Btn,{onClick:triggerThink,disabled:thinking,small:true},thinking?'Running...':'Think Now')
       )
     ),
+
+    // === PENDING DECISIONS (spec item 4 — priority cards with Execute/Dismiss) ===
+    decisions&&decisions.decisions&&decisions.decisions.length>0?e(Card,{style:{marginBottom:12}},
+      e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}},
+        e('div',{style:{fontSize:11,fontWeight:'bold',letterSpacing:2,color:GOLD}},'PENDING DECISIONS'),
+        e(Badge,{color:GOLD},decisions.count+' pending')
+      ),
+      decisions.decisions.slice(0,8).map(function(dp,i){
+        var isExp=expanded['dec_'+dp.id];
+        var typeIcon=dp.type==='APPROVE_ACTION'?'⚡':dp.type==='OWNER_ACTION'?'👤':dp.type==='APPROVE_BUILD'?'⚙':'💡';
+        var priColor=dp.priority==='critical'?RED:dp.priority==='high'?ORANGE:GOLD;
+        return e('div',{key:dp.id,style:{padding:'10px 0',borderBottom:i<Math.min(decisions.decisions.length,8)-1?'1px solid '+BORDER:'none'}},
+          e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',cursor:'pointer'},onClick:function(){toggleExp('dec_'+dp.id)}},
+            e('div',{style:{flex:1}},
+              e('div',{style:{display:'flex',alignItems:'center',gap:6,marginBottom:4}},
+                e('span',{style:{fontSize:16}},typeIcon),
+                e('span',{style:{fontWeight:'bold',fontSize:13,color:TEXT}},dp.title),
+                e(Badge,{color:priColor},dp.priority.toUpperCase()),
+                e('span',{style:{fontSize:10,color:TEXT_D,marginLeft:4}},
+                  dp.type==='APPROVE_ACTION'?'SYSTEM CAN EXECUTE':dp.type==='OWNER_ACTION'?'YOUR ACTION':dp.type==='APPROVE_BUILD'?'BUILD REQUEST':'DECISION'
+                )
+              )
+            ),
+            e('span',{style:{fontSize:11,color:TEXT_D}},relTime(dp.created_at))
+          ),
+          // Recommended action (always visible)
+          dp.recommended_action?e('div',{style:{fontSize:12,color:TEXT_D,marginTop:4,paddingLeft:26}},dp.recommended_action.substring(0,200)):null,
+          // Expanded detail
+          isExp?e('div',{style:{marginTop:8,paddingLeft:26}},
+            dp.detail?e('div',{style:{fontSize:12,color:TEXT,lineHeight:1.6,whiteSpace:'pre-wrap',marginBottom:8}},dp.detail.substring(0,600)):null,
+            dp.expected_impact?e('div',{style:{background:'rgba(39,174,96,0.1)',border:'1px solid '+GREEN,borderRadius:4,padding:'8px 12px',fontSize:12,color:GREEN,marginBottom:8}},
+              '💡 Expected Impact: '+dp.expected_impact
+            ):null,
+            e('div',{style:{display:'flex',gap:8}},
+              dp.executable&&dp.action_endpoint?e(Btn,{onClick:function(){executeDecision(dp)},small:true,disabled:executing===dp.id},
+                executing===dp.id?'Executing...':'Execute Now'
+              ):null,
+              e(Btn,{onClick:function(){dismissDecision(dp.id)},small:true,variant:'ghost'},'Dismiss')
+            )
+          ):null
+        );
+      })
+    ):null,
 
     // === DISASTER DECLARATIONS (spec item 6) ===
     disasters.length>0?e(Card,{style:{border:'1px solid '+RED,marginBottom:12}},
