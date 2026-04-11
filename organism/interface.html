@@ -166,33 +166,59 @@ function OpportunitySelector(p){
 function Dashboard(p){
   var pl=p.pl;
   var st1=useState(null),health=st1[0],setHealth=st1[1];
-  var st2=useState(null),status=st2[0],setStatus=st2[1];
-  var st3=useState(null),briefing=st3[0],setBriefing=st3[1];
-  var st4=useState(null),decisions=st4[0],setDecisions=st4[1];
+  var st2=useState(null),sysStatus=st2[0],setSysStatus=st2[1];
+  var st3=useState(null),execBrief=st3[0],setExecBrief=st3[1];
+  var st4=useState(null),huntStats=st4[0],setHuntStats=st4[1];
   var st5=useState(false),thinking=st5[0],setThinking=st5[1];
+  var st6=useState({}),expanded=st6[0],setExpanded=st6[1];
+  var st7=useState(null),cycleHist=st7[0],setCycleHist=st7[1];
+  var st8=useState(''),timeStr=st8[0],setTimeStr=st8[1];
 
   useEffect(function(){
-    fetch('/health').then(function(r){return r.json()}).then(setHealth).catch(function(){});
-    fetch('/api/system-status').then(function(r){return r.json()}).then(setStatus).catch(function(){});
-    fetch('/api/intelligence').then(function(r){return r.json()}).then(function(d){setBriefing(d)}).catch(function(){});
+    function loadAll(){
+      fetch('/health').then(function(r){return r.json()}).then(setHealth).catch(function(){});
+      fetch('/api/system-status').then(function(r){return r.json()}).then(setSysStatus).catch(function(){});
+      fetch('/api/exec-brief').then(function(r){return r.json()}).then(setExecBrief).catch(function(){});
+      fetch('/api/hunt-stats').then(function(r){return r.json()}).then(setHuntStats).catch(function(){});
+      fetch('/api/cycle-history').then(function(r){return r.json()}).then(setCycleHist).catch(function(){});
+    }
+    loadAll();
+    var iv=setInterval(loadAll,300000);
+    // Live clock
+    function tick(){setTimeStr(new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',second:'2-digit'}))}
+    tick();var t2=setInterval(tick,30000);
+    return function(){clearInterval(iv);clearInterval(t2)};
   },[]);
 
   var now=new Date();
   var greeting=now.getHours()<12?'Good morning':now.getHours()<17?'Good afternoon':'Good evening';
-  var dateStr=now.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'})+' · '+now.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+  var dateStr=now.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
 
   var pipeline=pl.pipeline||[];
   var tier1=pipeline.filter(function(o){return(o.opi_score||0)>=75}).length;
   var pursuing=pipeline.filter(function(o){return o.stage==='pursuing'}).length;
   var inProposal=pipeline.filter(function(o){return o.stage==='proposal'}).length;
   var submitted=pipeline.filter(function(o){return o.stage==='submitted'}).length;
-  var stale=pipeline.filter(function(o){var d=o.deadline?new Date(o.deadline):null;return d&&d<now}).length;
+  var stale=pipeline.filter(function(o){var d=o.due_date?new Date(o.due_date):null;return d&&d<now&&o.stage!=='won'&&o.stage!=='lost'}).length;
+  var newToday=pipeline.filter(function(o){var d=o.discovered_at?new Date(o.discovered_at):null;return d&&(now-d)<86400000}).length;
+  var avgOpi=sysStatus&&sysStatus.pipeline?sysStatus.pipeline.avg_opi:0;
+  var memCount=sysStatus&&sysStatus.intelligence?sysStatus.intelligence.organism_memories:0;
 
   function triggerThink(){
     setThinking(true);
-    fetch('/api/trigger',{method:'POST'}).then(function(){setThinking(false)}).catch(function(){setThinking(false)});
+    fetch('/api/trigger',{method:'POST'}).then(function(){setTimeout(function(){setThinking(false)},3000)}).catch(function(){setThinking(false)});
   }
 
+  function toggleExp(k){var n={};for(var x in expanded)n[x]=expanded[x];n[k]=!n[k];setExpanded(n)}
+
+  function relTime(ts){
+    if(!ts)return'—';
+    var d=new Date(ts),diff=now-d,m=Math.floor(diff/60000),h=Math.floor(diff/3600000);
+    if(m<1)return'just now';if(m<60)return m+'m ago';if(h<24)return h+'h ago';return Math.floor(h/24)+'d ago';
+  }
+
+  // Navigation targets per stat
+  var statNavMap={ACTIVE:'discovery','TIER 1':'tracker',PURSUING:'tracker','IN PROPOSAL':'proposal',SUBMITTED:'tracker',STALE:'tracker','NEW TODAY':'discovery','AVG OPI':'tracker',MEMORIES:'chat'};
   var stats=[
     {label:'ACTIVE',value:pipeline.length,color:CYAN},
     {label:'TIER 1',value:tier1,color:GREEN},
@@ -200,57 +226,230 @@ function Dashboard(p){
     {label:'IN PROPOSAL',value:inProposal,color:ORANGE},
     {label:'SUBMITTED',value:submitted,color:GREEN},
     {label:'STALE',value:stale,color:stale>0?RED:TEXT_D},
-    {label:'NEW TODAY',value:0,color:RED}
+    {label:'NEW TODAY',value:newToday,color:newToday>0?GREEN:TEXT_D}
   ];
 
-  return e('div',{style:{padding:'24px 32px',maxWidth:1100}},
-    // Greeting
-    e('h1',{style:{fontSize:28,fontWeight:400,color:GOLD,marginBottom:4}},greeting+', Christopher.'),
-    e('div',{style:{fontSize:13,color:TEXT_D,marginBottom:20}},dateStr),
+  // Extract dashboard briefing from exec-brief
+  var dashBrief=null;
+  if(execBrief&&execBrief.recent_intel){
+    for(var i=0;i<execBrief.recent_intel.length;i++){
+      if(execBrief.recent_intel[i].agent==='dashboard_agent'){dashBrief=execBrief.recent_intel[i];break}
+    }
+  }
 
-    // Priority briefing
-    e(Card,null,
-      briefing?e('div',{style:{fontSize:13,lineHeight:1.6}},typeof briefing==='string'?briefing:briefing.brief||briefing.content||'Pipeline is empty. The scraper is running every 6 minutes.'):
-      e('span',{style:{color:GOLD,animation:'pulse 1.5s infinite'}},'⊙ Analyzing your pipeline and generating today\'s briefing...')
+  // Extract disaster alerts
+  var disasters=(execBrief&&execBrief.alerts)?execBrief.alerts.filter(function(a){return a.type==='disaster'}):[];
+
+  // Extract upcoming deadlines
+  var deadlines=(execBrief&&execBrief.upcoming_deadlines)?execBrief.upcoming_deadlines:[];
+
+  // Recent intel feed (last 5 non-dashboard-agent)
+  var intelFeed=(execBrief&&execBrief.recent_intel)?execBrief.recent_intel.slice(0,8):[];
+
+  // Agent lists for organism status
+  var agentLists=sysStatus&&sysStatus.agents?sysStatus.agents:null;
+  var lastCycle=execBrief&&execBrief.agent_health?execBrief.agent_health.last_cycle:null;
+
+  // Hunt stats for scraper status
+  var recentHunts=Array.isArray(huntStats)?huntStats.slice(0,20):[];
+  var sourceMap={};
+  recentHunts.forEach(function(h){
+    var src=h.source||'cron';
+    if(!sourceMap[src])sourceMap[src]={runs:0,found:0,newOpps:0,lastRun:null};
+    sourceMap[src].runs++;
+    sourceMap[src].found+=(h.opportunities_found||0);
+    sourceMap[src].newOpps+=(h.opportunities_new||0);
+    if(!sourceMap[src].lastRun||h.run_at>sourceMap[src].lastRun)sourceMap[src].lastRun=h.run_at;
+  });
+
+  // Scraper sources from system-status
+  var scSources=sysStatus&&sysStatus.sources?sysStatus.sources:{active:[],disabled:[]};
+
+  return e('div',{style:{padding:'20px 28px',maxWidth:1100}},
+
+    // === GREETING + CLOCK ===
+    e('h1',{style:{fontSize:26,fontWeight:400,color:GOLD,marginBottom:2}},greeting+', Christopher.'),
+    e('div',{style:{fontSize:13,color:TEXT_D,marginBottom:16}},dateStr+' · '+timeStr),
+
+    // === TODAY'S PRIORITY (spec item 1) ===
+    dashBrief?e('div',{style:{border:'2px solid '+GOLD,borderRadius:8,padding:'14px 18px',marginBottom:16,background:'rgba(201,168,76,0.06)'}},
+      e('div',{style:{fontSize:11,fontWeight:'bold',letterSpacing:2,color:GOLD,marginBottom:8}},'🎯 TODAY\'S PRIORITY'),
+      e('div',{style:{fontSize:13,lineHeight:1.7,color:TEXT,whiteSpace:'pre-wrap'}},
+        (dashBrief.summary||'').substring(0,800)+(dashBrief.summary&&dashBrief.summary.length>800?'...':'')
+      ),
+      e('div',{style:{fontSize:11,color:TEXT_D,marginTop:8}},relTime(dashBrief.when)+' via '+dashBrief.agent)
+    ):
+    e(Card,{style:{border:'2px solid '+GOLD}},
+      e('div',{style:{fontSize:11,fontWeight:'bold',letterSpacing:2,color:GOLD,marginBottom:6}},'🎯 TODAY\'S PRIORITY'),
+      e('span',{style:{color:GOLD,animation:'pulse 1.5s infinite'}},'⊙ Loading intelligence briefing...')
     ),
 
-    // Stats grid
-    e('div',{style:{display:'grid',gridTemplateColumns:window.innerWidth<=768?'repeat(4,1fr)':'repeat(7,1fr)',gap:8,margin:'16px 0'}},
+    // === STATS GRID (spec item 2 — all clickable) ===
+    e('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(100px,1fr))',gap:8,margin:'12px 0'}},
       stats.map(function(s){
-        return e('div',{key:s.label,onClick:function(){if(s.label==='ACTIVE')p.nav('tracker')},style:{
-          background:BG2,border:'1px solid '+BORDER,borderRadius:4,padding:'12px 8px',textAlign:'center',cursor:'pointer'
+        return e('div',{key:s.label,onClick:function(){p.nav(statNavMap[s.label]||'tracker')},style:{
+          background:BG2,border:'1px solid '+BORDER,borderRadius:4,padding:'10px 6px',textAlign:'center',cursor:'pointer',borderBottom:'3px solid '+s.color
         }},
-          e('div',{style:{fontSize:24,fontWeight:'bold',color:s.color}},s.value),
-          e('div',{style:{fontSize:9,letterSpacing:2,color:TEXT_D,marginTop:4}},s.label)
+          e('div',{style:{fontSize:22,fontWeight:'bold',color:s.color}},s.value),
+          e('div',{style:{fontSize:9,letterSpacing:1.5,color:TEXT_D,marginTop:2}},s.label)
         );
       })
     ),
 
-    // Organism status + Think Now
-    e(Card,{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
-      e('div',null,
-        health?e('span',{style:{color:GREEN}},'● ALIVE — V'+((health.version||'').replace('V',''))+' · '+health.agents_active+' agents · uptime '+(health.uptime_seconds?(health.uptime_seconds/60|0)+'m':'—')):
-        e('span',{style:{color:ORANGE}},'🟠 No organism decisions yet. The engine runs daily at 8am CST.')
-      ),
-      e(Btn,{onClick:triggerThink,disabled:thinking,small:true},thinking?'Running...':'Run Now')
+    // === V2 ADDITIONS: Avg OPI + Memories + Agent Count row ===
+    e('div',{style:{display:'flex',gap:8,marginBottom:12,flexWrap:'wrap'}},
+      [{l:'AVG OPI',v:avgOpi,c:avgOpi>=80?GREEN:avgOpi>=60?GOLD:RED},
+       {l:'MEMORIES',v:memCount.toLocaleString(),c:CYAN},
+       {l:'AGENTS',v:health?health.agents_active:'—',c:GREEN},
+       {l:'OUTCOMES',v:sysStatus&&sysStatus.outcomes?sysStatus.outcomes.total:'—',c:GOLD}
+      ].map(function(s){
+        return e('div',{key:s.l,style:{flex:1,minWidth:80,background:BG2,border:'1px solid '+BORDER,borderRadius:4,padding:'8px 6px',textAlign:'center'}},
+          e('div',{style:{fontSize:18,fontWeight:'bold',color:s.c}},s.v),
+          e('div',{style:{fontSize:9,letterSpacing:1.5,color:TEXT_D,marginTop:2}},s.l)
+        );
+      })
     ),
 
-    // Two-column: Scraper Status + Quick Start
-    e('div',{style:{display:'grid',gridTemplateColumns:window.innerWidth<=768?'1fr':'1fr 1fr',gap:12}},
-      // Scraper Status
-      e(Card,null,
-        e('div',{style:{fontSize:12,fontWeight:'bold',letterSpacing:2,color:GOLD,marginBottom:8}},'SCRAPER STATUS'),
-        status&&status.hunt_stats?
-          e('div',null,(status.hunt_stats.sources||[]).map(function(s){
-            return e('div',{key:s.source,style:{display:'flex',justifyContent:'space-between',padding:'4px 0',fontSize:12}},
-              e('span',null,s.source),e('span',{style:{color:s.runs>0?GREEN:RED}},s.runs+' runs')
-            );
-          })):
-          e('div',{style:{color:TEXT_D,fontSize:12}},'Loading scraper status...')
+    // === UPCOMING DEADLINES (spec V2 addition) ===
+    deadlines.length>0?e(Card,{style:{marginBottom:12}},
+      e('div',{style:{fontSize:11,fontWeight:'bold',letterSpacing:2,color:GOLD,marginBottom:8}},'⏰ UPCOMING DEADLINES'),
+      deadlines.map(function(dl){
+        var daysLeft=dl.days_remaining;
+        var urgColor=daysLeft<=0?RED:daysLeft<=5?RED:daysLeft<=10?ORANGE:CYAN;
+        return e('div',{key:dl.title,style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 0',borderBottom:'1px solid '+BORDER,fontSize:12}},
+          e('div',{style:{flex:1}},
+            e('span',{style:{fontWeight:'bold',color:TEXT}},dl.title.substring(0,50)),
+            e(OPIBadge,{score:dl.opi}),
+            e(Badge,{color:stageColor(dl.stage)||GOLD},' ',dl.stage)
+          ),
+          e('div',{style:{color:urgColor,fontWeight:'bold',fontSize:13,minWidth:80,textAlign:'right'}},
+            daysLeft<=0?(Math.abs(daysLeft)+'d OVERDUE'):(daysLeft+'d left')
+          )
+        );
+      })
+    ):null,
+
+    // === ORGANISM STATUS (spec item 3 — agent dot grid) ===
+    e(Card,{style:{marginBottom:12}},
+      e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}},
+        e('div',{style:{fontSize:11,fontWeight:'bold',letterSpacing:2,color:GOLD}},'ORGANISM STATUS'),
+        e('div',{style:{display:'flex',gap:12,fontSize:11}},
+          agentLists?[
+            e('span',{key:'live',style:{color:GREEN}},'● LIVE '+(agentLists.per_opp||[]).length),
+            e('span',{key:'gated',style:{color:ORANGE}},'● GATED '+(agentLists.gated||[]).length),
+            e('span',{key:'core',style:{color:CYAN}},'● CORE '+((agentLists.system_core||[]).length+(agentLists.system_intel||[]).length))
+          ]:null
+        )
       ),
-      // Quick Start
+      // Agent dot grid
+      agentLists?e('div',{style:{display:'flex',flexWrap:'wrap',gap:3,marginBottom:8}},
+        (agentLists.per_opp||[]).map(function(a){return e('div',{key:a,title:a+' (per-opp)',style:{width:12,height:12,borderRadius:2,background:GREEN,cursor:'help'}})}),
+        (agentLists.gated||[]).map(function(a){return e('div',{key:a,title:a+' (gated)',style:{width:12,height:12,borderRadius:2,background:ORANGE,cursor:'help'}})}),
+        (agentLists.system_core||[]).map(function(a){return e('div',{key:a,title:a+' (system)',style:{width:12,height:12,borderRadius:2,background:CYAN,cursor:'help'}})}),
+        (agentLists.system_intel||[]).map(function(a){return e('div',{key:a,title:a+' (intel)',style:{width:12,height:12,borderRadius:2,background:'#5B9BD5',cursor:'help'}})})
+      ):null,
+      // Think Now + Last Think
+      e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
+        e('div',{style:{fontSize:11,color:TEXT_D}},
+          lastCycle?'Last think: '+relTime(lastCycle):'No cycles recorded',
+          health?' · V'+(health.version||'').replace('V',''):''
+        ),
+        e(Btn,{onClick:triggerThink,disabled:thinking,small:true},thinking?'Running...':'Think Now')
+      )
+    ),
+
+    // === DISASTER DECLARATIONS (spec item 6) ===
+    disasters.length>0?e(Card,{style:{border:'1px solid '+RED,marginBottom:12}},
+      e('div',{style:{fontSize:11,fontWeight:'bold',letterSpacing:2,color:RED,marginBottom:8}},'🚨 DISASTER DECLARATIONS'),
+      disasters.map(function(d,i){
+        return e('div',{key:i,style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 0',borderBottom:i<disasters.length-1?'1px solid '+BORDER:'none'}},
+          e('div',null,
+            e('div',{style:{fontWeight:'bold',color:TEXT,fontSize:13}},d.title),
+            d.threat_level?e(Badge,{color:RED},d.threat_level):null
+          ),
+          e(Btn,{onClick:function(){p.nav('content')},small:true,variant:'danger'},'48-hr Response →')
+        );
+      })
+    ):null,
+
+    // === MARKET PULSE (spec item 7) ===
+    sysStatus&&sysStatus.intelligence?e(Card,{style:{marginBottom:12}},
+      e('div',{style:{fontSize:11,fontWeight:'bold',letterSpacing:2,color:GOLD,marginBottom:8}},'📡 MARKET PULSE'),
+      e('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(110px,1fr))',gap:8}},
+        [{l:'Competitors',v:sysStatus.intelligence.competitive_intelligence,c:ORANGE},
+         {l:'Contacts',v:sysStatus.intelligence.relationship_contacts,c:GREEN},
+         {l:'Disasters',v:sysStatus.intelligence.disaster_alerts,c:RED},
+         {l:'Budget Signals',v:sysStatus.intelligence.budget_cycles,c:CYAN},
+         {l:'Recompetes',v:sysStatus.intelligence.recompete_tracker,c:GOLD},
+         {l:'Regulations',v:sysStatus.intelligence.regulatory_changes,c:'#5B9BD5'},
+         {l:'Teaming',v:sysStatus.intelligence.teaming_partners,c:GREEN},
+         {l:'Agencies',v:sysStatus.intelligence.agency_profiles,c:GOLD}
+        ].map(function(s){
+          return e('div',{key:s.l,style:{background:BG3,padding:'8px',borderRadius:4,textAlign:'center'}},
+            e('div',{style:{fontSize:16,fontWeight:'bold',color:s.c}},s.v),
+            e('div',{style:{fontSize:9,color:TEXT_D,letterSpacing:1}},s.l)
+          );
+        })
+      )
+    ):null,
+
+    // === LATEST INTEL FEED (spec V2 addition — last 5 agent observations) ===
+    intelFeed.length>0?e(Card,{style:{marginBottom:12}},
+      e('div',{style:{fontSize:11,fontWeight:'bold',letterSpacing:2,color:GOLD,marginBottom:8}},'LATEST INTELLIGENCE'),
+      intelFeed.slice(0,5).map(function(m,i){
+        var isExp=expanded['intel_'+i];
+        return e('div',{key:i,style:{padding:'6px 0',borderBottom:i<4?'1px solid '+BORDER:'none',cursor:'pointer'},onClick:function(){toggleExp('intel_'+i)}},
+          e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
+            e('div',{style:{display:'flex',gap:6,alignItems:'center'}},
+              e(Badge,{color:m.agent==='self_awareness'?GREEN:m.agent==='dashboard_agent'?GOLD:m.agent==='disaster_monitor'?RED:CYAN},m.agent.replace(/_/g,' ')),
+              m.opportunity_title?e('span',{style:{fontSize:11,color:TEXT_D}},m.opportunity_title.substring(0,30)):null
+            ),
+            e('span',{style:{fontSize:10,color:TEXT_D}},relTime(m.when||m.created_at))
+          ),
+          e('div',{style:{fontSize:12,color:TEXT_D,marginTop:4,whiteSpace:'pre-wrap',maxHeight:isExp?'none':'40px',overflow:'hidden'}},
+            (m.summary||m.observation||'').substring(0,isExp?2000:120)+((!isExp&&(m.summary||'').length>120)?'...':'')
+          )
+        );
+      })
+    ):null,
+
+    // === TWO COLUMN: SCRAPER STATUS + QUICK START ===
+    e('div',{style:{display:'grid',gridTemplateColumns:window.innerWidth<=768?'1fr':'1fr 1fr',gap:12,marginBottom:12}},
+
+      // Scraper Status (spec item 8 — enhanced with per-source cards)
       e(Card,null,
-        e('div',{style:{fontSize:12,fontWeight:'bold',letterSpacing:2,color:GOLD,marginBottom:8}},'QUICK START'),
+        e('div',{style:{fontSize:11,fontWeight:'bold',letterSpacing:2,color:GOLD,marginBottom:8}},'SCRAPER STATUS'),
+        scSources.active?scSources.active.map(function(src){
+          var key=src.replace(/[^a-z]/gi,'').toLowerCase();
+          var runs=0;
+          Object.keys(sourceMap).forEach(function(k){runs+=sourceMap[k].runs});
+          return e('div',{key:src,style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'5px 0',borderBottom:'1px solid '+BORDER,fontSize:12}},
+            e('div',{style:{display:'flex',alignItems:'center',gap:6}},
+              e('span',{style:{width:8,height:8,borderRadius:'50%',background:GREEN,display:'inline-block'}}),
+              e('span',null,src.replace(/\(.*\)/,'').trim())
+            ),
+            e(Badge,{color:GREEN},'ACTIVE')
+          );
+        }):null,
+        scSources.disabled?scSources.disabled.map(function(src){
+          return e('div',{key:src,style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'5px 0',fontSize:12}},
+            e('div',{style:{display:'flex',alignItems:'center',gap:6}},
+              e('span',{style:{width:8,height:8,borderRadius:'50%',background:RED,display:'inline-block'}}),
+              e('span',{style:{color:TEXT_D}},src.replace(/\(.*\)/,'').trim())
+            ),
+            e(Badge,{color:RED},'DISABLED')
+          );
+        }):null,
+        // Hunt run summary
+        e('div',{style:{marginTop:8,fontSize:11,color:TEXT_D,borderTop:'1px solid '+BORDER,paddingTop:6}},
+          recentHunts.length>0?('Last hunt: '+relTime(recentHunts[0].run_at)+' · '+recentHunts.length+' runs in buffer'):
+          'No recent hunt data'
+        )
+      ),
+
+      // Quick Start (spec: 4 shortcuts)
+      e(Card,null,
+        e('div',{style:{fontSize:11,fontWeight:'bold',letterSpacing:2,color:GOLD,marginBottom:8}},'QUICK START'),
         [{icon:'⚡',label:'New RFP landed',mod:'intake'},{icon:'◎',label:'Check pipeline',mod:'tracker'},
          {icon:'✦',label:'Draft proposal',mod:'proposal'},{icon:'◇',label:'Weekly digest',mod:'digest'}].map(function(q){
           return e('div',{key:q.label,onClick:function(){p.nav(q.mod)},style:{
@@ -263,18 +462,27 @@ function Dashboard(p){
       )
     ),
 
-    // Win Path
-    e(Card,null,
-      e('div',{style:{fontSize:12,fontWeight:'bold',letterSpacing:2,marginBottom:8}},'WIN PATH'),
-      e('div',{style:{display:'flex',gap:8,flexWrap:'wrap'}},
-        ['Discover','Score','Research','Workflow','Proposal','Red Team','Export','Submit','WIN'].map(function(step){
-          return e('span',{key:step,style:{padding:'4px 12px',borderRadius:4,border:'1px solid '+BORDER,fontSize:11,color:TEXT_D}},step);
+    // === WIN PATH (spec: 9 steps) ===
+    e(Card,{style:{marginBottom:12}},
+      e('div',{style:{fontSize:11,fontWeight:'bold',letterSpacing:2,color:GOLD,marginBottom:8}},'WIN PATH'),
+      e('div',{style:{display:'flex',gap:4,flexWrap:'wrap'}},
+        ['Discover','Score','Research','Workflow','Proposal','Red Team','Export','Submit','WIN'].map(function(step,i){
+          return e('span',{key:step,style:{padding:'4px 10px',borderRadius:4,border:'1px solid '+(i===8?GREEN:BORDER),fontSize:11,color:i===8?GREEN:TEXT_D,background:i===8?'rgba(39,174,96,0.1)':BG3}},
+            (i<8?(i+1)+'. ':'')+step
+          );
         })
       ),
-      e('div',{style:{fontSize:11,color:TEXT_D,marginTop:8}},'Each opportunity has a position on this path. The system tells you exactly where it is and what\'s next.')
-    )
+      e('div',{style:{fontSize:11,color:TEXT_D,marginTop:6}},'Each opportunity moves through this path. The organism tracks progress and tells you what\'s next.')
+    ),
+
+    // === COST STATUS (spec V2 addition) ===
+    cycleHist&&cycleHist.cycles&&cycleHist.cycles.length>0?e('div',{style:{fontSize:11,color:TEXT_D,textAlign:'right',marginTop:4}},
+      'Last full cycle: '+relTime(cycleHist.cycles[0].timestamp)+
+      (cycleHist.cycles[0].agents_fired?' · '+cycleHist.cycles[0].agents_fired+' agents fired':'')
+    ):null
   );
 }
+
 
 // ============================================================
 // PLACEHOLDER MODULES (Steps 2-7)
