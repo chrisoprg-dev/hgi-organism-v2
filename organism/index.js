@@ -2465,6 +2465,49 @@ if (url.startsWith('/api/disaster-response')) {
   return;
 }
 
+// === ORGANISM DECISIONS — /api/organism-decisions ===
+if (url === '/api/organism-decisions' || url.startsWith('/api/organism-decisions?')) {
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+  try {
+    if (req.method === 'DELETE') {
+      var delBody = '';
+      req.on('data', function(c) { delBody += c; });
+      await new Promise(function(r) { req.on('end', r); });
+      var delData = JSON.parse(delBody || '{}');
+      if (delData.id) {
+        await supabase.from('organism_memory').delete().eq('id', delData.id);
+        res.end(JSON.stringify({ dismissed: true, id: delData.id }));
+      } else {
+        res.end(JSON.stringify({ error: 'id required' }));
+      }
+      return;
+    }
+    var decRows = await supabase.from('organism_memory').select('id,agent,opportunity_id,observation,created_at,entity_tags').eq('memory_type', 'decision_point').order('created_at', { ascending: false }).limit(20);
+    var decisions = (decRows.data || []).map(function(row) {
+      var obs = row.observation || '';
+      function getField(key) {
+        var rx = new RegExp(key + ':\\s*([\\s\\S]*?)(?=\\n\\n[A-Z_]+:|$)', 'i');
+        var m = obs.match(rx);
+        return m ? m[1].trim() : '';
+      }
+      var ap = null;
+      try { ap = JSON.parse(getField('ACTION_PAYLOAD')); } catch(e2) {}
+      return {
+        id: row.id, priority: getField('PRIORITY') || 'medium', type: getField('TYPE') || 'OWNER_ACTION',
+        title: getField('TITLE') || 'Decision', detail: getField('DETAIL') || '',
+        recommended_action: getField('RECOMMENDED_ACTION') || '', expected_impact: getField('EXPECTED_IMPACT') || '',
+        executable: getField('EXECUTABLE') === 'true',
+        action_endpoint: getField('ACTION_ENDPOINT') !== 'null' ? getField('ACTION_ENDPOINT') : null,
+        action_payload: ap, opportunity_id: row.opportunity_id || null, created_at: row.created_at
+      };
+    });
+    res.end(JSON.stringify({ decisions: decisions, count: decisions.length, last_think_run: decisions.length > 0 ? decisions[0].created_at : null }));
+  } catch (e) {
+    res.end(JSON.stringify({ error: e.message, decisions: [] }));
+  }
+  return;
+}
+
 // === LOSS ANALYSIS — /api/loss-analysis ===
 if (url === '/api/loss-analysis') {
   res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
