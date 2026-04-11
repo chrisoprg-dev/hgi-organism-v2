@@ -22,7 +22,7 @@ select option{background:#191919}
 <div id="root"></div>
 <script>
 "use strict";
-var e=React.createElement,useState=React.useState,useEffect=React.useEffect,useRef=React.useRef,useCallback=React.useCallback,useMemo=React.useMemo;
+var e=React.createElement,useState=React.useState,useEffect=React.useEffect,useRef=React.useRef,useCallback=React.useCallback,useMemo=React.useMemo,Fragment=React.Fragment;
 
 // ============================================================
 // SHARED.JS — Constants, Components, Utilities
@@ -1955,6 +1955,9 @@ function ProposalEngineModule(p){
   var st6=useState(null),generating=st6[0],setGenerating=st6[1];
   var st7=useState(null),autoProgress=st7[0],setAutoProgress=st7[1];
   var st8=useState(null),improveResult=st8[0],setImproveResult=st8[1];
+  var st9w=useState('sections'),wsView=st9w[0],setWsView=st9w[1];
+  var st10w=useState({}),wsExpanded=st10w[0],setWsExpanded=st10w[1];
+  var st11w=useState(null),wsEditing=st11w[0],setWsEditing=st11w[1];
 
   var sectionList=['Executive Summary','Technical Approach','Management Approach','Staffing Plan','Past Performance Matrix','Transition / Mobilization Plan','Pricing Narrative','Compliance Matrix','Clarifying Questions','Red Team Critique'];
 
@@ -2115,14 +2118,75 @@ function ProposalEngineModule(p){
 
     // Workspace mode
     mode==='workspace'?e('div',null,
-      e('div',{style:{display:'flex',gap:8,marginBottom:12}},
+      e('div',{style:{display:'flex',gap:8,marginBottom:12,alignItems:'center'}},
         e(Btn,{onClick:produceProposal},'🚀 Produce Full Proposal (Opus)'),
-        e(Btn,{onClick:exportDocx,variant:'ghost'},'📄 Export .docx')
+        e(Btn,{onClick:exportDocx,variant:'ghost'},'📄 Export .docx'),
+        e(Btn,{onClick:function(){setWsView(wsView==='full'?'sections':'full')},variant:'ghost'},wsView==='full'?'📑 Section View':'📄 Full View')
       ),
-      pl.selected&&pl.selected.proposal_content?e(Card,null,
-        e(Label,{text:'CURRENT PROPOSAL DRAFT'}),
-        e('div',{style:{fontSize:12,whiteSpace:'pre-wrap',maxHeight:800,overflowY:'auto',lineHeight:1.6}},pl.selected.proposal_content)
-      ):null
+      (function(){
+        var content=pl.selected&&pl.selected.proposal_content?pl.selected.proposal_content:(Object.keys(sections).length>0?sectionList.filter(function(s){return sections[s]}).map(function(s){return '## '+s+'\n\n'+sections[s]}).join('\n\n'):'');
+        if(!content)return e(Card,{style:{background:BG3}},e('div',{style:{color:TEXT_D,fontSize:12,textAlign:'center',padding:24}},'No proposal content yet. Use "Produce Full Proposal" or generate sections individually.'));
+        // ACTION REQUIRED count
+        var actionMatches=content.match(/\[ACTION REQUIRED[^\]]*\]|\*\*ACTION REQUIRED[^*]*\*\*/gi)||[];
+        var actionCount=actionMatches.length;
+        // Parse sections
+        var parsed=[];
+        var parts=content.split(/(?=^#{1,3}\s)/m);
+        parts.forEach(function(part){
+          var trimmed=part.trim();
+          if(!trimmed)return;
+          var headerMatch=trimmed.match(/^#{1,3}\s+(.+)/);
+          if(headerMatch){parsed.push({title:headerMatch[1].trim(),content:trimmed})}
+          else if(parsed.length===0){parsed.push({title:'Introduction',content:trimmed})}
+        });
+        if(parsed.length===0)parsed.push({title:'Full Proposal',content:content});
+
+        return e(Fragment,null,
+          // Action required banner
+          actionCount>0?e('div',{style:{background:'#E67E2222',border:'1px solid #E67E2244',borderRadius:4,padding:'8px 12px',marginBottom:12,display:'flex',justifyContent:'space-between',alignItems:'center'}},
+            e('span',{style:{color:ORANGE,fontSize:12,fontWeight:'bold'}},'⚠ '+actionCount+' ACTION REQUIRED item'+(actionCount>1?'s':'')),
+            e('span',{style:{color:TEXT_D,fontSize:11}},parsed.length+' sections · '+(content.length/1000).toFixed(1)+'K chars')
+          ):e('div',{style:{color:TEXT_D,fontSize:11,marginBottom:8}},parsed.length+' sections · '+(content.length/1000).toFixed(1)+'K chars'),
+
+          // Full view
+          wsView==='full'?e(Card,null,
+            e('div',{style:{fontSize:12,whiteSpace:'pre-wrap',maxHeight:800,overflowY:'auto',lineHeight:1.6},dangerouslySetInnerHTML:{__html:content.replace(/\[ACTION REQUIRED[^\]]*\]/gi,function(m){return '<span style="background:#E67E2233;color:#E67E22;padding:2px 6px;border-radius:3px;font-weight:bold">'+m+'</span>'}).replace(/\*\*ACTION REQUIRED[^*]*\*\*/gi,function(m){return '<span style="background:#E67E2233;color:#E67E22;padding:2px 6px;border-radius:3px;font-weight:bold">'+m+'</span>'}).replace(/\n/g,'<br>')}})
+          ):
+
+          // Section view
+          e('div',null,parsed.map(function(sec,idx){
+            var isExpanded=wsExpanded[idx];
+            var hasAction=/ACTION REQUIRED/i.test(sec.content);
+            var isEditing=wsEditing===idx;
+            return e(Card,{key:idx,style:{marginBottom:8,borderColor:hasAction?ORANGE+'44':BORDER}},
+              e('div',{onClick:function(){setWsExpanded(function(prev){var n=Object.assign({},prev);n[idx]=!prev[idx];return n})},style:{display:'flex',justifyContent:'space-between',alignItems:'center',cursor:'pointer'}},
+                e('div',{style:{display:'flex',alignItems:'center',gap:8}},
+                  e('span',{style:{color:isExpanded?GOLD:TEXT_D,fontSize:11}},isExpanded?'▼':'▶'),
+                  e('span',{style:{color:GOLD,fontWeight:'bold',fontSize:13}},sec.title),
+                  hasAction?e(Badge,{color:ORANGE},'ACTION'):null
+                ),
+                e('span',{style:{color:TEXT_D,fontSize:11}},(sec.content.length/1000).toFixed(1)+'K')
+              ),
+              isExpanded?e('div',{style:{marginTop:12}},
+                isEditing?e('textarea',{defaultValue:sec.content,onBlur:function(ev){
+                  var newContent=ev.target.value;
+                  var allContent=parsed.map(function(s,i){return i===idx?newContent:s.content}).join('\n\n');
+                  if(pl.selected){pl.writeBack(pl.selected.id,{proposal_content:allContent});pl.selected.proposal_content=allContent}
+                  setWsEditing(null);
+                },style:{width:'100%',minHeight:200,background:BG3,color:TEXT,border:'1px solid '+GOLD+'44',borderRadius:4,padding:12,fontSize:12,fontFamily:'monospace',lineHeight:1.6,resize:'vertical'}}):
+                e('div',{style:{fontSize:12,whiteSpace:'pre-wrap',lineHeight:1.6,maxHeight:500,overflowY:'auto'},dangerouslySetInnerHTML:{__html:sec.content.replace(/\[ACTION REQUIRED[^\]]*\]/gi,function(m){return '<span style="background:#E67E2233;color:#E67E22;padding:2px 6px;border-radius:3px;font-weight:bold">'+m+'</span>'}).replace(/\*\*ACTION REQUIRED[^*]*\*\*/gi,function(m){return '<span style="background:#E67E2233;color:#E67E22;padding:2px 6px;border-radius:3px;font-weight:bold">'+m+'</span>'}).replace(/\n/g,'<br>')}}),
+                e('div',{style:{display:'flex',gap:6,marginTop:8}},
+                  e(Btn,{onClick:function(){setWsEditing(isEditing?null:idx)},variant:'ghost',small:true},isEditing?'💾 Done':'✏️ Edit'),
+                  e(Btn,{onClick:function(){improveSection(sec.title,'improve')},variant:'ghost',small:true,disabled:!!generating},'✨ Improve'),
+                  e(Btn,{onClick:function(){improveSection(sec.title,'redteam')},variant:'ghost',small:true,disabled:!!generating},'🔴 Red Team'),
+                  e(Btn,{onClick:function(){generateSection(sec.title)},variant:'ghost',small:true,disabled:!!generating},'🔄 Regenerate')
+                ),
+                generating===sec.title?e('div',{style:{color:GOLD,fontSize:11,marginTop:4}},'⟳ Working on '+sec.title+'...'):null
+              ):null
+            );
+          }))
+        );
+      })()
     ):null,
 
     // Section pills
