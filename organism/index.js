@@ -409,7 +409,7 @@ if (url === '/' || url === '/dashboard' || url === '/interface' || url === '/int
 if (url.startsWith('/api/opportunity-detail')) {
   var oId = (req.url.split('?id=')[1]||'').split('&')[0];
   if (!oId) { res.writeHead(400); res.end(JSON.stringify({error:'id required'})); return; }
-  var dr = await supabase.from('opportunities').select('id,title,agency,vertical,opi_score,stage,status,due_date,estimated_value,scope_analysis,financial_analysis,research_brief,staffing_plan,capture_action,source_url,outcome,outcome_notes,rfp_text,proposal_content,rfp_document_retrieved').eq('id',oId).single();
+  var dr = await supabase.from('opportunities').select('id,title,agency,vertical,opi_score,stage,status,due_date,estimated_value,scope_analysis,financial_analysis,research_brief,staffing_plan,capture_action,source_url,outcome,outcome_notes,rfp_text,proposal_content,rfp_document_retrieved,description,oral_presentation_date,award_notification_date,rfp_document_url,incumbent,why_hgi_wins,key_requirements').eq('id',oId).single();
   res.writeHead(200, {'Content-Type':'application/json'});
   res.end(JSON.stringify(dr.data || {}));
   return;
@@ -1630,6 +1630,22 @@ if (url.startsWith('/api/extract-contacts')) {
 
 // === CONTACTS DASHBOARD — /api/contacts ===
 if (url.startsWith('/api/contacts')) {
+  if (req.method === 'POST') {
+    var body = '';
+    req.on('data', function(c) { body += c; });
+    req.on('end', async function() {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      try {
+        var p = JSON.parse(body);
+        if (!p.contact_name) { res.end(JSON.stringify({error:'contact_name required'})); return; }
+        var ins = { contact_name: p.contact_name, title: p.title||null, organization: p.organization||null, agency: p.agency||null, email: p.email||null, phone: p.phone||null, contact_type: p.contact_type||'client', priority: p.priority||'medium', hgi_relationship: p.hgi_relationship||'new', notes: p.notes||null, opportunity_id: p.opportunity_id||null, updated_at: new Date().toISOString() };
+        var r = await supabase.from('relationship_graph').insert(ins);
+        if (r.error) { res.end(JSON.stringify({error:r.error.message})); return; }
+        res.end(JSON.stringify({success:true}));
+      } catch(e) { res.end(JSON.stringify({error:e.message})); }
+    });
+    return;
+  }
   res.writeHead(200, { 'Content-Type': 'application/json' });
   try {
     var ctData = await supabase.from('relationship_graph')
@@ -1934,6 +1950,16 @@ if (url.startsWith('/api/recompetes')) {
     var rcData = await supabase.from('recompete_tracker').select('*').order('last_updated', { ascending: false }).limit(100);
     res.end(JSON.stringify(rcData.data || []));
   } catch(e) { res.end(JSON.stringify({ error: e.message })); }
+  return;
+}
+
+// === KB DOCUMENTS LIBRARY — /api/kb-documents ===
+if (url.startsWith('/api/kb-documents')) {
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+  try {
+    var kdr = await supabase.from('knowledge_documents').select('id,filename,document_class,vertical,status,chunk_count,created_at,updated_at').order('created_at',{ascending:false}).limit(100);
+    res.end(JSON.stringify({ total: (kdr.data||[]).length, documents: kdr.data || [] }));
+  } catch(e) { res.end(JSON.stringify({error:e.message})); }
   return;
 }
 
@@ -2520,8 +2546,57 @@ if (url === '/api/organism-decisions' || url.startsWith('/api/organism-decisions
   return;
 }
 
+// === BENCH / RECRUITING — /api/bench ===
+if (url === '/api/bench') {
+  if (req.method === 'POST') {
+    var body = '';
+    req.on('data', function(c) { body += c; });
+    req.on('end', async function() {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      try {
+        var p = JSON.parse(body);
+        if (!p.name || !p.role) { res.end(JSON.stringify({error:'name and role required'})); return; }
+        await storeMemory('recruiting_agent', null, 'bench,' + (p.role||''), 'BENCH MEMBER: ' + p.name + ' | Role: ' + p.role + ' | Domain: ' + (p.domain||'') + ' | Clearance: ' + (p.clearance||'none') + ' | Location: ' + (p.location||'') + ' | Availability: ' + (p.availability||'available') + ' | Notes: ' + (p.notes||''), 'bench_member', null, 'medium');
+        res.end(JSON.stringify({success:true}));
+      } catch(e) { res.end(JSON.stringify({error:e.message})); }
+    });
+    return;
+  }
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+  try {
+    var bData = await supabase.from('organism_memory').select('id,observation,created_at').eq('memory_type','bench_member').order('created_at',{ascending:false}).limit(100);
+    var bench = (bData.data || []).map(function(m) {
+      var obs = m.observation || '';
+      var extract = function(label) { var rx = new RegExp(label + ':\\s*([^|]+)'); var mt = obs.match(rx); return mt ? mt[1].trim() : ''; };
+      return { id: m.id, name: extract('BENCH MEMBER'), role: extract('Role'), domain: extract('Domain'), clearance: extract('Clearance'), location: extract('Location'), availability: extract('Availability'), notes: extract('Notes'), added: m.created_at };
+    });
+    res.end(JSON.stringify({ total: bench.length, bench: bench }));
+  } catch(e) { res.end(JSON.stringify({error:e.message})); }
+  return;
+}
+
 // === LOSS ANALYSIS — /api/loss-analysis ===
 if (url === '/api/loss-analysis') {
+  if (req.method === 'POST') {
+    var body = '';
+    req.on('data', function(c) { body += c; });
+    req.on('end', async function() {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      try {
+        var p = JSON.parse(body);
+        if (!p.id) { res.end(JSON.stringify({error:'id required'})); return; }
+        var upd = { outcome_notes: '' };
+        if (p.winner_name) upd.outcome_notes += 'Winner: ' + p.winner_name + '\n';
+        if (p.winner_amount) upd.outcome_notes += 'Winner Amount: $' + p.winner_amount + '\n';
+        if (p.our_bid_amount) upd.outcome_notes += 'Our Bid: $' + p.our_bid_amount + '\n';
+        if (p.notes) upd.outcome_notes += 'Notes: ' + p.notes;
+        upd.last_updated = new Date().toISOString();
+        await supabase.from('opportunities').update(upd).eq('id', p.id);
+        res.end(JSON.stringify({success:true}));
+      } catch(e) { res.end(JSON.stringify({error:e.message})); }
+    });
+    return;
+  }
   res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
   try {
     var outcomes = await supabase.from('opportunities').select('id,title,agency,vertical,opi_score,outcome,outcome_notes,stage,estimated_value,due_date').not('outcome', 'is', null).order('last_updated', { ascending: false }).limit(50);
@@ -2606,7 +2681,7 @@ if (url === '/api/record-outcome' && req.method === 'POST') {
       
       // Record outcome
       var upd = { outcome: params.outcome, outcome_notes: params.notes || null, last_updated: new Date().toISOString() };
-      if (params.outcome === 'won' || params.outcome === 'lost') upd.stage = 'closed';
+      if (params.outcome === 'won' || params.outcome === 'lost') upd.stage = params.outcome;
       if (params.outcome === 'no_bid') upd.stage = 'no_bid';
       await supabase.from('opportunities').update(upd).eq('id', params.id);
       log('OUTCOME: ' + params.id.slice(0,40) + ' → ' + params.outcome);
