@@ -6524,7 +6524,8 @@ async function agentHunting(state, trigger) {
         '\nFILTER: Score as FILTER if Medicaid, clinical health, physical construction, IT, engineering, environmental remediation, insurance brokerage, equipment/supplies.' +
         '\n\nCRITICAL: A TPA opportunity in Louisiana with $1M+ value should score 75-85, NOT 13. Score based on HGI fit for THAT VERTICAL.' +
         '\n\nOPP: ' + cand.title + ' | ' + cand.agency + ' | ' + (cand.description || '').slice(0, 300) +
-        '\n\nJSON only: {"opi":N,"vertical":"disaster|tpa|workforce|housing|construction|grant|tax_appeals|federal|FILTER","capture_action":"GO|WATCH|NO-BID","why":"1 sentence including any relationship/competitive/timing advantage"}';
+        '\n\nToday is ' + new Date().toISOString().split('T')[0] + '. If the listing mentions ANY deadline/due date, extract it. If the deadline has ALREADY PASSED, the opportunity is expired — score opi:0 and set expired:true.' +
+        '\n\nJSON only: {"opi":N,"vertical":"disaster|tpa|workforce|housing|construction|grant|tax_appeals|federal|FILTER","capture_action":"GO|WATCH|NO-BID","why":"1 sentence including any relationship/competitive/timing advantage","deadline_found":"YYYY-MM-DD or null","expired":false}';
       var scoreResp = await anthropic.messages.create({
         model: 'claude-haiku-4-5-20251001', max_tokens: 200,
         messages: [{ role: 'user', content: scorePrompt }]
@@ -6532,6 +6533,17 @@ async function agentHunting(state, trigger) {
       trackCost('intake_scoring', 'claude-haiku-4-5-20251001', scoreResp.usage);
       var st = (scoreResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('').replace(/```json|```/g, '').trim();
       var score = JSON.parse(st);
+
+      // EXPIRED DETECTION (Session 104) — reject opps where AI detects past deadline
+      if (score.expired === true || score.opi === 0) {
+        log('HUNTING: EXPIRED — ' + (cand.title || '').slice(0, 60) + ' (deadline: ' + (score.deadline_found || 'detected in text') + ')');
+        continue;
+      }
+
+      // Use AI-extracted deadline if source didn't provide one
+      if (!cand.due_date && score.deadline_found && score.deadline_found !== 'null') {
+        cand.due_date = score.deadline_found;
+      }
 
       // DEADLINE PROXIMITY ADJUSTMENT (Session 95, Build #6)
       // Adjust OPI based on time remaining before deadline
