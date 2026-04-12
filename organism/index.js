@@ -1023,6 +1023,74 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         }).join('\n').slice(0, 4000);
       }
 
+      // ═══ STAGE 1: RFP COMPLIANCE PARSER (Session 104) ═══
+      // Before Opus writes anything, parse the RFP into a structured blueprint.
+      // This tells Opus EXACTLY what to produce — sections, forms, page limits, positions.
+      var rfpText = (opp.rfp_text && opp.rfp_text.trim().length > 500) ? opp.rfp_text : '';
+      var complianceBlueprint = null;
+      if (rfpText.length > 500) {
+        log('PROPOSAL ENGINE STAGE 1: Parsing RFP compliance blueprint...');
+        try {
+          var parseResp = await anthropic.messages.create({
+            model: 'claude-sonnet-4-6',
+            max_tokens: 8000,
+            system: 'You are an expert government RFP compliance analyst. You parse RFPs into structured blueprints that proposal writers follow exactly. Output ONLY valid JSON — no markdown, no commentary.',
+            messages: [{role:'user', content: 'Parse this RFP into a compliance blueprint. Extract EVERY structural requirement.\n\nRFP TEXT:\n' + rfpText.slice(0, 80000) + '\n\nReturn JSON with this exact structure:\n{\n  "submission_format": {\n    "copies_required": "e.g. 4 physical + 1 USB",\n    "delivery_address": "full address",\n    "delivery_contact": "name and title",\n    "deadline": "exact date and time",\n    "delivery_method": "e.g. physical only, no fax/email"\n  },\n  "sections_required": [\n    {\n      "tab_number": "e.g. Tab 1",\n      "section_number": "e.g. 5.1",\n      "title": "exact title from RFP",\n      "attachment_id": "e.g. Attachment A, or null",\n      "page_limit": "number or null",\n      "requirements": "what must be included — every sub-requirement listed",\n      "has_provided_form": true/false,\n      "form_description": "description of the form if provided by RFP"\n    }\n  ],\n  "evaluation_criteria": [\n    {\n      "criterion": "exact name",\n      "max_points": number,\n      "description": "what evaluators are scoring",\n      "maps_to_section": "which tab/section addresses this"\n    }\n  ],\n  "rate_sheet": {\n    "attachment_id": "e.g. Attachment H",\n    "categories": [\n      {\n        "category_name": "e.g. Program Management",\n        "positions": ["exact position titles from the RFP form"]\n      }\n    ],\n    "columns_required": ["e.g. Position, Name, City/State, Hourly Rate"],\n    "scoring_method": "how price is scored"\n  },\n  "contract_template": {\n    "provided_by_rfp": true/false,\n    "description": "what the RFP says about the contract — complete and return vs draft your own",\n    "sections_count": number\n  },\n  "scope_items": ["every distinct deliverable or service area listed in the scope of work"],\n  "required_certifications": ["every form, affidavit, or certification required with attachment ID"],\n  "questions_deadline": "date if specified",\n  "special_requirements": ["any unusual requirements not captured above"]\n}'}]
+          });
+          trackCost('rfp_compliance_parser', 'claude-sonnet-4-6', parseResp.usage);
+          var parseText = (parseResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('').replace(/```json|```/g, '').trim();
+          complianceBlueprint = JSON.parse(parseText);
+          log('PROPOSAL ENGINE STAGE 1: Blueprint parsed — ' + (complianceBlueprint.sections_required||[]).length + ' sections, ' + (complianceBlueprint.evaluation_criteria||[]).length + ' eval criteria, ' + (complianceBlueprint.scope_items||[]).length + ' scope items');
+        } catch(parseErr) {
+          log('PROPOSAL ENGINE STAGE 1: Parse error — ' + (parseErr.message||'').slice(0,100) + '. Falling back to unparsed mode.');
+        }
+      } else {
+        log('PROPOSAL ENGINE STAGE 1: No RFP text available — skipping compliance parse');
+      }
+
+      // ═══ STAGE 2: BUILD THE COMPLIANCE-DRIVEN PROMPT ═══
+      var blueprintSection = '';
+      if (complianceBlueprint) {
+        blueprintSection = '\n\n## ═══ RFP COMPLIANCE BLUEPRINT (MANDATORY — your proposal MUST follow this EXACTLY) ═══\n' +
+          'This blueprint was parsed from the actual RFP. Every section listed below MUST appear in your proposal in this EXACT order. Every form identified as "provided by RFP" must be COMPLETED as-is, not recreated. Every page limit MUST be respected. Every scope item MUST be addressed.\n\n' +
+          '### SUBMISSION FORMAT\n' + JSON.stringify(complianceBlueprint.submission_format, null, 2) + '\n\n' +
+          '### REQUIRED SECTIONS (produce these in EXACTLY this order)\n';
+        (complianceBlueprint.sections_required || []).forEach(function(s, i) {
+          blueprintSection += '\n' + (i+1) + '. ' + (s.tab_number||'') + ' — ' + s.title + (s.attachment_id ? ' (' + s.attachment_id + ')' : '') +
+            (s.page_limit ? ' [PAGE LIMIT: ' + s.page_limit + ']' : '') +
+            (s.has_provided_form ? ' [RFP PROVIDES THIS FORM — COMPLETE IT, DO NOT RECREATE]' : '') +
+            '\n   Requirements: ' + (s.requirements||'') +
+            (s.form_description ? '\n   Form: ' + s.form_description : '');
+        });
+        blueprintSection += '\n\n### EVALUATION CRITERIA (evaluators score using EXACTLY these categories)\n';
+        (complianceBlueprint.evaluation_criteria || []).forEach(function(ec) {
+          blueprintSection += '- ' + ec.criterion + ': ' + ec.max_points + ' points — ' + ec.description + ' (maps to: ' + (ec.maps_to_section||'') + ')\n';
+        });
+        if (complianceBlueprint.rate_sheet) {
+          blueprintSection += '\n### RATE SHEET STRUCTURE (use EXACTLY these position titles)\n' +
+            'Attachment: ' + (complianceBlueprint.rate_sheet.attachment_id||'') + '\n' +
+            'Columns: ' + (complianceBlueprint.rate_sheet.columns_required||[]).join(', ') + '\n' +
+            'Scoring: ' + (complianceBlueprint.rate_sheet.scoring_method||'') + '\n';
+          (complianceBlueprint.rate_sheet.categories || []).forEach(function(cat) {
+            blueprintSection += '  ' + cat.category_name + ': ' + (cat.positions||[]).join(', ') + '\n';
+          });
+        }
+        if (complianceBlueprint.contract_template) {
+          blueprintSection += '\n### CONTRACT REQUIREMENT\n' +
+            (complianceBlueprint.contract_template.provided_by_rfp ?
+              'THE RFP PROVIDES A SAMPLE CONTRACT. Complete and return the provided contract — DO NOT draft a new one from scratch. Fill in all blank fields (consultant name, address, dates, compensation caps).' :
+              'The RFP requires proposers to include a draft contract. Draft one that meets 2 CFR 200 and FEMA requirements.') + '\n';
+        }
+        blueprintSection += '\n### SCOPE ITEMS CHECKLIST (every item below MUST be addressed in the Technical Approach)\n';
+        (complianceBlueprint.scope_items || []).forEach(function(si, i) {
+          blueprintSection += (i+1) + '. ' + si + '\n';
+        });
+        blueprintSection += '\n### REQUIRED FORMS & CERTIFICATIONS\n';
+        (complianceBlueprint.required_certifications || []).forEach(function(rc) {
+          blueprintSection += '- ' + rc + '\n';
+        });
+      }
+
       // ═══ BUILD THE MEGA-PROMPT WITH ALL INTELLIGENCE ═══
       var D = String.fromCharCode(36);
       var proposalPrompt = 'You are the HGI Global proposal production engine. Your job is to produce a COMPLETE, SUBMISSION-READY response document.\n\n' +
@@ -1062,7 +1130,19 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         '## OUTCOME LESSONS — WHAT WE LEARNED FROM WINS/LOSSES\n' + (outcomeText || 'No outcomes recorded yet') + '\n\n' +
         '## PARALLEL PURSUIT INTELLIGENCE\n' + (siblingText || 'No parallel pursuits') + '\n\n' +
         '## KNOWLEDGE BASE — HGI INSTITUTIONAL EXPERTISE\n' + kbChunks.slice(0,12000) + '\n\n' +
+        (blueprintSection || '') + '\n\n' +
         '## INSTRUCTIONS\n' +
+        (complianceBlueprint ?
+          'A COMPLIANCE BLUEPRINT HAS BEEN PARSED FROM THIS RFP (see above). YOU MUST:\n' +
+          '1. Follow the EXACT section order from the blueprint — Tab 1, Tab 2, Tab 3, etc.\n' +
+          '2. Use the EXACT position titles from the rate sheet — do not invent your own.\n' +
+          '3. When the blueprint says "RFP PROVIDES THIS FORM" — complete the provided form as-is. Do NOT recreate it.\n' +
+          '4. When the blueprint shows a sample contract is provided — fill in the blanks of that contract, do NOT draft a new one.\n' +
+          '5. Respect every page limit noted in the blueprint.\n' +
+          '6. Address every scope item on the checklist within the Technical Approach.\n' +
+          '7. Map your content to the evaluation criteria — make it effortless for evaluators to score each criterion.\n' +
+          '8. Complete every form and certification listed — pre-fill all company data, flag ONLY wet signature lines.\n\n' :
+          '') +
         'STEP 1 — ANALYZE THE SUBMISSION FORMAT:\n' +
         'Read the RFP/SOQ document above CAREFULLY. Determine EXACTLY what the agency is asking for:\n' +
         '- Is it a fill-in-the-blank questionnaire/form? If so, fill out every field of that form.\n' +
@@ -1170,11 +1250,16 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         last_updated: new Date().toISOString()
       }).eq('id', ppId);
 
-      // 7. Write memory
+      // 7. Write memory (including blueprint summary)
+      var blueprintSummary = complianceBlueprint ?
+        ' Blueprint: ' + (complianceBlueprint.sections_required||[]).length + ' sections, ' +
+        (complianceBlueprint.evaluation_criteria||[]).length + ' eval criteria, ' +
+        (complianceBlueprint.scope_items||[]).length + ' scope items, ' +
+        'contract template ' + (complianceBlueprint.contract_template && complianceBlueprint.contract_template.provided_by_rfp ? 'PROVIDED by RFP' : 'NOT provided') + '.' : ' No blueprint (no RFP text).';
       await supabase.from('organism_memory').insert({
         agent: 'proposal_engine',
         opportunity_id: ppId,
-        observation: 'PROPOSAL PRODUCED: ' + (opp.title||'').slice(0,50) + ' — ' + proposalText.length + ' chars generated. Stored in proposal_content field. Ready for President review.',
+        observation: 'PROPOSAL PRODUCED: ' + (opp.title||'').slice(0,50) + ' — ' + proposalText.length + ' chars generated.' + blueprintSummary + ' Stored in proposal_content field. Ready for President review.',
         memory_type: 'analysis',
         created_at: new Date().toISOString()
       });
@@ -1202,16 +1287,26 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
 
         var reviewPrompt = 'You are a ruthless government proposal red team reviewer and PWIN estimator. Review this proposal against the RFP and return ONLY valid JSON.\n\n' +
           '## RFP/SOQ REQUIREMENTS\n' + rfpRef.slice(0, 20000) + '\n\n' +
+          (complianceBlueprint ? '## COMPLIANCE BLUEPRINT (parsed from RFP — check proposal against EVERY item)\n' +
+            'Required sections: ' + JSON.stringify((complianceBlueprint.sections_required||[]).map(function(s){return s.tab_number+' '+s.title+(s.page_limit?' [LIMIT:'+s.page_limit+' pages]':'')})) + '\n' +
+            'Rate sheet positions: ' + JSON.stringify(complianceBlueprint.rate_sheet) + '\n' +
+            'Contract template provided: ' + (complianceBlueprint.contract_template?complianceBlueprint.contract_template.provided_by_rfp:'unknown') + '\n' +
+            'Scope items to address: ' + JSON.stringify(complianceBlueprint.scope_items) + '\n' +
+            'Eval criteria: ' + JSON.stringify(complianceBlueprint.evaluation_criteria) + '\n\n' : '') +
           '## PROPOSAL TEXT\n' + proposalText.slice(0, 60000) + competitorContext + '\n\n' +
           '## REVIEW CHECKLIST:\n' +
-          '1. COMPLIANCE: Missing required sections, exhibits, forms, certifications\n' +
-          '2. PERSONNEL: Geoffrey Brien mentioned (MUST NOT be), staff auto-assigned to roles (MUST be [TO BE ASSIGNED]), only Christopher J. Oney on cover letter\n' +
-          '3. EVIDENCE: Unsubstantiated claims without specific data (dates, amounts, project names)\n' +
-          '4. WIN THEMES: Missing, forced, or excessively repeated\n' +
-          '5. FILLER: Vague commitments, generic language, padding with no evaluator value\n' +
-          '6. FORMAT: Wrong section order, missing required headers, structure mismatch\n' +
-          '7. FACTS: Incorrect HGI data (Founded 1931, ~50 employees, Kenner HQ Suite 510, UEI DL4SJEVKZ6H4)\n' +
-          '8. SCORING RISK: Sections that would lose the most evaluator points as-written\n\n' +
+          '1. COMPLIANCE: Missing required sections, exhibits, forms, certifications. If a COMPLIANCE BLUEPRINT is provided above, check the proposal against EVERY section and scope item — flag any that are missing or incomplete.\n' +
+          '2. STRUCTURE: Does the proposal follow the EXACT section order specified in the RFP? Are tab numbers correct? Are section headings matching the RFP language?\n' +
+          '3. RATE SHEET: Does the rate sheet use the EXACT position titles from the RFP form? Are all required columns present? If the blueprint shows specific positions, verify each one appears.\n' +
+          '4. CONTRACT: If the RFP provides a sample contract, did the proposal complete and return it — or did it try to draft a new one from scratch? Drafting a new contract when one is provided is a CRITICAL compliance failure.\n' +
+          '5. PAGE LIMITS: Does any section exceed a stated page limit? Flag any section that would exceed its limit when formatted.\n' +
+          '6. SCOPE COVERAGE: If scope items are listed in the blueprint, verify each one is addressed in the Technical Approach. Flag any missing scope items.\n' +
+          '7. PERSONNEL: Geoffrey Brien mentioned (MUST NOT be), staff auto-assigned to roles (MUST be [TO BE ASSIGNED]), only Christopher J. Oney on cover letter\n' +
+          '8. EVIDENCE: Unsubstantiated claims without specific data (dates, amounts, project names)\n' +
+          '9. WIN THEMES: Missing, forced, or excessively repeated\n' +
+          '10. FILLER: Vague commitments, generic language, padding with no evaluator value\n' +
+          '11. FACTS: Incorrect HGI data (Founded 1931, ~50 employees, Kenner HQ Suite 510, UEI DL4SJEVKZ6H4)\n' +
+          '12. SCORING RISK: Sections that would lose the most evaluator points as-written\n\n' +
           'Return ONLY this JSON structure (no markdown, no preamble):\n' +
           '{\n' +
           '  "overall_status": "PASS or CONDITIONAL or FAIL",\n' +
