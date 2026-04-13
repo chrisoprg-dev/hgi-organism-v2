@@ -788,7 +788,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       // ── FILTER cross-opp memories to those relevant to this pursuit ──
       var crossMems = crossMemsRaw.filter(function(m) {
         return matchesContext(m.observation) || matchesContext(m.entity_tags);
-      }).slice(0, 40);
+      }).slice(0, 20);
 
       // ── FILTER competitive intel to this opp + same agency/vertical/state ──
       var ciRelevant = ciAll.filter(function(c) {
@@ -885,8 +885,8 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         });
         if (catMems.length > 0) {
           intelSummary += '\n### ' + cat + '\n';
-          catMems.slice(0,10).forEach(function(m) {
-            intelSummary += '[' + m.agent + ' | ' + (m.memory_type||'') + ']: ' + (m.observation||'').slice(0,4000) + '\n';
+          catMems.slice(0,5).forEach(function(m) {
+            intelSummary += '[' + m.agent + ' | ' + (m.memory_type||'') + ']: ' + (m.observation||'').slice(0,1500) + '\n';
           });
         }
       });
@@ -895,8 +895,8 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       var crossIntel = '';
       if (crossMems.length > 0) {
         crossIntel = crossMems.map(function(m) {
-          return '[' + m.agent + ' from other pursuit]: ' + (m.observation||'').slice(0,2000);
-        }).join('\n').slice(0, 8000);
+          return '[' + m.agent + ' from other pursuit]: ' + (m.observation||'').slice(0,1000);
+        }).join('\n').slice(0, 5000);
       }
 
       // Structured competitive intelligence
@@ -913,7 +913,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
             '\nTeaming history: ' + (c.teaming_history||'') +
             '\nWin rate: ' + (c.win_rate_estimate||'') +
             '\nStrategy notes: ' + (c.strategic_notes||'');
-        }).join('\n\n').slice(0, 8000);
+        }).join('\n\n').slice(0, 5000);
       }
 
       // Relationship/contact intelligence
@@ -1109,7 +1109,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         'Why HGI Wins: ' + (opp.why_hgi_wins||'Not yet analyzed') + '\n' +
         'HGI Fit: ' + (opp.hgi_fit||'') + '\n' +
         'HGI Relevance: ' + (opp.hgi_relevance||'') + '\n\n' +
-        '## RFP/SOQ REQUIREMENTS (THE ACTUAL DOCUMENT)\n' + ((opp.rfp_text && opp.rfp_text.trim().length > 200) ? opp.rfp_text.slice(0, 50000) : (opp.scope_analysis || opp.description || 'No RFP text available')) + '\n\n' +
+        '## RFP/SOQ REQUIREMENTS (THE ACTUAL DOCUMENT)\n' + ((opp.rfp_text && opp.rfp_text.trim().length > 200) ? opp.rfp_text.slice(0, 40000) : (opp.scope_analysis || opp.description || 'No RFP text available')) + '\n\n' +
         '## HGI COMPANY PROFILE\n' + HGI + '\n\n' +
         '## SCOPE ANALYSIS (Organism deep analysis of requirements)\n' + (opp.scope_analysis || 'Not yet produced') + '\n\n' +
         '## FINANCIAL ANALYSIS (Pricing strategy, market benchmarks)\n' + (opp.financial_analysis || 'Not yet produced') + '\n\n' +
@@ -1136,8 +1136,8 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
           'A COMPLIANCE BLUEPRINT HAS BEEN PARSED FROM THIS RFP (see above). YOU MUST:\n' +
           '1. Follow the EXACT section order from the blueprint — Tab 1, Tab 2, Tab 3, etc.\n' +
           '2. Use the EXACT position titles from the rate sheet — do not invent your own.\n' +
-          '3. When the blueprint says "RFP PROVIDES THIS FORM" — complete the provided form as-is. Do NOT recreate it.\n' +
-          '4. When the blueprint shows a sample contract is provided — fill in the blanks of that contract, do NOT draft a new one.\n' +
+          '3. When the blueprint says "RFP PROVIDES THIS FORM" — state that HGI will complete and submit the provided form. Do NOT reproduce the form text.\n' +
+          '4. When the blueprint shows a sample contract is provided — state that HGI has reviewed the sample contract and will execute it as provided. List any blanks requiring HGI input as a brief checklist. Do NOT reproduce contract language.\n' +
           '5. Respect every page limit noted in the blueprint.\n' +
           '6. Address every scope item on the checklist within the Technical Approach.\n' +
           '7. Map your content to the evaluation criteria — make it effortless for evaluators to score each criterion.\n' +
