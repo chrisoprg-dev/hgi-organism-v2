@@ -1136,7 +1136,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         'Why HGI Wins: ' + (opp.why_hgi_wins||'Not yet analyzed') + '\n' +
         'HGI Fit: ' + (opp.hgi_fit||'') + '\n' +
         'HGI Relevance: ' + (opp.hgi_relevance||'') + '\n\n' +
-        '## RFP/SOQ REQUIREMENTS (THE ACTUAL DOCUMENT)\n' + ((opp.rfp_text && opp.rfp_text.trim().length > 200) ? opp.rfp_text.slice(0, 40000) : (opp.scope_analysis || opp.description || 'No RFP text available')) + '\n\n' +
+        '## RFP/SOQ REQUIREMENTS (THE ACTUAL DOCUMENT)\n' + ((opp.rfp_text && opp.rfp_text.trim().length > 200) ? opp.rfp_text.slice(0, 20000) : (opp.scope_analysis || opp.description || 'No RFP text available')) + '\n\n' +
         '## HGI COMPANY PROFILE\n' + HGI + '\n\n' +
         '## SCOPE ANALYSIS (Organism deep analysis of requirements)\n' + (opp.scope_analysis || 'Not yet produced') + '\n\n' +
         '## FINANCIAL ANALYSIS (Pricing strategy, market benchmarks)\n' + (opp.financial_analysis || 'Not yet produced') + '\n\n' +
@@ -1231,6 +1231,8 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         '- HGI phone: (504) 681-6135. Email: info@hgi-global.com. Do NOT use placeholder numbers.\n' +
         '- HGI has approximately 50 team members across offices in Kenner (HQ), Shreveport, Alexandria, and New Orleans. Do NOT cite "67 full-time employees and 43 contractors."';
 
+      var _heapBefore = process.memoryUsage();
+      log('PROPOSAL ENGINE: Heap before Opus call — ' + Math.round(_heapBefore.heapUsed / 1048576) + 'MB heapUsed, ' + Math.round(_heapBefore.heapTotal / 1048576) + 'MB heapTotal, ' + Math.round(_heapBefore.rss / 1048576) + 'MB RSS');
       log('PROPOSAL ENGINE: Calling Claude Opus 4.6 (128K max) with ' + proposalPrompt.length + ' char prompt');
 
       // Opus 4.6 supports 128K output tokens but requires streaming for large outputs
