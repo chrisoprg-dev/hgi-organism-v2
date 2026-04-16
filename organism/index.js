@@ -6698,12 +6698,19 @@ async function agentHunting(state, trigger) {
         '\n\nToday is ' + new Date().toISOString().split('T')[0] + '. If the listing mentions ANY deadline/due date, extract it. If the deadline has ALREADY PASSED, the opportunity is expired — score opi:0 and set expired:true.' +
         '\n\nJSON only: {"opi":N,"vertical":"disaster|tpa|workforce|housing|construction|grant|tax_appeals|federal|FILTER","capture_action":"GO|WATCH|NO-BID","why":"1 sentence including any relationship/competitive/timing advantage","deadline_found":"YYYY-MM-DD or null","expired":false}';
       var scoreResp = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-20251001', max_tokens: 200,
+        model: 'claude-haiku-4-5-20251001', max_tokens: 400,
         messages: [{ role: 'user', content: scorePrompt }]
       });
       trackCost('intake_scoring', 'claude-haiku-4-5-20251001', scoreResp.usage);
       var st = (scoreResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('').replace(/```json|```/g, '').trim();
-      var score = JSON.parse(st);
+      var score;
+      try { score = JSON.parse(st); }
+      catch(pe) {
+        log('HUNTING: JSON parse FAIL for "' + (cand.title||'').slice(0,50) + '" — stop_reason=' + (scoreResp.stop_reason||'?') + ' raw=' + st.slice(0, 150).replace(/\n/g,' '));
+        continue;
+      }
+      // Phase 3 instrumentation: log every Haiku score decision so we can calibrate
+      log('HUNTING: SCORE ' + (cand.title||'').slice(0,55) + ' → opi:' + (score.opi||'?') + ' vert:' + (score.vertical||'?') + ' ' + (score.capture_action||'?') + ' exp:' + !!score.expired + (score.why ? ' why:"' + score.why.slice(0,80) + '"' : ''));
 
       // EXPIRED DETECTION (Session 104) — reject opps where AI detects past deadline
       if (score.expired === true || score.opi === 0) {
@@ -6746,7 +6753,7 @@ async function agentHunting(state, trigger) {
         discovered_at: new Date().toISOString(), last_updated: new Date().toISOString()
       });
       qualified.push({ title: cand.title, opi: score.opi, source: cand.source });
-    } catch (e) {}
+    } catch (e) { log('HUNTING: scoring error for "' + (cand.title||'').slice(0,50) + '" — ' + (e.message||'').slice(0,120)); }
   }
 
   log('HUNTING: ' + qualified.length + ' qualified and added');
