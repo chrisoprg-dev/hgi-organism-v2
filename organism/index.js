@@ -509,10 +509,16 @@ if (url === '/api/hunt' && req.method === 'POST') {
       var verticals = p.verticals || ['disaster_recovery','tpa_claims','construction','grant','workforce','housing','program_admin'];
       var states = p.states || ['Louisiana','Texas','Florida','Mississippi','Alabama','Georgia'];
       log('HUNT triggered: ' + verticals.length + ' verticals, ' + states.length + ' states');
-      // Trigger the hunting functions asynchronously
-      if (typeof huntAllSources === 'function') { huntAllSources().catch(function(e){log('Hunt error: '+e.message)}); }
-      else { log('huntAllSources not available — manual hunt only'); }
-      res.end(JSON.stringify({success:true,message:'Hunt triggered for '+verticals.length+' verticals across '+states.length+' states',note:'Results will appear in pipeline as opportunities are processed'}));
+      // Trigger agentHunting asynchronously — loads state then runs all source scrapers
+      setImmediate(async function() {
+        try {
+          var huntState = await loadState();
+          log('HUNT: State loaded — ' + huntState.pipeline.length + ' existing opps. Calling agentHunting...');
+          var huntResult = await agentHunting(huntState, 'api_hunt_manual');
+          log('HUNT: Complete — ' + (huntResult && huntResult.new_opps ? huntResult.new_opps : 0) + ' new opportunities qualified');
+        } catch(he) { log('HUNT error: ' + (he.message || '').slice(0, 200)); }
+      });
+      res.end(JSON.stringify({success:true,message:'Hunt triggered for '+verticals.length+' verticals across '+states.length+' states',note:'Results will appear in pipeline as opportunities are processed. Check /api/logs for progress.'}));
     } catch(e) { res.end(JSON.stringify({error:e.message})); }
   });
   return;
@@ -6245,6 +6251,9 @@ async function huntLaPAC() {
 async function agentHunting(state, trigger) {
   log('HUNTING: checking procurement portals...');
   var newOpps = [];
+  // Track per-source raw find counts so we can write hunt_runs rows at the end
+  // Keys: centralbidding_v2, lapac_v2, sam_gov, openfema, usaspending, grants_gov, federal_register, web_search
+  var sourceCounts = {};
   var existingTitles = state.pipeline.map(function(o) { return (o.title || '').toLowerCase().slice(0, 50); });
 
   function isDupe(title) {
@@ -6263,18 +6272,20 @@ async function agentHunting(state, trigger) {
   try {
     var isCronHunt = (trigger || '').indexOf('cron') >= 0;
     var cbResults = await huntCentralBidding(isCronHunt);
+    sourceCounts.centralbidding_v2 = (cbResults || []).length;
     cbResults.forEach(function(o) {
       if (o.title && !isDupe(o.title)) newOpps.push(o);
     });
-  } catch (e) { log('HUNTING CB direct err: ' + e.message); }
+  } catch (e) { log('HUNTING CB direct err: ' + e.message); sourceCounts.centralbidding_v2 = -1; }
 
   // LaPAC — Direct scraping
   try {
     var lapacResults = await huntLaPAC();
+    sourceCounts.lapac_v2 = (lapacResults || []).length;
     lapacResults.forEach(function(o) {
       if (o.title && !isDupe(o.title)) newOpps.push(o);
     });
-  } catch (e) { log('HUNTING LaPAC err: ' + e.message); }
+  } catch (e) { log('HUNTING LaPAC err: ' + e.message); sourceCounts.lapac_v2 = -1; }
 
   // LaPAC — now handled by huntLaPAC() above
 
@@ -6300,12 +6311,15 @@ async function agentHunting(state, trigger) {
       var sr = await fetch('https://api.sam.gov/opportunities/v2/search?api_key=DEMO_KEY&q=' + encodeURIComponent(samKW[s]) + '&postedFrom=' + daysAgo(14) + '&postedTo=' + today() + '&active=true&limit=10');
       if (sr.ok) {
         var sd = await sr.json();
-        (sd.opportunitiesData || []).forEach(function(o) {
+        var samBatch = sd.opportunitiesData || [];
+        sourceCounts.sam_gov = (sourceCounts.sam_gov || 0) + samBatch.length;
+        samBatch.forEach(function(o) {
           if (o.title && !isDupe(o.title)) newOpps.push({ title: o.title, agency: o.fullParentPathName || 'Federal', source: 'sam_gov', source_url: 'https://sam.gov/opp/' + o.opportunityId, description: (o.description || '').slice(0, 500), due_date: o.responseDeadLine || null });
         });
       }
     } catch (e) {}
   }
+  if (!('sam_gov' in sourceCounts)) sourceCounts.sam_gov = 0;
 
 
   // === NEW: OpenFEMA disaster declarations (free, no key) ===
@@ -6320,6 +6334,7 @@ async function agentHunting(state, trigger) {
       if (fr.ok) {
         var fd = await fr.json();
         var decls = fd.DisasterDeclarationsSummaries || [];
+        sourceCounts.openfema = (sourceCounts.openfema || 0) + decls.length;
         for (var fi = 0; fi < decls.length; fi++) {
           var decl = decls[fi];
           var ft = 'DR-' + decl.disasterNumber + ' ' + (decl.state || '') + ' — ' + (decl.declarationTitle || '');
@@ -6339,6 +6354,7 @@ async function agentHunting(state, trigger) {
       }
     } catch (e) { log('HUNTING OpenFEMA err: ' + e.message); }
   }
+  if (!('openfema' in sourceCounts)) sourceCounts.openfema = 0;
   log('HUNTING: OpenFEMA checked ' + hgiStates.length + ' states');
 
   // === NEW: USAspending expiring contracts (free, no key) ===
@@ -6363,6 +6379,7 @@ async function agentHunting(state, trigger) {
     if (usaR.ok) {
       var usaD = await usaR.json();
       var usaResults = usaD.results || [];
+      sourceCounts.usaspending = usaResults.length;
       for (var ui = 0; ui < usaResults.length; ui++) {
         var ua = usaResults[ui];
         var ut = 'RECOMPETE: ' + (ua['Recipient Name'] || '?') + ' — ' + (ua.Description || '').slice(0, 80);
@@ -6381,6 +6398,7 @@ async function agentHunting(state, trigger) {
       log('HUNTING: USAspending found ' + usaResults.length + ' expiring contracts');
     }
   } catch (e) { log('HUNTING USAspending err: ' + e.message); }
+  if (!('usaspending' in sourceCounts)) sourceCounts.usaspending = 0;
 
   // === NEW: Grants.gov forecasted+posted (free, no key) ===
   try {
@@ -6394,6 +6412,7 @@ async function agentHunting(state, trigger) {
     if (gr.ok) {
       var gd = await gr.json();
       var gops = (gd.data && gd.data.oppHits) ? gd.data.oppHits : [];
+      sourceCounts.grants_gov = gops.length;
       for (var gi = 0; gi < gops.length; gi++) {
         var go = gops[gi];
         if (go.oppTitle && !isDupe(go.oppTitle)) {
@@ -6409,6 +6428,7 @@ async function agentHunting(state, trigger) {
       log('HUNTING: Grants.gov found ' + gops.length + ' results');
     }
   } catch (e) { log('HUNTING Grants.gov err: ' + e.message); }
+  if (!('grants_gov' in sourceCounts)) sourceCounts.grants_gov = 0;
 
   // === NEW: Federal Register CDBG-DR and FEMA notices (free, no key) ===
   try {
@@ -6422,6 +6442,7 @@ async function agentHunting(state, trigger) {
       if (frR.ok) {
         var frD = await frR.json();
         var frResults = frD.results || [];
+        sourceCounts.federal_register = (sourceCounts.federal_register || 0) + frResults.length;
         for (var fri = 0; fri < frResults.length; fri++) {
           var frd = frResults[fri];
           if (frd.title && !isDupe(frd.title)) {
@@ -6438,6 +6459,7 @@ async function agentHunting(state, trigger) {
     }
     log('HUNTING: Federal Register checked ' + frTerms.length + ' terms');
   } catch (e) { log('HUNTING Federal Register err: ' + e.message); }
+  if (!('federal_register' in sourceCounts)) sourceCounts.federal_register = 0;
 
   // === WEB SEARCH HUNTING — portals without APIs, ALL 8 VERTICALS ===
   try {
@@ -6476,6 +6498,7 @@ async function agentHunting(state, trigger) {
       try {
         var webOpps = JSON.parse(webText);
         if (Array.isArray(webOpps)) {
+          sourceCounts.web_search = webOpps.length;
           webOpps.forEach(function(wo) {
             if (wo.title && !isDupe(wo.title)) {
               newOpps.push({
@@ -6491,6 +6514,28 @@ async function agentHunting(state, trigger) {
       } catch (pe) { log('HUNTING: Web search parse error: ' + pe.message); }
     }
   } catch (e) { log('HUNTING web search err: ' + e.message); }
+  if (!('web_search' in sourceCounts)) sourceCounts.web_search = 0;
+
+  // === WRITE PER-SOURCE hunt_runs ROWS (Session 107 fix) ===
+  // This makes scraper activity visible to the /api/health-monitor check and the audit dashboard.
+  // Without these writes, runs are invisible even though the scrapers are executing.
+  var huntRunTs = new Date().toISOString();
+  var huntRunRows = Object.keys(sourceCounts).map(function(src) {
+    var count = sourceCounts[src];
+    return {
+      id: 'hr-' + src + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+      source: src,
+      status: count === -1 ? 'error' : ('found:' + count),
+      run_at: huntRunTs,
+      opportunities_found: count === -1 ? 0 : count
+    };
+  });
+  try {
+    if (huntRunRows.length > 0) {
+      await supabase.from('hunt_runs').insert(huntRunRows);
+      log('HUNTING: Wrote ' + huntRunRows.length + ' hunt_runs tracking rows: ' + Object.keys(sourceCounts).map(function(s){return s+':'+sourceCounts[s]}).join(', '));
+    }
+  } catch(hre) { log('HUNTING: hunt_runs insert failed — ' + (hre.message || '').slice(0, 120)); }
 
   log('HUNTING: ' + newOpps.length + ' raw candidates. Scoring with ALL organism intelligence...');
   if (newOpps.length === 0) {
