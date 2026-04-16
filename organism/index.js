@@ -6519,11 +6519,11 @@ async function agentHunting(state, trigger) {
   // === WRITE PER-SOURCE hunt_runs ROWS (Session 107 fix) ===
   // This makes scraper activity visible to the /api/health-monitor check and the audit dashboard.
   // Without these writes, runs are invisible even though the scrapers are executing.
+  // NOTE: hunt_runs.id is bigint auto-increment — do NOT pass a string id or the insert drops silently.
   var huntRunTs = new Date().toISOString();
   var huntRunRows = Object.keys(sourceCounts).map(function(src) {
     var count = sourceCounts[src];
     return {
-      id: 'hr-' + src + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
       source: src,
       status: count === -1 ? 'error' : ('found:' + count),
       run_at: huntRunTs,
