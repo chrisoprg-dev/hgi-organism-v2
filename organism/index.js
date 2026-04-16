@@ -2489,8 +2489,9 @@ if (url === '/api/health-monitor') {
       hmWarnings > 0 ? 'WARNING — ' + hmWarnings + ' warning(s)' : 'ALL SYSTEMS OK';
 
     // Log to hunt_runs for tracking
+    // NOTE: hunt_runs.id is bigint auto-increment — do NOT pass a string id or the insert drops silently.
     await supabase.from('hunt_runs').insert({
-      id: 'hr-health-' + Date.now(), source: 'health_monitor',
+      source: 'health_monitor',
       status: hmResult.summary + ' | ' + hmResult.checks.length + ' checks | ' + hmResult.alerts.length + ' alerts',
       run_at: new Date().toISOString(), opportunities_found: 0
     });
@@ -5604,8 +5605,8 @@ async function agentDisasterMonitor(state) {
           log('AUTO-INTAKE: DR-' + nd.disaster_number + ' ' + nd.state + ' added (OPI 75)');
           // Create disaster alert notification
           try {
+            // NOTE: hunt_runs.id is bigint auto-increment — do NOT pass a string id or the insert drops silently.
             await supabase.from('hunt_runs').insert({
-              id: 'notify-dr-' + nd.disaster_number + '-' + Date.now(),
               source: 'notify:disaster_alert',
               status: 'completed',
               run_at: new Date().toISOString(),
