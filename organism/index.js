@@ -33,17 +33,44 @@ var LOG_MAX = 500;
 
 // === COST TRACKING (Session 95) ===
 var costLog = [];
+var webSearchCount = 0; // Session 105: track web searches ($10/1000)
 var PRICING = {
   'claude-sonnet-4-6': { in_per_tok: 0.000003, out_per_tok: 0.000015 },
   'claude-sonnet-4-20250514': { in_per_tok: 0.000003, out_per_tok: 0.000015 },
   'claude-haiku-4-5-20251001': { in_per_tok: 0.00000025, out_per_tok: 0.00000125 },
-  'claude-opus-4-6': { in_per_tok: 0.000015, out_per_tok: 0.000075 }
+  'claude-opus-4-6': { in_per_tok: 0.000005, out_per_tok: 0.000025 }
 };
 function trackCost(agent, model, usage) {
   if (!usage) return;
   var p = PRICING[model] || PRICING['claude-haiku-4-5-20251001'];
   var cost = (usage.input_tokens || 0) * p.in_per_tok + (usage.output_tokens || 0) * p.out_per_tok;
   costLog.push({ agent: agent, model: model, input_tokens: usage.input_tokens || 0, output_tokens: usage.output_tokens || 0, cost_usd: cost, ts: new Date().toISOString() });
+}
+
+// SESSION 105: Agent frequency control — skip web-search agents that ran recently
+var agentLastRun = {};
+async function shouldRunAgent(agentName, frequencyDays) {
+  // Check in-memory cache first
+  var now = Date.now();
+  if (agentLastRun[agentName] && (now - agentLastRun[agentName]) < frequencyDays * 86400000) {
+    return false;
+  }
+  // Check Supabase for last run
+  try {
+    var lastMem = await supabase.from('organism_memory').select('created_at')
+      .eq('agent', agentName).order('created_at', { ascending: false }).limit(1);
+    if (lastMem.data && lastMem.data.length > 0) {
+      var lastRun = new Date(lastMem.data[0].created_at).getTime();
+      agentLastRun[agentName] = lastRun;
+      var daysSince = (now - lastRun) / 86400000;
+      if (daysSince < frequencyDays) {
+        log('FREQUENCY: Skipping ' + agentName + ' — last ran ' + Math.round(daysSince * 10) / 10 + ' days ago (runs every ' + frequencyDays + ' days)');
+        return false;
+      }
+    }
+  } catch (e) { /* on error, run the agent */ }
+  agentLastRun[agentName] = now;
+  return true;
 }
 
 const server = http.createServer(async (req, res) => {
@@ -1216,6 +1243,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       });
       var finalMessage = await stream.finalMessage();
       proposalText = (finalMessage.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
+      trackCost('proposal_engine_opus', 'claude-opus-4-6', finalMessage.usage);
       log('PROPOSAL ENGINE: Generated ' + proposalText.length + ' chars');
 
       // 5.5 POST-PROCESSING: Auto-fill known ACTION REQUIRED items
@@ -2482,7 +2510,7 @@ if (url === '/api/cost-monitor') {
       res.end(JSON.stringify({
         message: 'No cost data yet. Cost logs appear after next cron session completes.',
         total_usd: 0,
-        current_session: { calls: costLog.length, est_cost_usd: Math.round(costLog.reduce(function(s,c) { return s + c.cost_usd; }, 0) * 10000) / 10000 }
+        current_session: { calls: costLog.length, est_cost_usd: Math.round(costLog.reduce(function(s,c) { return s + c.cost_usd; }, 0) * 10000) / 10000, web_searches: webSearchCount, web_search_cost_usd: Math.round(webSearchCount * 0.01 * 100) / 100 }
       }));
       return;
     }
@@ -2548,7 +2576,7 @@ if (url === '/api/cost-monitor') {
       },
       by_agent: agentList,
       daily_spend: dayList,
-      current_session: { calls: costLog.length, est_cost_usd: Math.round(costLog.reduce(function(s,c) { return s + c.cost_usd; }, 0) * 10000) / 10000 },
+      current_session: { calls: costLog.length, est_cost_usd: Math.round(costLog.reduce(function(s,c) { return s + c.cost_usd; }, 0) * 10000) / 10000, web_searches: webSearchCount, web_search_cost_usd: Math.round(webSearchCount * 0.01 * 100) / 100 },
       as_of_cst: cstNow.toISOString().slice(0, 19).replace('T', ' ') + ' CST'
     }));
   } catch(cmErr) {
@@ -4916,6 +4944,7 @@ async function claudeCall(system, prompt, maxTokens, opts) {
 
   var response = await anthropic.messages.create(params);
   trackCost(opts.agent || system.slice(0, 40), model, response.usage);
+  if (useSearch) { var wsHits = (response.content || []).filter(function(b) { return b.type === 'server_tool_use' || b.type === 'web_search_tool_result'; }).length; webSearchCount += Math.max(wsHits, 1); }
   var texts = [];
   for (var i = 0; i < (response.content || []).length; i++) {
     if (response.content[i].type === 'text') texts.push(response.content[i].text);
@@ -7228,7 +7257,7 @@ async function runSession(trigger) {
     try { var rLL = await agentLearningLoop(state); if (rLL) allResults.push(rLL); } catch (e) { log('LL err: ' + e.message); }
     // RE-ENABLED (Session 84) — 10 more system agents for full intelligence:
     log('--- Extended intelligence agents (10) ---');
-    try { var rDis = await agentDiscovery(state); if (rDis) allResults.push(rDis); } catch (e) { log('Disc err: ' + e.message); }
+    if (await shouldRunAgent('discovery_agent', 3)) { try { var rDis = await agentDiscovery(state); if (rDis) allResults.push(rDis); } catch (e) { log('Disc err: ' + e.message); } }
     // try { var rOPI = await agentOPICalibration(state); if (rOPI) allResults.push(rOPI); } catch (e) { log('OPI err: ' + e.message); }
     try { var rCE = await agentContentEngine(state); if (rCE) allResults.push(rCE); } catch (e) { log('CE err: ' + e.message); }
     // try { var rRec = await agentRecruiting(state); if (rRec) allResults.push(rRec); } catch (e) { log('Rec err: ' + e.message); }
@@ -7236,19 +7265,19 @@ async function runSession(trigger) {
     try { var rSI = await agentScraperInsights(state); if (rSI) allResults.push(rSI); } catch (e) { log('SI err: ' + e.message); }
     // try { var rEB = await agentExecutiveBrief(state); if (rEB) allResults.push(rEB); } catch (e) { log('EB err: ' + e.message); }
     try { var rDV = await agentDesignVisual(state); if (rDV) allResults.push(rDV); } catch (e) { log('DV err: ' + e.message); }
-    try { var rTM = await agentTeaming(state); if (rTM) allResults.push(rTM); } catch (e) { log('Team err: ' + e.message); }
-    try { var rSE = await agentSourceExpansion(state); if (rSE) allResults.push(rSE); } catch (e) { log('SE err: ' + e.message); }
-    try { var rCX = await agentContractExpiration(state); if (rCX) allResults.push(rCX); } catch (e) { log('CX err: ' + e.message); }
-    try { var rBC = await agentBudgetCycle(state); if (rBC) allResults.push(rBC); } catch (e) { log('BC err: ' + e.message); }
+    if (await shouldRunAgent('teaming_agent', 7)) { try { var rTM = await agentTeaming(state); if (rTM) allResults.push(rTM); } catch (e) { log('Team err: ' + e.message); } }
+    if (await shouldRunAgent('source_expansion', 7)) { try { var rSE = await agentSourceExpansion(state); if (rSE) allResults.push(rSE); } catch (e) { log('SE err: ' + e.message); } }
+    if (await shouldRunAgent('contract_expiration', 7)) { try { var rCX = await agentContractExpiration(state); if (rCX) allResults.push(rCX); } catch (e) { log('CX err: ' + e.message); } }
+    if (await shouldRunAgent('budget_cycle_tracker', 7)) { try { var rBC = await agentBudgetCycle(state); if (rBC) allResults.push(rBC); } catch (e) { log('BC err: ' + e.message); } }
     try { var rLA = await agentLossAnalysis(state); if (rLA) allResults.push(rLA); } catch (e) { log('LA err: ' + e.message); }
     try { var rWR = await agentWinRateAnalytics(state); if (rWR) allResults.push(rWR); } catch (e) { log('WR err: ' + e.message); }
-    try { var rRM = await agentRegulatoryMonitor(state); if (rRM) allResults.push(rRM); } catch (e) { log('RM err: ' + e.message); }
+    if (await shouldRunAgent('regulatory_monitor', 7)) { try { var rRM = await agentRegulatoryMonitor(state); if (rRM) allResults.push(rRM); } catch (e) { log('RM err: ' + e.message); } }
     try { var rOA = await agentOutreachAutomation(state); if (rOA) allResults.push(rOA); } catch (e) { log('OA err: ' + e.message); }
     // LearningLoop already active above (line 5317) — skip duplicate
-    try { var rEN = await agentEntrepreneurial(state); if (rEN) allResults.push(rEN); } catch (e) { log('EN err: ' + e.message); }
-    try { var rRC = await agentRecompete(state); if (rRC) allResults.push(rRC); } catch (e) { log('RC err: ' + e.message); }
-    try { var rCD = await agentCompetitorDeepDive(state); if (rCD) allResults.push(rCD); } catch (e) { log('CD err: ' + e.message); }
-    try { var rAP = await agentAgencyProfile(state); if (rAP) allResults.push(rAP); } catch (e) { log('AP err: ' + e.message); }
+    if (await shouldRunAgent('entrepreneurial_agent', 3)) { try { var rEN = await agentEntrepreneurial(state); if (rEN) allResults.push(rEN); } catch (e) { log('EN err: ' + e.message); } }
+    if (await shouldRunAgent('recompete_monitor', 7)) { try { var rRC = await agentRecompete(state); if (rRC) allResults.push(rRC); } catch (e) { log('RC err: ' + e.message); } }
+    if (await shouldRunAgent('competitor_deep_dive', 7)) { try { var rCD = await agentCompetitorDeepDive(state); if (rCD) allResults.push(rCD); } catch (e) { log('CD err: ' + e.message); } }
+    if (await shouldRunAgent('agency_profile_agent', 7)) { try { var rAP = await agentAgencyProfile(state); if (rAP) allResults.push(rAP); } catch (e) { log('AP err: ' + e.message); } }
     try { var rSD = await agentSubcontractorDB(state); if (rSD) allResults.push(rSD); } catch (e) { log('SD err: ' + e.message); }
 
     // 5. EVAL SCORING
