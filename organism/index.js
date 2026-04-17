@@ -6344,7 +6344,8 @@ async function agentHunting(state, trigger) {
   ];
   for (var s = 0; s < samKW.length; s++) {
     try {
-      var sr = await fetch('https://api.sam.gov/opportunities/v2/search?api_key=DEMO_KEY&q=' + encodeURIComponent(samKW[s]) + '&postedFrom=' + daysAgo(14) + '&postedTo=' + today() + '&active=true&limit=10');
+      var samApiKey = process.env.SAM_GOV_API_KEY || 'DEMO_KEY';
+      var sr = await fetch('https://api.sam.gov/prod/opportunities/v2/search?api_key=' + samApiKey + '&q=' + encodeURIComponent(samKW[s]) + '&postedFrom=' + daysAgo(14) + '&postedTo=' + today() + '&active=true&limit=10');
       if (sr.ok) {
         var sd = await sr.json();
         var samBatch = sd.opportunitiesData || [];
