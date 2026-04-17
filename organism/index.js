@@ -47,6 +47,37 @@ function trackCost(agent, model, usage) {
   costLog.push({ agent: agent, model: model, input_tokens: usage.input_tokens || 0, output_tokens: usage.output_tokens || 0, cost_usd: cost, ts: new Date().toISOString() });
 }
 
+// SESSION 107: Periodic cost flush — every 5 min, flush accumulated cost to hunt_runs
+// so costs show up in dashboards/api_cost even if runSession never completes or
+// spend happens outside runSession (interface chat, manual orchestrations, MCP calls).
+async function flushCostLog(reason) {
+  if (!costLog || costLog.length === 0) return;
+  try {
+    var chunk = costLog.splice(0, costLog.length); // drain atomically
+    var total = chunk.reduce(function(s, c) { return s + c.cost_usd; }, 0);
+    var byAgent = {};
+    chunk.forEach(function(c) {
+      if (!byAgent[c.agent]) byAgent[c.agent] = { calls: 0, cost: 0, in_tok: 0, out_tok: 0 };
+      byAgent[c.agent].calls++;
+      byAgent[c.agent].cost += c.cost_usd;
+      byAgent[c.agent].in_tok += c.input_tokens;
+      byAgent[c.agent].out_tok += c.output_tokens;
+    });
+    var summary = JSON.stringify({ flush: reason || 'interval', total_usd: Math.round(total * 10000) / 10000, calls: chunk.length, by_agent: byAgent });
+    await supabase.from('hunt_runs').insert({
+      source: 'api_cost_interval',
+      status: summary.slice(0, 5000),
+      run_at: new Date().toISOString(),
+      opportunities_found: 0
+    });
+    log('COST FLUSH (' + (reason||'interval') + '): $' + total.toFixed(4) + ' across ' + chunk.length + ' calls');
+  } catch(fe) {
+    // On failure, put costs back into the log to retry next interval
+    log('COST FLUSH ERROR: ' + (fe.message || '').slice(0, 150));
+  }
+}
+setInterval(function() { flushCostLog('interval').catch(function(){}); }, 5 * 60 * 1000); // 5 min
+
 // SESSION 105: Agent frequency control — skip web-search agents that ran recently
 var agentLastRun = {};
 async function shouldRunAgent(agentName, frequencyDays) {
@@ -665,6 +696,7 @@ if (url === '/api/chat' && req.method === 'POST') {
     system: 'You are the HGI Business Development Organism — a 95-year-old minority-owned firm specializing in disaster recovery, TPA/claims, workforce, construction management, grant management, housing, property tax appeals, and program administration. Answer questions about the HGI pipeline, opportunities, competitive intel, and BD strategy. Be concise, direct, and strategic. You have access to all organism intelligence below.\n\n' + HGI + '\n\nRecent organism memories:\n' + chatCtx + chatOppCtx + chatPipeCtx,
     messages: chatMessages
   });
+  trackCost('interface_chat', SONNET, chatResp.usage);
 
   const chatReply = chatResp.content[0].text;
 
@@ -4442,6 +4474,7 @@ if (url.startsWith('/api/compliance-matrix')) {
       system: 'You extract compliance requirements from government RFPs. Return only valid JSON.',
       messages: [{role:'user', content: cmPrompt}]
     });
+    trackCost('compliance_matrix', 'claude-sonnet-4-20250514', cmResp.usage);
     var cmText = (cmResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
     
     // Clean and parse
@@ -4538,6 +4571,7 @@ if (url.startsWith('/api/rate-table')) {
       system: 'You build government contract pricing tables. Return only valid JSON with realistic, competitive pricing.',
       messages: [{role:'user', content: rtPrompt}]
     });
+    trackCost('rate_card_builder', 'claude-sonnet-4-20250514', rtResp.usage);
     var rtText = (rtResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
     rtText = rtText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
     var rtData;
@@ -4606,6 +4640,7 @@ if (url.startsWith('/api/org-chart')) {
       system: 'You create professional project organizational charts and methodology flow diagrams using Mermaid.js syntax. Return only valid JSON.',
       messages: [{role:'user', content: ocPrompt}]
     });
+    trackCost('org_chart_generator', 'claude-sonnet-4-20250514', ocResp.usage);
     var ocText = (ocResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
     ocText = ocText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
     var ocData;
@@ -6358,8 +6393,13 @@ async function agentHunting(state, trigger) {
   if (!('openfema' in sourceCounts)) sourceCounts.openfema = 0;
   log('HUNTING: OpenFEMA checked ' + hgiStates.length + ' states');
 
-  // === NEW: USAspending expiring contracts (free, no key) ===
-  try {
+  // === USAspending DISABLED Session 107 ===
+  // Returns historical awards (already-awarded contracts that have ended) — these get
+  // marked "expired" by intake scoring and add zero qualified opps to pipeline.
+  // Proper use is recompete tracking (what contract ends when → who should HGI target
+  // 6-12 months ahead). That belongs in a separate agent writing to recompete_tracker table.
+  // Re-enable with env USASPENDING_ENABLED=true
+  if (process.env.USASPENDING_ENABLED === 'true') try {
     var usaBody = JSON.stringify({
       filters: {
         place_of_performance_locations: [
@@ -6399,7 +6439,7 @@ async function agentHunting(state, trigger) {
       log('HUNTING: USAspending found ' + usaResults.length + ' expiring contracts');
     }
   } catch (e) { log('HUNTING USAspending err: ' + e.message); }
-  if (!('usaspending' in sourceCounts)) sourceCounts.usaspending = 0;
+  sourceCounts.usaspending = sourceCounts.usaspending || 0;
 
   // === NEW: Grants.gov forecasted+posted (free, no key) ===
   try {
@@ -6431,8 +6471,11 @@ async function agentHunting(state, trigger) {
   } catch (e) { log('HUNTING Grants.gov err: ' + e.message); }
   if (!('grants_gov' in sourceCounts)) sourceCounts.grants_gov = 0;
 
-  // === NEW: Federal Register CDBG-DR and FEMA notices (free, no key) ===
-  try {
+  // === Federal Register DISABLED Session 107 ===
+  // Produced 36 results/run, 0 qualified ever. Every result scored FILTER by Haiku.
+  // Wastes ~7-13 Haiku intake calls per hunt for zero output.
+  // Re-enable by setting env FED_REGISTER_ENABLED=true
+  if (process.env.FED_REGISTER_ENABLED === 'true') try {
     var frTerms = ['CDBG-DR', 'FEMA Public Assistance', 'Hazard Mitigation Grant', 'WIOA workforce', 'housing authority HUD', 'workers compensation insurance', 'construction management oversight', 'grant administration federal'];
     for (var frt = 0; frt < frTerms.length; frt++) {
       var frUrl = 'https://www.federalregister.gov/api/v1/documents.json?' +
@@ -6460,7 +6503,7 @@ async function agentHunting(state, trigger) {
     }
     log('HUNTING: Federal Register checked ' + frTerms.length + ' terms');
   } catch (e) { log('HUNTING Federal Register err: ' + e.message); }
-  if (!('federal_register' in sourceCounts)) sourceCounts.federal_register = 0;
+  sourceCounts.federal_register = sourceCounts.federal_register || 0;
 
   // === WEB SEARCH HUNTING — portals without APIs, ALL 8 VERTICALS ===
   try {
@@ -6495,6 +6538,7 @@ async function agentHunting(state, trigger) {
         model: 'claude-haiku-4-5-20251001', max_tokens: 2000,
         messages: [{ role: 'user', content: webScorePrompt }]
       });
+      trackCost('hunting_web_parser', 'claude-haiku-4-5-20251001', webResp.usage);
       var webText = (webResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('').replace(/```json|```/g, '').trim();
       try {
         var webOpps = JSON.parse(webText);
@@ -7061,11 +7105,59 @@ async function orchestrateOpp(opp) {
       system: 'Senior government contracting scope analyst. ' + classGuide + ' Geography: LA TX FL MS AL GA. Be exhaustive ABOUT WHAT THE RFP ACTUALLY SAYS. Do not infer or embellish. Cite specific RFP sections. If the RFP does not mention a funding source, program history, or scope element, do not claim it does.',
       messages: [{ role: 'user', content: 'Deep scope analysis for HGI go/no-go.\n\nGROUND RULE: Every factual claim in your output must be directly supported by the RFP TEXT below. Do NOT infer program funding sources (e.g., FEMA, CDBG, CDBG-DR), historical context (e.g., post-Katrina, post-COVID), or agency priorities from your general knowledge or from the organism intelligence unless the RFP text explicitly confirms them. If the RFP does not mention FEMA, do not frame the opportunity as a FEMA play. If the RFP does not mention CDBG, do not frame it as a CDBG play. The organism intelligence below is for COMPETITIVE positioning (who else is bidding, what rates they charge, who the incumbent is) — NOT for inferring scope or funding. If you are uncertain whether something is in the RFP, say so explicitly.\n\nOPPORTUNITY: ' + opp.title + '\nAGENCY: ' + (opp.agency || '') + '\nSTATE: ' + (opp.state || 'LA') + '\nVERTICAL: ' + (opp.vertical || 'general') + '\nRFP TEXT:\n' + rfpContent + '\n' + kbContext.slice(0, 2000) + '\n\nORGANISM INTELLIGENCE (competitors, contacts, disasters, budgets, regulations, patterns — FOR COMPETITIVE POSITIONING ONLY):\n' + orchSlice + '\n\nProvide:\n1. SUB-VERTICAL CLASSIFICATION — exact type of work, is this HGI core? (Base this ONLY on what the RFP describes, not on HGI past performance patterns.)\n2. SCOPE SUMMARY — what is being asked, plain English, 3-5 sentences. Stick to the RFP.\n3. DETAILED DELIVERABLES — every task and work product from the RFP. If you cite a task, it must be in the RFP text above.\n4. EVALUATION CRITERIA — exact criteria and point values from RFP. Quote or paraphrase from the RFP.\n5. HGI CAPABILITY ALIGNMENT — map each deliverable to HGI past performance, flag gaps. Use the competitor intelligence above to identify where HGI is stronger or weaker than likely bidders.\n6. COMPLIANCE REQUIREMENTS — licenses, certs, insurance, bonding AS SPECIFIED IN THE RFP. Do not add requirements from your general knowledge unless the RFP triggers them.\n7. CRITICAL QUESTIONS — what must HGI clarify before committing\n8. COMPETITIVE POSITIONING — based on the competitor data above, who is the primary threat and why? What is HGI\'s key differentiator?\n9. SOURCE CHECK — briefly note any claim you made that you are NOT 100% certain is in the RFP text above, so Christopher can verify.' }]
     });
+    trackCost('orchestrator_scope', 'claude-sonnet-4-6', scopeResp.usage);
     var scopeText = (scopeResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
     if (scopeText.length > 100) {
-      await supabase.from('opportunities').update({ scope_analysis: scopeText, last_updated: new Date().toISOString() }).eq('id', oppId);
+      // === FACT-CHECKER (Session 107) ===
+      // Session 106 OPSB bug: scope analyst hallucinated "post-Katrina FEMA PA + CDBG-DR program"
+      // when the actual RFP contained zero CDBG/Katrina mentions. Root cause: pattern-matching to HGI memory.
+      // Fix: cheap Haiku pass that verifies concrete claims against the RFP text before saving.
+      var scopeToSave = scopeText;
+      try {
+        var factCheckPrompt = 'You are a fact-checker. I will give you (1) an RFP TEXT, and (2) a SCOPE ANALYSIS written about that RFP.\n\n' +
+          'Your job: find any CONCRETE CLAIMS in the SCOPE ANALYSIS that are NOT supported by the RFP TEXT.\n\n' +
+          'Look especially for invented framing like:\n' +
+          '- Funding source claims ("FEMA PA", "CDBG-DR", "HMGP", "federal funding") not in the RFP\n' +
+          '- Historical context ("post-Katrina", "post-COVID", "following Hurricane X") not in the RFP\n' +
+          '- Agency program names or priorities not in the RFP\n' +
+          '- Specific dollar amounts, dates, or quantities not in the RFP\n' +
+          '- Named people or positions not in the RFP\n\n' +
+          'Exclude from flagging: genuinely generic analysis ("HGI has experience with X"), competitive positioning ("vendor Y is likely to bid"), or forward-looking recommendations. These are OPINIONS, not claims about the RFP.\n\n' +
+          'Return JSON only: {"hallucinated_claims":[{"claim":"exact phrase from scope","why_invented":"brief reason"}],"verdict":"CLEAN|FLAGGED|CONTAMINATED"}\n' +
+          '- CLEAN: zero claims invented\n' +
+          '- FLAGGED: 1-2 minor claims invented (can be fixed with annotation)\n' +
+          '- CONTAMINATED: 3+ claims invented OR any claim that reframes the opportunity (like inventing a funding source). Scope should be regenerated.\n\n' +
+          'RFP TEXT:\n' + (rfpContent || '').slice(0, 30000) + '\n\n' +
+          'SCOPE ANALYSIS:\n' + scopeText;
+        var fcResp = await anthropic.messages.create({
+          model: 'claude-haiku-4-5-20251001', max_tokens: 1500,
+          messages: [{ role: 'user', content: factCheckPrompt }]
+        });
+        trackCost('orchestrator_fact_check', 'claude-haiku-4-5-20251001', fcResp.usage);
+        var fcText = (fcResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('').replace(/```json|```/g, '').trim();
+        var fc;
+        try { fc = JSON.parse(fcText); }
+        catch(pe) { var jm = fcText.match(/\{[\s\S]*\}/); if (jm) { try { fc = JSON.parse(jm[0]); } catch(pe2){} } }
+        if (fc && fc.verdict && fc.verdict !== 'CLEAN') {
+          var claimsList = (fc.hallucinated_claims || []).map(function(c){ return '- "' + (c.claim||'').slice(0,120) + '" (' + (c.why_invented||'').slice(0,80) + ')'; }).join('\n');
+          var banner = '⚠️ FACT-CHECK: ' + fc.verdict + ' — scope may contain claims not supported by RFP text.\nClaims flagged:\n' + claimsList + '\n\n--- BEGIN SCOPE ANALYSIS ---\n';
+          scopeToSave = banner + scopeText;
+          log('ORCHESTRATE FACT-CHECK: ' + fc.verdict + ' — ' + (fc.hallucinated_claims||[]).length + ' claims flagged for ' + oppId);
+          try {
+            await storeMemory('orchestrator_fact_check', oppId, 'fact_check,hallucination',
+              'FACT-CHECK VERDICT: ' + fc.verdict + ' for ' + (opp.title||'').slice(0,60) + '\n' +
+              (fc.hallucinated_claims||[]).length + ' claims flagged:\n' + claimsList +
+              '\n\nReview the scope_analysis before proposal generation. Regenerate if CONTAMINATED.',
+              'analysis', null, 'high');
+          } catch(fme) {}
+        } else if (fc && fc.verdict === 'CLEAN') {
+          log('ORCHESTRATE FACT-CHECK: CLEAN for ' + oppId);
+        }
+      } catch(fce) { log('ORCHESTRATE FACT-CHECK error (non-fatal): ' + (fce.message||'').slice(0,120)); }
+
+      await supabase.from('opportunities').update({ scope_analysis: scopeToSave, last_updated: new Date().toISOString() }).eq('id', oppId);
       results.steps.push('scope');
-      log('ORCHESTRATE: Scope done (' + scopeText.length + ' chars)');
+      log('ORCHESTRATE: Scope done (' + scopeToSave.length + ' chars)');
     }
   } catch(e) { results.errors.push('scope:' + e.message); log('ORCHESTRATE: Scope error: ' + e.message); }
 
@@ -7077,6 +7169,7 @@ async function orchestrateOpp(opp) {
       system: 'HGI CFO-level financial analyst. Show math for every estimate. Never present estimate as RFP fact. Rate card: Principal ' + d + '220, Prog Dir ' + d + '210, SME ' + d + '200, Sr Grant Mgr ' + d + '180, Grant Mgr ' + d + '175, Sr PM ' + d + '180, PM ' + d + '155, Grant Writer ' + d + '145, Cost Est ' + d + '125, Admin ' + d + '65.',
       messages: [{ role: 'user', content: 'Contract value estimation for HGI.\n\nOPP: ' + opp.title + '\nAGENCY: ' + (opp.agency || '') + '\nESTIMATED VALUE: ' + (opp.estimated_value || 'Not stated') + '\nSCOPE:\n' + (scopeAnalysis || '').slice(0, 2000) + '\n\nORGANISM INTELLIGENCE (competitor pricing, incumbent contracts, budget data, market rates):\n' + orchSlice + '\n\nEstimate using THREE methods with visible math:\n1. STAFFING MATH — list every RFP position, realistic monthly hours (MSA = 20-80 hrs/mo not 160), multiply by rate, base period only\n2. COMPARABLE CONTRACTS — use the competitor pricing intelligence and incumbent contract data above, plus 2-3 similar contracts in same state/vertical\n3. PERCENTAGE OF FEDERAL FUNDING — if FEMA/CDBG/HMGP, estimate total federal allocation, admin fee 5-12%. Use disaster declaration data above for context.\n\nThen: CONSOLIDATED ESTIMATE (LOW/MID/HIGH base period), option years separate as UPSIDE\nPRICE-TO-WIN ANALYSIS — based on competitor pricing intelligence above, what rate structure wins this against the likely field?\nSTAFFING PLAN, HGI COST TO DELIVER, PROFIT MARGIN, FINANCIAL RISKS, RECOMMENDATION (PURSUE/CONDITIONAL/PASS)' }]
     });
+    trackCost('orchestrator_financial', 'claude-sonnet-4-6', finResp.usage);
     var finText = (finResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
     if (finText.length > 100) {
       await supabase.from('opportunities').update({ financial_analysis: finText, last_updated: new Date().toISOString() }).eq('id', oppId);
@@ -7094,6 +7187,7 @@ async function orchestrateOpp(opp) {
       system: 'HGI senior capture intelligence analyst. Always search the web for agency facts, incumbents, budgets. Never guess. Cite sources.',
       messages: [{ role: 'user', content: 'Capture intelligence brief for HGI.\n\nOPP: ' + opp.title + '\nAGENCY: ' + (opp.agency || '') + '\nSTATE: ' + (opp.state || 'LA') + '\nOPI: ' + opp.opi_score + '\nSCOPE:\n' + (scopeAnalysis || '').slice(0, 1500) + '\nFINANCIAL:\n' + (finAnalysis || '').slice(0, 1500) + '\n' + kbContext.slice(0, 1500) + '\n\nORGANISM INTELLIGENCE (existing competitor data, contacts, relationships, incumbent info, budget cycles, regulatory context, outcome lessons, cross-opp patterns):\n' + orchSlice + '\n\nUse the organism intelligence above as your STARTING POINT — do not duplicate what the organism already knows. Search the web to FILL GAPS and verify/update existing intelligence. Provide:\n1. AGENCY PROFILE — budget, leadership, procurement patterns. Cross-reference agency profiles above.\n2. COMPETITIVE LANDSCAPE — START with the competitor data above, then add new findings. Who will bid? What are their real weaknesses HGI can exploit?\n3. HGI WIN STRATEGY — 3 differentiators mapped to eval criteria. Use relationship data above to identify insider advantages.\n4. GHOST LANGUAGE — specific themes that highlight competitor weaknesses without naming them (based on the weaknesses data above)\n5. RED FLAGS\n6. 48-HOUR ACTION PLAN — use role titles only, never names\n7. RISKS & CHALLENGES — honest assessment' }]
     });
+    trackCost('orchestrator_research', 'claude-sonnet-4-6', researchResp.usage);
     var researchText = (researchResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('\n');
     if (researchText.length > 100) {
       await supabase.from('opportunities').update({ research_brief: researchText, last_updated: new Date().toISOString() }).eq('id', oppId);
@@ -7110,6 +7204,7 @@ async function orchestrateOpp(opp) {
       system: 'OPI calibration engine. ' + classGuide + ' Return ONLY: REVISED_OPI: [number]',
       messages: [{ role: 'user', content: 'Re-score for HGI with full intel.\nTitle: ' + opp.title + '\nAgency: ' + (opp.agency || '') + '\nOriginal OPI: ' + opp.opi_score + '\nSCOPE:\n' + (scopeAnalysis || '').slice(0, 1000) + '\nFINANCIAL:\n' + (finAnalysis || '').slice(0, 1000) + '\nRESEARCH:\n' + (researchBrief || '').slice(0, 1000) + '\n\nIf not HGI core work: score below 25. If core: Past Perf 30pts, Tech Cap 20pts, Competitive 15pts, Relationships 15pts, Strategic 10pts, Financial 10pts.\nReturn ONLY: REVISED_OPI: [number]' }]
     });
+    trackCost('orchestrator_opi_rescore', 'claude-sonnet-4-6', opiResp.usage);
     var opiText = (opiResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
     var opiMatch = opiText.match(/REVISED_OPI:\s*(\d+)/i);
     if (opiMatch) {
@@ -7128,6 +7223,7 @@ async function orchestrateOpp(opp) {
       system: 'HGI chief capture officer making final bid decision. First line MUST be: PWIN: [number]% | RECOMMENDATION: [GO|CONDITIONAL GO|NO-BID]',
       messages: [{ role: 'user', content: 'Final GO/NO-GO assessment.\nOPP: ' + opp.title + '\nAGENCY: ' + (opp.agency || '') + '\nOPI: ' + (results.revisedOpi || opp.opi_score) + '\nSCOPE:\n' + (scopeAnalysis || '').slice(0, 1000) + '\nFINANCIAL:\n' + (finAnalysis || '').slice(0, 1000) + '\nRESEARCH:\n' + (researchBrief || '').slice(0, 1000) + '\n\nORGANISM INTELLIGENCE (relationships, competitors, outcomes, patterns):\n' + orchSlice.slice(0, 3000) + '\n\nFirst line: PWIN: X% | RECOMMENDATION: GO/CONDITIONAL GO/NO-BID\nThen: decision justification considering competitor weaknesses and HGI relationships above, top 3 win factors, top 3 risks, conditions for GO, teaming recommendation based on partner data above' }]
     });
+    trackCost('orchestrator_winnability', 'claude-sonnet-4-6', winResp.usage);
     var winText = (winResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
     var pwinMatch = winText.match(/PWIN:\s*(\d+)/i);
     var recMatch = winText.match(/RECOMMENDATION:\s*(GO|CONDITIONAL GO|NO-BID)/i);
