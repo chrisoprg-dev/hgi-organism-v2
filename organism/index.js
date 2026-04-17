@@ -734,7 +734,7 @@ if (url === '/api/chat' && req.method === 'POST') {
   const chatResp = await anthropic.messages.create({
     model: SONNET,
     max_tokens: 4096,
-    system: 'You are the HGI Business Development Organism — a 95-year-old minority-owned firm specializing in disaster recovery, TPA/claims, workforce, construction management, grant management, housing, property tax appeals, and program administration. Answer questions about the HGI pipeline, opportunities, competitive intel, and BD strategy. Be concise, direct, and strategic. You have access to all organism intelligence below.\n\n' + HGI + '\n\nRecent organism memories:\n' + chatCtx + chatOppCtx + chatPipeCtx,
+    system: 'You are the HGI Business Development Organism — a 97-year-old minority-owned firm specializing in disaster recovery, TPA/claims, workforce, construction management, grant management, housing, property tax appeals, and program administration. Answer questions about the HGI pipeline, opportunities, competitive intel, and BD strategy. Be concise, direct, and strategic. You have access to all organism intelligence below.\n\n' + HGI + '\n\nRecent organism memories:\n' + chatCtx + chatOppCtx + chatPipeCtx,
     messages: chatMessages
   });
   trackCost('interface_chat', SONNET, chatResp.usage);
@@ -1258,7 +1258,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         '- What is the submission format (font, spacing, page count)?\n' +
         '- Are there required forms, affidavits, or certifications? Flag what HGI must complete manually.\n\n' +
         'STEP 2 — IDENTIFY WIN THEMES:\n' +
-        'Before writing, identify 2-3 win themes specific to THIS RFP based on the organism intelligence and HGI strengths against the competitive landscape. These are not slogans — they are the strategic reasons HGI should win this contract. Examples: incumbent knowledge of the agency systems, 95-year track record on similar programs, local presence when competitors are out-of-state.\n' +
+        'Before writing, identify 2-3 win themes specific to THIS RFP based on the organism intelligence and HGI strengths against the competitive landscape. These are not slogans — they are the strategic reasons HGI should win this contract. Examples: incumbent knowledge of the agency systems, 97-year track record on similar programs, local presence when competitors are out-of-state.\n' +
         'Place each win theme where it naturally belongs in the proposal — once, in the section where it carries the most weight. Do NOT repeat win themes across multiple sections. Once a theme is stated and supported, it is done. Every other section proves capability through specifics — methodology, past performance, staffing — without restating the theme.\n\n' +
         'STEP 3 — PRODUCE THE EXACT DELIVERABLE THE AGENCY WANTS:\n' +
         'Do NOT produce a generic proposal. Produce EXACTLY what the submission requirements specify.\n' +
@@ -1303,7 +1303,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         '- Professional, confident tone — this goes directly to evaluators. No hedging, no "we believe" or "we feel" — state capabilities as facts.\n' +
         '- No mention of AI, organism, agents, confidence levels, or the capture system\n' +
         '- Document must look like it came from the President with no visible AI involvement\n' +
-        '- HGI was established in 1931 (not 1929). SAM UEI: DL4SJEVKZ6H4\n' +
+        '- HGI was established in 1929. SAM UEI: DL4SJEVKZ6H4\n' +
         '- Do NOT impose section numbering (1.0, 2.0) unless the RFP specifically uses numbered sections. Match the RFP structure exactly.\n' +
         '- Do NOT include a Table of Contents unless the RFP requires one.\n' +
         '- Do NOT generate ASCII art org charts or text-based organizational diagrams. Instead write "See Organizational Chart (Appendix A)" — the system generates a professional graphic separately.\n' +
@@ -1319,7 +1319,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       var stream = await anthropic.messages.stream({
         model: 'claude-opus-4-6',
         max_tokens: 128000,
-        system: 'You are a senior government proposal writer at HGI Global (Hammerman & Gainer LLC), a 95-year-old Louisiana-based firm. You produce submission-ready documents that WIN — not average drafts. Every word earns points with evaluators. You match the exact format each solicitation requires (questionnaire forms filled field-by-field, narrative proposals with specified sections, exhibits completed). You are specific, factual, direct, and persuasive. You use only confirmed company data. You write like the firm President would write — authoritative, zero filler, zero hedging. CRITICAL: Geoffrey Brien no longer works at HGI. Never include him. CRITICAL: Do NOT auto-assign HGI leadership (CEO, VP, CAO, etc.) to project roles. All positions are OPEN — describe role requirements and qualifications needed, not pre-filled names. Use [TO BE ASSIGNED] for Key Personnel unless explicitly instructed otherwise.',
+        system: 'You are a senior government proposal writer at HGI Global (Hammerman & Gainer LLC), a 97-year-old Louisiana-based firm. You produce submission-ready documents that WIN — not average drafts. Every word earns points with evaluators. You match the exact format each solicitation requires (questionnaire forms filled field-by-field, narrative proposals with specified sections, exhibits completed). You are specific, factual, direct, and persuasive. You use only confirmed company data. You write like the firm President would write — authoritative, zero filler, zero hedging. CRITICAL: Geoffrey Brien no longer works at HGI. Never include him. CRITICAL: Do NOT auto-assign HGI leadership (CEO, VP, CAO, etc.) to project roles. All positions are OPEN — describe role requirements and qualifications needed, not pre-filled names. Use [TO BE ASSIGNED] for Key Personnel unless explicitly instructed otherwise.',
         messages: [{role:'user', content: proposalPrompt}]
       });
       var finalMessage = await stream.finalMessage();
@@ -1414,7 +1414,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
           '8. EVIDENCE: Unsubstantiated claims without specific data (dates, amounts, project names)\n' +
           '9. WIN THEMES: Missing, forced, or excessively repeated\n' +
           '10. FILLER: Vague commitments, generic language, padding with no evaluator value\n' +
-          '11. FACTS: Incorrect HGI data (Founded 1931, ~50 employees, Kenner HQ Suite 510, UEI DL4SJEVKZ6H4)\n' +
+          '11. FACTS: Incorrect HGI data (Founded 1929, ~50 employees, Kenner HQ Suite 510, UEI DL4SJEVKZ6H4)\n' +
           '12. SCORING RISK: Sections that would lose the most evaluator points as-written\n\n' +
           'Return ONLY this JSON structure (no markdown, no preamble):\n' +
           '{\n' +
@@ -1552,7 +1552,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
               id: docId,
               filename: kbFilename,
               file_type: 'txt',
-              document_class: 'winning_proposal',
+              document_class: 'quality_gated_draft',
               vertical: kbVertical,
               client: opp.agency || '',
               contract_name: opp.title || '',
@@ -1580,7 +1580,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
                 char_start: idx * chunkSize,
                 char_end: Math.min((idx + 1) * chunkSize, kbDocContent.length),
                 vertical: kbVertical,
-                document_class: 'winning_proposal',
+                document_class: 'quality_gated_draft',
                 filename: kbFilename
               };
             });
@@ -3152,7 +3152,7 @@ if (url.startsWith('/api/proposal-refine')) {
           { q: agency + ' ' + oppState + ' contracts awarded ' + vertical + ' 2024 2025', label: 'Agency awards' }
         ]),
         supabase.from('knowledge_chunks').select('chunk_text,filename,vertical')
-          .or('vertical.eq.' + vertical.toLowerCase() + ',document_class.eq.winning_proposal')
+          .or('vertical.eq.' + vertical.toLowerCase() + ',document_class.eq.quality_gated_draft')
           .limit(20)
       ]);
 
@@ -3183,7 +3183,7 @@ if (url.startsWith('/api/proposal-refine')) {
         '\n1. Output the FULL proposal, not just changed sections' +
         '\n2. Every claim must have specific evidence (dates, amounts, project names)' +
         '\n3. No Geoffrey Brien. All positions [TO BE ASSIGNED] except Christopher J. Oney on cover letter' +
-        '\n4. Founded 1931, ~50 employees, Kenner HQ Suite 510, UEI DL4SJEVKZ6H4' +
+        '\n4. Founded 1929, ~50 employees, Kenner HQ Suite 510, UEI DL4SJEVKZ6H4' +
         '\n5. Use web research for current methodology. Use KB for HGI proof points' +
         '\n6. Minimize [ACTION REQUIRED] — only for wet signatures, real resumes, final rate approvals' +
         '\n7. Match the RFP structure exactly';
@@ -3496,8 +3496,8 @@ if (url.startsWith('/api/proposal-doc')) {
       if (match === 'DL4SJEVKZ6H4') return match;
       return 'DL4SJEVKZ6H4';
     });
-    // Founding year — enforce 1931
-    proposalText = proposalText.replace(/\b(Est(?:ablished)?\.?\s*)1929\b/gi, '$11931');
+    // Founding year — 1929 is canonical; no rewrite needed
+    // (removed: 1929→1931 regex, S114 Item A reversal)
     // Phone correction
     proposalText = proposalText.replace(/\(504\)\s*000-0000/g, '(504) 681-6135');
     // Email placeholder
@@ -3511,10 +3511,8 @@ if (url.startsWith('/api/proposal-doc')) {
     proposalText = proposalText.replace(/67\s+full[- ]time\s+(employees|staff)/gi, 'approximately 50 team members');
     proposalText = proposalText.replace(/67\s+FT\s*\+?\s*43\s+contract/gi, 'approximately 50 team members');
     proposalText = proposalText.replace(/110\s+professionals/gi, 'approximately 50 team members');
-    // Founding year catch-all
-    proposalText = proposalText.replace(/founded\s+in\s+1929/gi, 'founded in 1931');
-    proposalText = proposalText.replace(/since\s+1929/gi, 'since 1931');
-    proposalText = proposalText.replace(/\b95[\s-]year/gi, 'ninety-five-year');
+    // Founding year catch-all — 1929 is canonical; 95-year normalization removed (S114 Item A)
+    // (removed: founded_in_1929→1931, since_1929→1931, 95_year→ninety-five-year regexes)
     // Orleans Parish School Board — not confirmed
     proposalText = proposalText.replace(/Orleans\s+Parish\s+School\s+Board[^.]*?\./gi, '');
 
@@ -4218,7 +4216,7 @@ if (url.startsWith('/api/proposal-doc')) {
               children: [new TextRun({ text: '2400 Veterans Memorial Blvd, Suite 510, Kenner, LA 70062', size: 20, font: 'Calibri', color: GRAY })]
             }),
             new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 100 },
-              children: [new TextRun({ text: '100% Minority-Owned | Est. 1931 | SAM UEI: DL4SJEVKZ6H4', size: 20, font: 'Calibri', color: GRAY })]
+              children: [new TextRun({ text: '100% Minority-Owned | Est. 1929 | SAM UEI: DL4SJEVKZ6H4', size: 20, font: 'Calibri', color: GRAY })]
             }),
             // Bottom gold bar
             new Paragraph({ spacing: { before: 2000 }, border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: GOLD, space: 8 } }, children: [] }),
@@ -5191,7 +5189,7 @@ function getInterface() {
 }
 
 // === HGI COMPANY CONTEXT (cached across all agent calls) ===
-var HGI = 'SYSTEM CONTEXT: HGI Global (Hammerman & Gainer LLC) is a 95-year-old, 100% minority-owned program management firm in Kenner, Louisiana (2400 Veterans Memorial Blvd, Suite 510, 70062). 8 verticals: Disaster Recovery, TPA/Claims (full P&C), Property Tax Appeals, Workforce/WIOA, Construction Management, Program Administration, Housing/HUD, Grant Management. Past performance: Road Home ' + String.fromCharCode(36) + '67M direct/' + String.fromCharCode(36) + '13B+ program (2006-2015, zero misappropriation), HAP ' + String.fromCharCode(36) + '950M, Restore LA ' + String.fromCharCode(36) + '42.3M, Rebuild NJ ' + String.fromCharCode(36) + '67.7M, TPSD ' + String.fromCharCode(36) + '2.96M (completed 2022-2025), St. John Sheriff ' + String.fromCharCode(36) + '788K, BP GCCF ' + String.fromCharCode(36) + '1.65M. Key staff by role: President, Chairman, CEO, CAO, VP, SVP Claims, 1099 SME (~' + String.fromCharCode(36) + '1B grants/incentives). ~50 team members across offices in Kenner (HQ), Shreveport, Alexandria, New Orleans. Phone: (504) 681-6135. Email: info@hgi-global.com. SAM UEI: DL4SJEVKZ6H4. Insurance: ' + String.fromCharCode(36) + '5M fidelity/' + String.fromCharCode(36) + '5M E&O/' + String.fromCharCode(36) + '2M GL. Rates: Built per-RFP from market analysis and financial agent output. Do NOT copy standard rates into proposals. HGI has NEVER had a direct federal contract. All work flows through state agencies, local governments, housing authorities, and insurance entities. Do NOT list PBGC or Orleans Parish School Board as past performance without explicit President confirmation. RULES: (1) Every claim must cite source+date. Unverified = say so. (2) Set confidence:high only with source URL. Medium when extrapolating. Inferred when reasoning without sources. (3) Set source_url to specific URL or null. CRITICAL PERSONNEL UPDATE: Geoffrey Brien is NO LONGER with HGI — do not reference him in any proposals, staffing plans, or deliverables. The DR Manager position is currently unfilled. Any organism memories referencing Brien as current staff are OUTDATED. FOUNDING YEAR: HGI was founded in 1931, not 1929. Use 1931 in all documents. OUTPUT FORMAT RULES (apply to ALL agent outputs): (1) Start directly with your findings. No title headers like HGI GLOBAL or agent name headers. (2) Never write Agent X of Y numbering. (3) No Classification, Eyes Only, Principals Only, Prepared for, or Capture-Sensitive labels. (4) No markdown headers (# ## ###), horizontal rules (---), or emoji. (5) No governing rules boilerplate or blockquote disclaimers at the top. (6) Use role titles only — never write Christopher Oney, Larry Oney, Lou Resweber, Candy Dottolo, Dillon Truax, Vanessa James, Chris Feduccia, or any staff names. Say President, Chairman, CEO, CAO, VP, SVP Claims, SME. (7) Be direct and concise. Substance over formatting. Write findings as clean prose, not decorated documents. (8) No markdown tables for internal analysis — use plain text. Tables are only for proposal content that will appear in final documents.';
+var HGI = 'SYSTEM CONTEXT: HGI Global (Hammerman & Gainer LLC) is a 97-year-old, 100% minority-owned program management firm in Kenner, Louisiana (2400 Veterans Memorial Blvd, Suite 510, 70062). 8 verticals: Disaster Recovery, TPA/Claims (full P&C), Property Tax Appeals, Workforce/WIOA, Construction Management, Program Administration, Housing/HUD, Grant Management. Past performance: Road Home ' + String.fromCharCode(36) + '67M direct/' + String.fromCharCode(36) + '13B+ program (2006-2015, zero misappropriation), HAP ' + String.fromCharCode(36) + '950M, Restore LA ' + String.fromCharCode(36) + '42.3M, Rebuild NJ ' + String.fromCharCode(36) + '67.7M, TPSD ' + String.fromCharCode(36) + '2.96M (completed 2022-2025), St. John Sheriff ' + String.fromCharCode(36) + '788K, BP GCCF ' + String.fromCharCode(36) + '1.65M. Key staff by role: President, Chairman, CEO, CAO, VP, SVP Claims, 1099 SME (~' + String.fromCharCode(36) + '1B grants/incentives). ~50 team members across offices in Kenner (HQ), Shreveport, Alexandria, New Orleans. Phone: (504) 681-6135. Email: info@hgi-global.com. SAM UEI: DL4SJEVKZ6H4. Insurance: ' + String.fromCharCode(36) + '5M fidelity/' + String.fromCharCode(36) + '5M E&O/' + String.fromCharCode(36) + '2M GL. Rates: Built per-RFP from market analysis and financial agent output. Do NOT copy standard rates into proposals. HGI has NEVER had a direct federal contract. All work flows through state agencies, local governments, housing authorities, and insurance entities. Do NOT list PBGC or Orleans Parish School Board as past performance without explicit President confirmation. RULES: (1) Every claim must cite source+date. Unverified = say so. (2) Set confidence:high only with source URL. Medium when extrapolating. Inferred when reasoning without sources. (3) Set source_url to specific URL or null. CRITICAL PERSONNEL UPDATE: Geoffrey Brien is NO LONGER with HGI — do not reference him in any proposals, staffing plans, or deliverables. The DR Manager position is currently unfilled. Any organism memories referencing Brien as current staff are OUTDATED. FOUNDING YEAR: HGI was founded in 1929. Use 1929 in all documents. OUTPUT FORMAT RULES (apply to ALL agent outputs): (1) Start directly with your findings. No title headers like HGI GLOBAL or agent name headers. (2) Never write Agent X of Y numbering. (3) No Classification, Eyes Only, Principals Only, Prepared for, or Capture-Sensitive labels. (4) No markdown headers (# ## ###), horizontal rules (---), or emoji. (5) No governing rules boilerplate or blockquote disclaimers at the top. (6) Use role titles only — never write Christopher Oney, Larry Oney, Lou Resweber, Candy Dottolo, Dillon Truax, Vanessa James, Chris Feduccia, or any staff names. Say President, Chairman, CEO, CAO, VP, SVP Claims, SME. (7) Be direct and concise. Substance over formatting. Write findings as clean prose, not decorated documents. (8) No markdown tables for internal analysis — use plain text. Tables are only for proposal content that will appear in final documents.';
 
 
 // RATE_CARD — only referenced by financial agent and rate-table endpoint. NOT sent to other agents or proposals.
