@@ -78,6 +78,47 @@ async function flushCostLog(reason) {
 }
 setInterval(function() { flushCostLog('interval').catch(function(){}); }, 5 * 60 * 1000); // 5 min
 
+// SESSION 108: auto-continuation wrapper. If the model hits max_tokens, automatically
+// make continuation calls (up to maxContinuations) and concatenate results. Prevents
+// truncated scope/financial/research outputs like the 12,223-char OPSB scope.
+// Cost: only fires when truncation happens. Tracks each continuation separately in costLog.
+// NOTE: Do NOT use this for calls that include `tools` (web_search) — continuation would
+// need to preserve tool_use/tool_result blocks which this helper does not handle.
+async function callWithContinuation(params, agentLabel, maxContinuations) {
+  maxContinuations = (maxContinuations == null) ? 2 : maxContinuations;
+  var resp = await anthropic.messages.create(params);
+  trackCost(agentLabel, params.model, resp.usage);
+  var allText = (resp.content || []).filter(function(b){ return b.type === 'text'; }).map(function(b){ return b.text; }).join('');
+  var stopReason = resp.stop_reason;
+  var continuations = 0;
+  while (stopReason === 'max_tokens' && continuations < maxContinuations) {
+    continuations++;
+    log('[' + agentLabel + '] hit max_tokens, continuation ' + continuations + ' (' + allText.length + ' chars so far)');
+    try {
+      var contParams = {
+        model: params.model,
+        max_tokens: params.max_tokens,
+        system: params.system,
+        messages: (params.messages || []).concat([
+          { role: 'assistant', content: allText },
+          { role: 'user', content: 'Continue from exactly where you left off. Do not repeat any prior content. Pick up mid-sentence if needed and complete every remaining section.' }
+        ])
+      };
+      var contResp = await anthropic.messages.create(contParams);
+      trackCost(agentLabel + '_continuation', params.model, contResp.usage);
+      var contText = (contResp.content || []).filter(function(b){ return b.type === 'text'; }).map(function(b){ return b.text; }).join('');
+      if (!contText || contText.length < 20) { log('[' + agentLabel + '] continuation returned no content, stopping'); break; }
+      allText = allText + contText;
+      stopReason = contResp.stop_reason;
+    } catch(ce) {
+      log('[' + agentLabel + '] continuation ' + continuations + ' failed: ' + (ce.message||'').slice(0,120));
+      break;
+    }
+  }
+  if (continuations > 0) log('[' + agentLabel + '] completed with ' + continuations + ' continuation(s), final length ' + allText.length);
+  return { text: allText, continuations: continuations, stop_reason: stopReason };
+}
+
 // SESSION 105: Agent frequency control — skip web-search agents that ran recently
 var agentLastRun = {};
 async function shouldRunAgent(agentName, frequencyDays) {
@@ -7101,13 +7142,12 @@ async function orchestrateOpp(opp) {
 
   // STEP 1: SCOPE ANALYSIS
   try {
-    var scopeResp = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6', max_tokens: 3000,
+    var scopeCall = await callWithContinuation({
+      model: 'claude-sonnet-4-6', max_tokens: 8000,
       system: 'Senior government contracting scope analyst. ' + classGuide + ' Geography: LA TX FL MS AL GA. Be exhaustive ABOUT WHAT THE RFP ACTUALLY SAYS. Do not infer or embellish. Cite specific RFP sections. If the RFP does not mention a funding source, program history, or scope element, do not claim it does.',
       messages: [{ role: 'user', content: 'Deep scope analysis for HGI go/no-go.\n\nGROUND RULE: Every factual claim in your output must be directly supported by the RFP TEXT below. Do NOT infer program funding sources (e.g., FEMA, CDBG, CDBG-DR), historical context (e.g., post-Katrina, post-COVID), or agency priorities from your general knowledge or from the organism intelligence unless the RFP text explicitly confirms them. If the RFP does not mention FEMA, do not frame the opportunity as a FEMA play. If the RFP does not mention CDBG, do not frame it as a CDBG play. The organism intelligence below is for COMPETITIVE positioning (who else is bidding, what rates they charge, who the incumbent is) — NOT for inferring scope or funding. If you are uncertain whether something is in the RFP, say so explicitly.\n\nOPPORTUNITY: ' + opp.title + '\nAGENCY: ' + (opp.agency || '') + '\nSTATE: ' + (opp.state || 'LA') + '\nVERTICAL: ' + (opp.vertical || 'general') + '\nRFP TEXT:\n' + rfpContent + '\n' + kbContext.slice(0, 2000) + '\n\nORGANISM INTELLIGENCE (competitors, contacts, disasters, budgets, regulations, patterns — FOR COMPETITIVE POSITIONING ONLY):\n' + orchSlice + '\n\nProvide:\n1. SUB-VERTICAL CLASSIFICATION — exact type of work, is this HGI core? (Base this ONLY on what the RFP describes, not on HGI past performance patterns.)\n2. SCOPE SUMMARY — what is being asked, plain English, 3-5 sentences. Stick to the RFP.\n3. DETAILED DELIVERABLES — every task and work product from the RFP. If you cite a task, it must be in the RFP text above.\n4. EVALUATION CRITERIA — exact criteria and point values from RFP. Quote or paraphrase from the RFP.\n5. HGI CAPABILITY ALIGNMENT — map each deliverable to HGI past performance, flag gaps. Use the competitor intelligence above to identify where HGI is stronger or weaker than likely bidders.\n6. COMPLIANCE REQUIREMENTS — licenses, certs, insurance, bonding AS SPECIFIED IN THE RFP. Do not add requirements from your general knowledge unless the RFP triggers them.\n7. CRITICAL QUESTIONS — what must HGI clarify before committing\n8. COMPETITIVE POSITIONING — based on the competitor data above, who is the primary threat and why? What is HGI\'s key differentiator?\n9. SOURCE CHECK — briefly note any claim you made that you are NOT 100% certain is in the RFP text above, so Christopher can verify.' }]
-    });
-    trackCost('orchestrator_scope', 'claude-sonnet-4-6', scopeResp.usage);
-    var scopeText = (scopeResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
+    }, 'orchestrator_scope', 2);
+    var scopeText = scopeCall.text;
     if (scopeText.length > 100) {
       // === FACT-CHECKER (Session 107) ===
       // Session 106 OPSB bug: scope analyst hallucinated "post-Katrina FEMA PA + CDBG-DR program"
@@ -7165,13 +7205,12 @@ async function orchestrateOpp(opp) {
   // STEP 2: FINANCIAL ANALYSIS
   var scopeAnalysis = results.steps.indexOf('scope') >= 0 ? scopeText : (opp.scope_analysis || '');
   try {
-    var finResp = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6', max_tokens: 2500,
+    var finCall = await callWithContinuation({
+      model: 'claude-sonnet-4-6', max_tokens: 5000,
       system: 'HGI CFO-level financial analyst. Show math for every estimate. Never present estimate as RFP fact. Rate card: Principal ' + d + '220, Prog Dir ' + d + '210, SME ' + d + '200, Sr Grant Mgr ' + d + '180, Grant Mgr ' + d + '175, Sr PM ' + d + '180, PM ' + d + '155, Grant Writer ' + d + '145, Cost Est ' + d + '125, Admin ' + d + '65.',
       messages: [{ role: 'user', content: 'Contract value estimation for HGI.\n\nOPP: ' + opp.title + '\nAGENCY: ' + (opp.agency || '') + '\nESTIMATED VALUE: ' + (opp.estimated_value || 'Not stated') + '\nSCOPE:\n' + (scopeAnalysis || '').slice(0, 2000) + '\n\nORGANISM INTELLIGENCE (competitor pricing, incumbent contracts, budget data, market rates):\n' + orchSlice + '\n\nEstimate using THREE methods with visible math:\n1. STAFFING MATH — list every RFP position, realistic monthly hours (MSA = 20-80 hrs/mo not 160), multiply by rate, base period only\n2. COMPARABLE CONTRACTS — use the competitor pricing intelligence and incumbent contract data above, plus 2-3 similar contracts in same state/vertical\n3. PERCENTAGE OF FEDERAL FUNDING — if FEMA/CDBG/HMGP, estimate total federal allocation, admin fee 5-12%. Use disaster declaration data above for context.\n\nThen: CONSOLIDATED ESTIMATE (LOW/MID/HIGH base period), option years separate as UPSIDE\nPRICE-TO-WIN ANALYSIS — based on competitor pricing intelligence above, what rate structure wins this against the likely field?\nSTAFFING PLAN, HGI COST TO DELIVER, PROFIT MARGIN, FINANCIAL RISKS, RECOMMENDATION (PURSUE/CONDITIONAL/PASS)' }]
-    });
-    trackCost('orchestrator_financial', 'claude-sonnet-4-6', finResp.usage);
-    var finText = (finResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
+    }, 'orchestrator_financial', 2);
+    var finText = finCall.text;
     if (finText.length > 100) {
       await supabase.from('opportunities').update({ financial_analysis: finText, last_updated: new Date().toISOString() }).eq('id', oppId);
       results.steps.push('financial');
@@ -7183,7 +7222,7 @@ async function orchestrateOpp(opp) {
   var finAnalysis = results.steps.indexOf('financial') >= 0 ? finText : (opp.financial_analysis || '');
   try {
     var researchResp = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6', max_tokens: 3000,
+      model: 'claude-sonnet-4-6', max_tokens: 5000,
       tools: [{ type: 'web_search_20250305', name: 'web_search' }],
       system: 'HGI senior capture intelligence analyst. Always search the web for agency facts, incumbents, budgets. Never guess. Cite sources.',
       messages: [{ role: 'user', content: 'Capture intelligence brief for HGI.\n\nOPP: ' + opp.title + '\nAGENCY: ' + (opp.agency || '') + '\nSTATE: ' + (opp.state || 'LA') + '\nOPI: ' + opp.opi_score + '\nSCOPE:\n' + (scopeAnalysis || '').slice(0, 1500) + '\nFINANCIAL:\n' + (finAnalysis || '').slice(0, 1500) + '\n' + kbContext.slice(0, 1500) + '\n\nORGANISM INTELLIGENCE (existing competitor data, contacts, relationships, incumbent info, budget cycles, regulatory context, outcome lessons, cross-opp patterns):\n' + orchSlice + '\n\nUse the organism intelligence above as your STARTING POINT — do not duplicate what the organism already knows. Search the web to FILL GAPS and verify/update existing intelligence. Provide:\n1. AGENCY PROFILE — budget, leadership, procurement patterns. Cross-reference agency profiles above.\n2. COMPETITIVE LANDSCAPE — START with the competitor data above, then add new findings. Who will bid? What are their real weaknesses HGI can exploit?\n3. HGI WIN STRATEGY — 3 differentiators mapped to eval criteria. Use relationship data above to identify insider advantages.\n4. GHOST LANGUAGE — specific themes that highlight competitor weaknesses without naming them (based on the weaknesses data above)\n5. RED FLAGS\n6. 48-HOUR ACTION PLAN — use role titles only, never names\n7. RISKS & CHALLENGES — honest assessment' }]
@@ -7220,7 +7259,7 @@ async function orchestrateOpp(opp) {
   // STEP 5: WINNABILITY
   try {
     var winResp = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6', max_tokens: 1500,
+      model: 'claude-sonnet-4-6', max_tokens: 2500,
       system: 'HGI chief capture officer making final bid decision. First line MUST be: PWIN: [number]% | RECOMMENDATION: [GO|CONDITIONAL GO|NO-BID]',
       messages: [{ role: 'user', content: 'Final GO/NO-GO assessment.\nOPP: ' + opp.title + '\nAGENCY: ' + (opp.agency || '') + '\nOPI: ' + (results.revisedOpi || opp.opi_score) + '\nSCOPE:\n' + (scopeAnalysis || '').slice(0, 1000) + '\nFINANCIAL:\n' + (finAnalysis || '').slice(0, 1000) + '\nRESEARCH:\n' + (researchBrief || '').slice(0, 1000) + '\n\nORGANISM INTELLIGENCE (relationships, competitors, outcomes, patterns):\n' + orchSlice.slice(0, 3000) + '\n\nFirst line: PWIN: X% | RECOMMENDATION: GO/CONDITIONAL GO/NO-BID\nThen: decision justification considering competitor weaknesses and HGI relationships above, top 3 win factors, top 3 risks, conditions for GO, teaming recommendation based on partner data above' }]
     });
