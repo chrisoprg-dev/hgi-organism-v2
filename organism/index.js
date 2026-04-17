@@ -158,7 +158,7 @@ const server = http.createServer(async (req, res) => {
 
     if (url === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'alive', uptime_seconds: Math.floor(process.uptime()), timestamp: new Date().toISOString(), version: 'V5.0-full-organism', agents_active: 42 }));
+      res.end(JSON.stringify({ status: 'alive', uptime_seconds: Math.floor(process.uptime()), timestamp: new Date().toISOString(), version: 'V2.0-organism', agents_active: 42 }));
       return;
     }
 
@@ -647,7 +647,7 @@ if (url === '/api/cycle-history') {
   try {
     var chMems = await supabase.from('organism_memory')
       .select('observation,created_at')
-      .eq('agent','v4_engine')
+      .eq('agent','v2')
       .order('created_at',{ascending:false}).limit(30);
     var cycles = (chMems.data || []).map(function(m) {
       var obs = m.observation || '';
@@ -2975,7 +2975,7 @@ if (url === '/api/exec-brief') {
       alerts: alerts,
       awaiting_award: submitted.map(function(o) { return { title: o.title, opi: o.opi_score }; }),
       recent_intel: briefMems,
-      agent_health: { active_agents: 42, version: 'V5.0-full-organism', last_cycle: briefMems.length > 0 ? briefMems[0].when : null }
+      agent_health: { active_agents: 42, version: 'V2.0-organism', last_cycle: briefMems.length > 0 ? briefMems[0].when : null }
     }));
   } catch (e) { res.end(JSON.stringify({ error: e.message })); }
   return;
@@ -3504,9 +3504,9 @@ if (url.startsWith('/api/proposal-doc')) {
     proposalText = proposalText.replace(/info@hgi\.com/gi, 'info@hgi-global.com');
     // Geoffrey Brien removal — catch any that slip through
     proposalText = proposalText.replace(/Geoffrey\s+Brien/gi, '[DR Manager — Position Open]');
-    // PBGC removal — HGI has never had a direct federal contract
-    proposalText = proposalText.replace(/PBGC[^.]*?\./gi, '');
-    proposalText = proposalText.replace(/Pension Benefit Guaranty[^.]*?\./gi, '');
+    // PBGC — included per Christopher S113 Q4 decision (S115 reversal)
+    // Strip regex removed. L5192 HGI context guardrail still prevents
+    // auto-inclusion as past performance without President confirmation.
     // Old staff count correction
     proposalText = proposalText.replace(/67\s+full[- ]time\s+(employees|staff)/gi, 'approximately 50 team members');
     proposalText = proposalText.replace(/67\s+FT\s*\+?\s*43\s+contract/gi, 'approximately 50 team members');
@@ -4371,6 +4371,45 @@ if (url.startsWith('/api/export-opportunity')) {
     res.writeHead(200, { 'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'Content-Disposition': 'attachment; filename="' + eoFn + '"', 'Access-Control-Allow-Origin': '*' });
     res.end(eoBuf);
   } catch (e) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); }
+  return;
+}
+
+// === EXTRACT RFP REQUIREMENTS — /api/extract-rfp-reqs (S115) ===
+// Targeted endpoint: runs extractRFPRequirements on one opp and persists the result.
+// Used for S115 gate testing and future ad-hoc requirement extraction.
+if (url === '/api/extract-rfp-reqs' && req.method === 'POST') {
+  var xBody = '';
+  for await (const chunk of req) xBody += chunk;
+  var xId = '';
+  try { xId = JSON.parse(xBody || '{}').id || ''; } catch(e) {}
+  if (!xId) { res.writeHead(400); res.end(JSON.stringify({error:'id required'})); return; }
+  try {
+    var xOpp = await supabase.from('opportunities').select('id,title,agency,rfp_text').eq('id', xId).single();
+    if (!xOpp.data) { res.writeHead(404); res.end(JSON.stringify({error:'opp not found'})); return; }
+    var xRfp = (xOpp.data.rfp_text || '');
+    if (xRfp.length < 500) { res.writeHead(400); res.end(JSON.stringify({error:'rfp_text < 500 chars', rfp_chars: xRfp.length})); return; }
+    var xReqs = await extractRFPRequirements(xRfp.slice(0, 40000), xOpp.data);
+    if (xReqs) {
+      await supabase.from('opportunities').update({ rfp_requirements: xReqs, last_updated: new Date().toISOString() }).eq('id', xId);
+    }
+    res.writeHead(200, {'Content-Type':'application/json'});
+    res.end(JSON.stringify({
+      ok: !!xReqs,
+      opp_id: xId,
+      opp_title: (xOpp.data.title||'').slice(0,120),
+      rfp_total_chars: xRfp.length,
+      extracted_from_chars: Math.min(xRfp.length, 40000),
+      requirements_count: xReqs ? (xReqs.requirements||[]).length : 0,
+      evaluation_criteria_count: xReqs ? (xReqs.evaluation_criteria||[]).length : 0,
+      submission_requirements_count: xReqs ? (xReqs.submission_requirements||[]).length : 0,
+      fatal_flaws_count: xReqs ? (xReqs.fatal_flaws||[]).length : 0,
+      result: xReqs
+    }));
+  } catch(e) {
+    log('EXTRACT-RFP-REQS ERROR: ' + e.message);
+    res.writeHead(500, {'Content-Type':'application/json'});
+    res.end(JSON.stringify({error: e.message}));
+  }
   return;
 }
 
@@ -7058,6 +7097,87 @@ async function kbQuery(vertical, oppText) {
   } catch(e) { return ''; }
 }
 
+// ═════════════════════════════════════════════════════════════════════════════
+// extractRFPRequirements — S115 D+E shared infrastructure
+// Parses an RFP/RFQ/SOQ into a structured JSON requirements list. Output feeds:
+//   - D.gap-detector (S119): flags requirements without mapped proposal paragraphs
+//   - E.compliance-audit (S125): every-requirement compliance matrix
+//   - F.coverage-matrix (S127): visual evaluator-criteria coverage graphic
+// Called from orchestrateOpp scope step. Also exposed via /api/extract-rfp-reqs
+// for targeted re-runs. Respects the orchestrator's 40K char rfp_text truncation;
+// if that cap causes miss-rate issues on dense RFPs, chunked extraction is a
+// follow-up session concern (flagged as Doc 2 §3.1 Rule 1 in the build plan).
+// ═════════════════════════════════════════════════════════════════════════════
+async function extractRFPRequirements(rfpText, opp) {
+  if (!rfpText || rfpText.length < 500) return null;
+  var truncated = rfpText.slice(0, 40000);
+  var oppTitle = ((opp && opp.title) || '').slice(0, 120);
+  var oppAgency = ((opp && opp.agency) || '').slice(0, 80);
+
+  var prompt = 'You are extracting STRUCTURED REQUIREMENTS from a procurement RFP/RFQ/SOQ document. ' +
+    'Your output must be precise, enumerated, and traceable back to specific sections of the RFP.\n\n' +
+    'RFP TITLE: ' + oppTitle + '\n' +
+    'AGENCY: ' + oppAgency + '\n\n' +
+    'EXTRACT FOUR THINGS:\n\n' +
+    '1. REQUIREMENTS — every specific item the proposer must address, respond to, or provide. ' +
+    'Look for numbered/lettered sections, shall/must/will language, bullet requirements, submission checklists. ' +
+    'For each: assign id ("R1", "R1.1", "R2"); capture exact section_number (null if none) and section_title (null if none); ' +
+    'include requirement_text (<=400 chars, paraphrase OK); classify type as "mandatory" (shall/must), "responsive" ' +
+    '(proposer should address), or "informational" (context only); set weight_percent if the RFP states one for that ' +
+    'specific item (null otherwise); identify response_format ("narrative", "table", "form_field", "resume", "org_chart", ' +
+    '"attachment", "other"); page_limit as integer if constrained (null otherwise); evaluation_criterion_id if the requirement ' +
+    'clearly maps to a stated evaluation factor (null otherwise).\n\n' +
+    '2. EVALUATION_CRITERIA — factors the agency will score against, with stated weights. ' +
+    'Each: id ("EC-1", "EC-2"), name ("Technical Approach", "Past Performance", etc.), weight_percent (null if unstated).\n\n' +
+    '3. SUBMISSION_REQUIREMENTS — format/logistics constraints. Examples: page count limits, font/margin rules, copies, ' +
+    'submission method, deadline, required forms/attachments, binding/tabbing. ' +
+    'Each: type ("page_count", "format", "copies", "deadline", "attachment", "submission_method", "binding", "other") and constraint (specific rule).\n\n' +
+    '4. FATAL_FLAWS — patterns causing disqualification or severe penalty. Examples: late submission, missing signatures, ' +
+    'exceeding page limits, missing required forms, improper format, missing certifications. ' +
+    'Each: pattern (what triggers the flaw) and penalty (stated consequence).\n\n' +
+    'OUTPUT ONLY VALID JSON. No prose, no markdown fencing, no commentary. Structure:\n' +
+    '{\n' +
+    '  "requirements": [{"id":"R1","section_number":"1.1","section_title":"Technical Approach","requirement_text":"...","type":"mandatory","weight_percent":40,"response_format":"narrative","page_limit":null,"evaluation_criterion_id":"EC-1"}, ...],\n' +
+    '  "evaluation_criteria": [{"id":"EC-1","name":"Technical Approach","weight_percent":40}, ...],\n' +
+    '  "submission_requirements": [{"type":"page_count","constraint":"25 pages single-sided"}, ...],\n' +
+    '  "fatal_flaws": [{"pattern":"late submission","penalty":"disqualification"}, ...]\n' +
+    '}\n\n' +
+    'IF AN ITEM IS NOT STATED IN THE RFP, use null or empty array. Do NOT invent. False positives are worse than misses.\n\n' +
+    'RFP TEXT FOLLOWS:\n\n' + truncated;
+
+  var resp;
+  try {
+    resp = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6', max_tokens: 8000,
+      messages: [{ role: 'user', content: prompt }]
+    });
+    trackCost('orchestrator_rfp_requirements', 'claude-sonnet-4-6', resp.usage);
+  } catch(ce) {
+    log('extractRFPRequirements: model call failed: ' + (ce.message||'').slice(0,120));
+    return null;
+  }
+
+  var raw = (resp.content || []).filter(function(b){ return b.type === 'text'; }).map(function(b){ return b.text; }).join('');
+  var cleaned = raw.replace(/```json|```/g, '').trim();
+  var parsed = null;
+  try { parsed = JSON.parse(cleaned); }
+  catch(pe) {
+    var m = cleaned.match(/\{[\s\S]*\}/);
+    if (m) { try { parsed = JSON.parse(m[0]); } catch(pe2) { log('extractRFPRequirements: JSON parse failed'); return null; } }
+    else { log('extractRFPRequirements: no JSON object found'); return null; }
+  }
+  if (!parsed || typeof parsed !== 'object') return null;
+  parsed.requirements = Array.isArray(parsed.requirements) ? parsed.requirements : [];
+  parsed.evaluation_criteria = Array.isArray(parsed.evaluation_criteria) ? parsed.evaluation_criteria : [];
+  parsed.submission_requirements = Array.isArray(parsed.submission_requirements) ? parsed.submission_requirements : [];
+  parsed.fatal_flaws = Array.isArray(parsed.fatal_flaws) ? parsed.fatal_flaws : [];
+  parsed.extracted_at = new Date().toISOString();
+  parsed.extracted_from_chars = truncated.length;
+  parsed.source_rfp_total_chars = rfpText.length;
+  parsed.extractor_version = 's115_v1';
+  return parsed;
+}
+
 async function orchestrateOpp(opp) {
   var oppId = opp.id;
   var d = String.fromCharCode(36);
@@ -7199,6 +7319,25 @@ async function orchestrateOpp(opp) {
       log('ORCHESTRATE: Scope done (' + scopeToSave.length + ' chars)');
     }
   } catch(e) { results.errors.push('scope:' + e.message); log('ORCHESTRATE: Scope error: ' + e.message); }
+
+  // STEP 1.5: STRUCTURED RFP REQUIREMENT EXTRACTION (S115)
+  // Parses the RFP into a structured requirements list for D.gap-detector (S119)
+  // and E.compliance-audit (S125). This step produces and persists; downstream
+  // consumers are not yet wired.
+  try {
+    if (rfpContent && rfpContent.length >= 500) {
+      var reqs = await extractRFPRequirements(rfpContent, opp);
+      if (reqs) {
+        await supabase.from('opportunities').update({ rfp_requirements: reqs, last_updated: new Date().toISOString() }).eq('id', oppId);
+        results.steps.push('rfp_requirements');
+        log('ORCHESTRATE: RFP requirements extracted (' + (reqs.requirements || []).length + ' reqs, ' + (reqs.evaluation_criteria || []).length + ' criteria, ' + (reqs.submission_requirements || []).length + ' submission rules, ' + (reqs.fatal_flaws || []).length + ' fatal flaws)');
+      } else {
+        log('ORCHESTRATE: RFP requirement extraction returned null');
+      }
+    } else {
+      log('ORCHESTRATE: Skipping RFP requirement extraction (rfp_text < 500 chars)');
+    }
+  } catch(e) { results.errors.push('rfp_requirements:' + e.message); log('ORCHESTRATE: RFP requirement extraction error: ' + e.message); }
 
   // STEP 2: FINANCIAL ANALYSIS
   var scopeAnalysis = results.steps.indexOf('scope') >= 0 ? scopeText : (opp.scope_analysis || '');
@@ -7372,7 +7511,7 @@ async function runSession(trigger) {
         }
       }
       
-      await storeMemory('v4_engine', null, 'v4,skeleton,session',
+      await storeMemory('v2', null, 'v2,skeleton,session',
         'V4 SKELETON SESSION - trigger:' + trigger + ' pipeline:' + state.pipeline.length + ' agents:' + allResults.length + ' newOpps:' + newOppsFound + ' newRFPs:' + newRFPsRetrieved,
         'analysis', null, 'high');
       log('=== SKELETON SESSION COMPLETE: ' + id + ' | ' + allResults.length + ' agents fired (cost-control mode) ===');
@@ -7403,7 +7542,7 @@ async function runSession(trigger) {
       log('SMART FILTER: ' + activeOpps.length + ' of ' + beforeCount + ' opps need analysis (' + (beforeCount - activeOpps.length) + ' skipped — no changes)');
       if (activeOpps.length === 0) {
         log('SMART: No per-opp changes — skipping per-opp agents but RUNNING system-wide agents');
-        await storeMemory('v4_engine', null, 'v4,smart,session', 'SMART SESSION — no per-opp changes across ' + beforeCount + ' opps. System-wide agents still running. Trigger: ' + trigger, 'analysis', null, 'high');
+        await storeMemory('v2', null, 'v2,smart,session', 'SMART SESSION — no per-opp changes across ' + beforeCount + ' opps. System-wide agents still running. Trigger: ' + trigger, 'analysis', null, 'high');
         // Don't return — fall through to system-wide agents below
       }
     }
@@ -7526,7 +7665,7 @@ async function runSession(trigger) {
     }
     log('TRACKING: Updated last_analyzed_at for ' + activeOpps.length + ' opps');
 
-    await storeMemory('v4_engine', null, 'v4,session',
+    await storeMemory('v2', null, 'v2,session',
       'V4 SESSION - trigger:' + trigger + ' pipeline:' + state.pipeline.length + ' agents:' + allResults.length + ' opps_analyzed:' + activeOpps.length + ' uptime:' + Math.floor(process.uptime()) + 's',
       'analysis', null, 'high');
 
@@ -7894,7 +8033,7 @@ async function runSession(trigger) {
 // ============================================================
 log('==========================================================');
 log('HGI ORGANISM V4.5-full-intel - STARTING');
-log('V5.0-full-organism: 42 active agents. Direct CB+LaPAC hunting. All 8 verticals. Multi-source discovery. Self-sufficient V2.');
+log('V2.0-organism: 42 active agents. Direct CB+LaPAC hunting. All 8 verticals. Multi-source discovery. Self-sufficient V2.');
 log('12h dedup guard. Crash logging. Test endpoints.');
 log('==========================================================');
 
@@ -7944,7 +8083,7 @@ function scheduleWeekdayCron() {
     try {
       var myStart = Math.floor(Date.now() / 1000 - process.uptime());
       var recent = await supabase.from('organism_memory').select('observation')
-        .eq('agent','v4_engine').gte('created_at', new Date(Date.now() - 7200000).toISOString())
+        .eq('agent','v2').gte('created_at', new Date(Date.now() - 7200000).toISOString())
         .order('created_at',{ascending:false}).limit(1);
       if (recent.data && recent.data.length > 0) {
         var obs = recent.data[0].observation || '';
