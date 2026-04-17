@@ -5436,7 +5436,39 @@ var HGI_NAICS = ['541611','541690','561110','561990','524291','923120','921190']
 // ============================================================
 function selectHGIPP(opp, opts) {
   opts = opts || {};
-  var vertical = (opts.vertical || (opp && opp.vertical) || '').toLowerCase().replace(/\s+/g, '_').replace('/', '_');
+  // S117: vertical normalization — opp.vertical from scrapers/orchestrator does not
+  // always match the HGI_PP taxonomy. Map raw scraper strings to canonical PP verticals
+  // before scoring. opp_context returns both raw and normalized for audit.
+  var verticalRaw = (opts.vertical || (opp && opp.vertical) || '').toLowerCase().replace(/\s+/g, '_').replace('/', '_');
+  var VERTICAL_NORMALIZE = {
+    'disaster': 'disaster_recovery',
+    'disaster_recovery_consulting': 'disaster_recovery',
+    'cdbg': 'disaster_recovery',
+    'cdbg_dr': 'disaster_recovery',
+    'fema': 'disaster_recovery',
+    'grant_management': 'grant',
+    'grants_management': 'grant',
+    'grant_admin': 'grant',
+    'grant_administration': 'grant',
+    'infrastructure': 'construction',
+    'construction_management': 'construction',
+    'cm': 'construction',
+    'tpa': 'tpa_claims',
+    'claims': 'tpa_claims',
+    'workers_comp': 'tpa_claims',
+    'tpa_claims_workers_comp': 'tpa_claims',
+    'property_tax_appeals': 'property_tax',
+    'appeals': 'property_tax',
+    'billing_appeals': 'property_tax',
+    'housing_hud': 'housing',
+    'hud': 'housing',
+    'program_administration': 'program_admin',
+    'program_management': 'program_admin',
+    'workforce_wioa': 'workforce',
+    'workforce_services': 'workforce',
+    'wioa': 'workforce'
+  };
+  var vertical = VERTICAL_NORMALIZE[verticalRaw] || verticalRaw;
   var agency = (opts.agency || (opp && opp.agency) || '').toLowerCase();
   var state = (opts.state || (opp && opp.state) || '').toUpperCase().slice(0, 2);
   var estValueRaw = opts.estimated_value || (opp && opp.estimated_value) || null;
@@ -5578,7 +5610,7 @@ function selectHGIPP(opp, opts) {
       return { rank: i + 1, pp_id: x.pp.id, client: x.pp.client, contract_name: x.pp.contract_name, score: x.score };
     }),
     opp_context: {
-      vertical: vertical, agency: agency, state: state,
+      vertical_raw: verticalRaw, vertical_normalized: vertical, agency: agency, state: state,
       estimated_value_raw: estValueRaw, estimated_value_parsed: estValue,
       opp_agency_type: oppType
     }
@@ -7527,7 +7559,7 @@ async function extractRFPRequirements(rfpText, opp) {
   parsed.extracted_at = new Date().toISOString();
   parsed.extracted_from_chars = truncated.length;
   parsed.source_rfp_total_chars = rfpText.length;
-  parsed.extractor_version = 's115_v1';
+  parsed.extractor_version = 's116_v1';
   return parsed;
 }
 
