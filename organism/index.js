@@ -7182,15 +7182,21 @@ async function runSession(trigger) {
 
     // 2. ORCHESTRATION — Run full 5-step analysis on opps that need it
     // Triggers when: scope_analysis is NULL/empty AND rfp_text has real content
-    try {
+    // === SESSION 107 COST CONTROL ===
+    // Autonomous orchestration disabled until cost tracking + hallucination guards fixed.
+    // Set AUTO_ORCH_ENABLED=true in Railway env to re-enable.
+    var AUTO_ORCH_ENABLED = process.env.AUTO_ORCH_ENABLED === 'true';
+    if (AUTO_ORCH_ENABLED) try {
       var needsOrch = state.pipeline.filter(function(o) {
         var hasRfp = (o.rfp_text || '').length > 2000;
         var noScope = !o.scope_analysis || (o.scope_analysis || '').length < 200;
-        var isActive = o.status === 'active' && (o.opi_score || 0) >= 60;
+        var isActive = o.status === 'active' && (o.opi_score || 0) >= 80;
         return hasRfp && noScope && isActive;
       });
       if (needsOrch.length > 0) {
-        log('ORCHESTRATE: ' + needsOrch.length + ' opps need full analysis');
+        // Hard budget cap: max 1 autonomous orchestration per session
+        needsOrch = needsOrch.slice(0, 1);
+        log('ORCHESTRATE: ' + needsOrch.length + ' opps need full analysis (capped at 1/session)');
         for (var oi = 0; oi < needsOrch.length; oi++) {
           try {
             var orchResult = await orchestrateOpp(needsOrch[oi]);
@@ -7202,6 +7208,7 @@ async function runSession(trigger) {
         }
       }
     } catch(e) { log('Orchestration check error: ' + e.message); }
+    else { log('AUTO_ORCH: Disabled (Session 107 cost control). Orchestrate manually via /api/orchestrate/:oppId'); }
 
     // SKELETON GATE: In skeleton mode, only run essential system agents + event-triggered opps
     if (isSkeleton) {
