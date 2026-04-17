@@ -1197,6 +1197,56 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         });
       }
 
+      // ═══ S116: PP SELECTOR — top-3 HGI_PP entries ranked for THIS RFP ═══
+      var D = String.fromCharCode(36);
+      var _ppResult = null;
+      var topPPText = '';
+      try {
+        _ppResult = selectHGIPP(opp, {
+          vertical: vertical,
+          agency: opp.agency,
+          state: oppState,
+          estimated_value: opp.estimated_value,
+          rfpText: opp.rfp_text
+        });
+        var _topPPs = (_ppResult && _ppResult.selected) || [];
+        topPPText = _topPPs.map(function(pp, i) {
+          var valStr = '';
+          if (pp.value) {
+            if (pp.value.hgi_direct) valStr += D + (pp.value.hgi_direct/1e6).toFixed(1) + 'M HGI direct';
+            if (pp.value.program_total) valStr += (valStr ? '; ' : '') + D + (pp.value.program_total >= 1e9 ? (pp.value.program_total/1e9).toFixed(1)+'B' : (pp.value.program_total/1e6).toFixed(0)+'M') + ' program total';
+            if (pp.value.hgi_direct_monthly) valStr += D + (pp.value.hgi_direct_monthly/1e3).toFixed(0) + 'K/month HGI direct (' + (pp.outcome === 'active' ? 'active' : 'historical') + ')';
+          }
+          var periodStr = '';
+          if (pp.period && (pp.period.start || pp.period.end)) {
+            periodStr = (pp.period.start || 'TBD') + '-' + (pp.period.end || (pp.outcome === 'active' ? 'present' : 'TBD'));
+          }
+          var metricsStr = '';
+          if (pp.key_metrics) {
+            metricsStr = Object.keys(pp.key_metrics).map(function(k){ return k + ': ' + pp.key_metrics[k]; }).join(', ');
+          }
+          return (i+1) + '. ' + (pp.contract_name || pp.id) + '\n' +
+            '   Client: ' + (pp.client || 'TBD') + '\n' +
+            '   Vertical: ' + (pp.vertical || 'TBD') + ' | Period: ' + (periodStr || 'TBD') + ' | Value: ' + (valStr || 'TBD') + '\n' +
+            '   Scope: ' + (pp.scope || 'TBD') + '\n' +
+            '   Outcome: ' + (pp.outcome || 'TBD') + (metricsStr ? ' | Metrics: ' + metricsStr : '');
+        }).join('\n\n');
+        // Log selection breakdown for auditability
+        try {
+          await storeMemory('pp_selector', opp.id, (opp.agency||'')+',pp_selection,s116',
+            'PP SELECTION for RFP "' + (opp.title||'').slice(0,120) + '". Top 3: ' +
+            _topPPs.map(function(p){ return p.id; }).join(', ') +
+            '\nOpp context: vertical=' + vertical + ', agency_type=' + (_ppResult.opp_context && _ppResult.opp_context.opp_agency_type) +
+            ', state=' + oppState + ', est_value=' + (_ppResult.opp_context && _ppResult.opp_context.estimated_value_parsed) +
+            '\nFull breakdown: ' + JSON.stringify(_ppResult.breakdown),
+            'pp_selection', null, 'high');
+        } catch(_ppLog) { log('PP SELECTOR LOG: ' + (_ppLog.message||'').slice(0,120)); }
+        log('PP SELECTOR: top-3 for opp ' + (opp.id||'') + ' = ' + _topPPs.map(function(p){ return p.id; }).join(', '));
+      } catch(_ppErr) {
+        log('PP SELECTOR ERROR: ' + (_ppErr.message||'').slice(0,200));
+        topPPText = '(PP selector unavailable — senior_writer must reference HGI_PP canon conservatively and avoid exclusions: PBGC, Orleans Parish School Board, OPSB, LIGA, TPCIGA)';
+      }
+
       // ═══ BUILD THE MEGA-PROMPT WITH ALL INTELLIGENCE ═══
       var D = String.fromCharCode(36);
       var proposalPrompt = 'You are the HGI Global proposal production engine. Your job is to produce a COMPLETE, SUBMISSION-READY response document.\n\n' +
@@ -1217,6 +1267,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         'HGI Relevance: ' + (opp.hgi_relevance||'') + '\n\n' +
         '## RFP/SOQ REQUIREMENTS (THE ACTUAL DOCUMENT)\n' + ((opp.rfp_text && opp.rfp_text.trim().length > 200) ? opp.rfp_text.slice(0, 20000) : (opp.scope_analysis || opp.description || 'No RFP text available')) + '\n\n' +
         '## HGI COMPANY PROFILE\n' + HGI + '\n\n' +
+        '## TOP-RELEVANT PAST PERFORMANCE FOR THIS RFP (selected by HGI_PP selector; ranks 1-3 based on vertical match, agency-type match, scale, recency)\nFeature these 3 prominently in Past Performance and Experience sections. You may reference other HGI_PP canonical entries as supporting citations, but these 3 must be the primary feature. DO NOT list these exclusions under any circumstances without explicit President confirmation: PBGC, Orleans Parish School Board, OPSB, LIGA, TPCIGA. No current FEMA Public Assistance contract may be claimed.\n\n' + topPPText + '\n\n' +
         '## SCOPE ANALYSIS (Organism deep analysis of requirements)\n' + (opp.scope_analysis || 'Not yet produced') + '\n\n' +
         '## FINANCIAL ANALYSIS (Pricing strategy, market benchmarks)\n' + (opp.financial_analysis || 'Not yet produced') + '\n\n' +
         '## RESEARCH BRIEF (Win strategy, competitive positioning)\n' + (opp.research_brief || 'Not yet produced') + '\n\n' +
@@ -1319,7 +1370,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       var stream = await anthropic.messages.stream({
         model: 'claude-opus-4-6',
         max_tokens: 128000,
-        system: 'You are a senior government proposal writer at HGI Global (Hammerman & Gainer LLC), a 97-year-old Louisiana-based firm. You produce submission-ready documents that WIN — not average drafts. Every word earns points with evaluators. You match the exact format each solicitation requires (questionnaire forms filled field-by-field, narrative proposals with specified sections, exhibits completed). You are specific, factual, direct, and persuasive. You use only confirmed company data. You write like the firm President would write — authoritative, zero filler, zero hedging. CRITICAL: Geoffrey Brien no longer works at HGI. Never include him. CRITICAL: Do NOT auto-assign HGI leadership (CEO, VP, CAO, etc.) to project roles. All positions are OPEN — describe role requirements and qualifications needed, not pre-filled names. Use [TO BE ASSIGNED] for Key Personnel unless explicitly instructed otherwise.',
+        system: 'You are a senior government proposal writer at HGI Global (Hammerman & Gainer LLC), a 97-year-old Louisiana-based firm. You produce submission-ready documents that WIN — not average drafts. Every word earns points with evaluators. You match the exact format each solicitation requires (questionnaire forms filled field-by-field, narrative proposals with specified sections, exhibits completed). You are specific, factual, direct, and persuasive. You use only confirmed company data. You write like the firm President would write — authoritative, zero filler, zero hedging. CRITICAL: Geoffrey Brien no longer works at HGI. Never include him. CRITICAL: Do NOT auto-assign HGI leadership (CEO, VP, CAO, etc.) to project roles. All positions are OPEN — describe role requirements and qualifications needed, not pre-filled names. Use [TO BE ASSIGNED] for Key Personnel unless explicitly instructed otherwise. CRITICAL PAST PERFORMANCE RULES (S116): (1) The user message contains a "## TOP-RELEVANT PAST PERFORMANCE FOR THIS RFP" section with 3 pre-selected PPs ranked for this specific RFP. Feature those 3 prominently in Past Performance sections. (2) HARD EXCLUSIONS — never list any of these as HGI past performance without explicit President confirmation: PBGC, Orleans Parish School Board (OPSB), LIGA, TPCIGA. If the RFP client IS one of these (e.g. OPSB itself), reference them as the client/agency — never as HGI past performance. (3) No current FEMA Public Assistance contract may be claimed. (4) Use only values exactly as stated in the TOP-RELEVANT PAST PERFORMANCE section — do not alter dollar amounts, dates, scope, or metrics.',
         messages: [{role:'user', content: proposalPrompt}]
       });
       var finalMessage = await stream.finalMessage();
@@ -3513,8 +3564,12 @@ if (url.startsWith('/api/proposal-doc')) {
     proposalText = proposalText.replace(/110\s+professionals/gi, 'approximately 50 team members');
     // Founding year catch-all — 1929 is canonical; 95-year normalization removed (S114 Item A)
     // (removed: founded_in_1929→1931, since_1929→1931, 95_year→ninety-five-year regexes)
-    // Orleans Parish School Board — not confirmed
-    proposalText = proposalText.replace(/Orleans\s+Parish\s+School\s+Board[^.]*?\./gi, '');
+    // Orleans Parish School Board — S116 Item 4: L3517 post-process regex removed.
+    // That regex (/Orleans\s+Parish\s+School\s+Board[^.]*?\./gi) overreached by deleting
+    // EVERY OPSB reference, which breaks proposals where OPSB is the actual client
+    // (e.g. RFQ 26-0108). The HGI_PP_EXCLUSIONS constant + HGI context guardrail +
+    // senior_writer system prompt now enforce "do not list OPSB as past performance"
+    // at generation time, which is the correct layer for a semantic rule.
 
     if (!proposalText || proposalText.length < 500) {
       res.writeHead(400); res.end(JSON.stringify({
@@ -4388,7 +4443,7 @@ if (url === '/api/extract-rfp-reqs' && req.method === 'POST') {
     if (!xOpp.data) { res.writeHead(404); res.end(JSON.stringify({error:'opp not found'})); return; }
     var xRfp = (xOpp.data.rfp_text || '');
     if (xRfp.length < 500) { res.writeHead(400); res.end(JSON.stringify({error:'rfp_text < 500 chars', rfp_chars: xRfp.length})); return; }
-    var xReqs = await extractRFPRequirements(xRfp.slice(0, 40000), xOpp.data);
+    var xReqs = await extractRFPRequirements(xRfp.slice(0, 180000), xOpp.data);
     if (xReqs) {
       await supabase.from('opportunities').update({ rfp_requirements: xReqs, last_updated: new Date().toISOString() }).eq('id', xId);
     }
@@ -4398,7 +4453,7 @@ if (url === '/api/extract-rfp-reqs' && req.method === 'POST') {
       opp_id: xId,
       opp_title: (xOpp.data.title||'').slice(0,120),
       rfp_total_chars: xRfp.length,
-      extracted_from_chars: Math.min(xRfp.length, 40000),
+      extracted_from_chars: Math.min(xRfp.length, 180000),
       requirements_count: xReqs ? (xReqs.requirements||[]).length : 0,
       evaluation_criteria_count: xReqs ? (xReqs.evaluation_criteria||[]).length : 0,
       submission_requirements_count: xReqs ? (xReqs.submission_requirements||[]).length : 0,
@@ -5228,11 +5283,307 @@ function getInterface() {
 }
 
 // === HGI COMPANY CONTEXT (cached across all agent calls) ===
-var HGI = 'SYSTEM CONTEXT: HGI Global (Hammerman & Gainer LLC) is a 97-year-old, 100% minority-owned program management firm in Kenner, Louisiana (2400 Veterans Memorial Blvd, Suite 510, 70062). 8 verticals: Disaster Recovery, TPA/Claims (full P&C), Property Tax Appeals, Workforce/WIOA, Construction Management, Program Administration, Housing/HUD, Grant Management. Past performance: Road Home ' + String.fromCharCode(36) + '67M direct/' + String.fromCharCode(36) + '13B+ program (2006-2015, zero misappropriation), HAP ' + String.fromCharCode(36) + '950M, Restore LA ' + String.fromCharCode(36) + '42.3M, Rebuild NJ ' + String.fromCharCode(36) + '67.7M, TPSD ' + String.fromCharCode(36) + '2.96M (completed 2022-2025), St. John Sheriff ' + String.fromCharCode(36) + '788K, BP GCCF ' + String.fromCharCode(36) + '1.65M. Key staff by role: President, Chairman, CEO, CAO, VP, SVP Claims, 1099 SME (~' + String.fromCharCode(36) + '1B grants/incentives). ~50 team members across offices in Kenner (HQ), Shreveport, Alexandria, New Orleans. Phone: (504) 681-6135. Email: info@hgi-global.com. SAM UEI: DL4SJEVKZ6H4. Insurance: ' + String.fromCharCode(36) + '5M fidelity/' + String.fromCharCode(36) + '5M E&O/' + String.fromCharCode(36) + '2M GL. Rates: Built per-RFP from market analysis and financial agent output. Do NOT copy standard rates into proposals. HGI has NEVER had a direct federal contract. All work flows through state agencies, local governments, housing authorities, and insurance entities. Do NOT list PBGC or Orleans Parish School Board as past performance without explicit President confirmation. RULES: (1) Every claim must cite source+date. Unverified = say so. (2) Set confidence:high only with source URL. Medium when extrapolating. Inferred when reasoning without sources. (3) Set source_url to specific URL or null. CRITICAL PERSONNEL UPDATE: Geoffrey Brien is NO LONGER with HGI — do not reference him in any proposals, staffing plans, or deliverables. The DR Manager position is currently unfilled. Any organism memories referencing Brien as current staff are OUTDATED. FOUNDING YEAR: HGI was founded in 1929. Use 1929 in all documents. OUTPUT FORMAT RULES (apply to ALL agent outputs): (1) Start directly with your findings. No title headers like HGI GLOBAL or agent name headers. (2) Never write Agent X of Y numbering. (3) No Classification, Eyes Only, Principals Only, Prepared for, or Capture-Sensitive labels. (4) No markdown headers (# ## ###), horizontal rules (---), or emoji. (5) No governing rules boilerplate or blockquote disclaimers at the top. (6) Use role titles only — never write Christopher Oney, Larry Oney, Lou Resweber, Candy Dottolo, Dillon Truax, Vanessa James, Chris Feduccia, or any staff names. Say President, Chairman, CEO, CAO, VP, SVP Claims, SME. (7) Be direct and concise. Substance over formatting. Write findings as clean prose, not decorated documents. (8) No markdown tables for internal analysis — use plain text. Tables are only for proposal content that will appear in final documents.';
+var HGI = 'SYSTEM CONTEXT: HGI Global (Hammerman & Gainer LLC) is a 97-year-old, 100% minority-owned program management firm in Kenner, Louisiana (2400 Veterans Memorial Blvd, Suite 510, 70062). 8 verticals: Disaster Recovery, TPA/Claims (full P&C), Property Tax Appeals, Workforce/WIOA, Construction Management, Program Administration, Housing/HUD, Grant Management. PAST PERFORMANCE: See HGI_PP constant (9 canonical entries across verticals); selectHGIPP() returns RFP-specific top-3. DO NOT copy HGI_PP wholesale into proposals — use the selector. HARD EXCLUSIONS (never list as past performance without explicit President confirmation): PBGC, Orleans Parish School Board, OPSB, LIGA, TPCIGA. No current FEMA Public Assistance contract may be claimed. Key staff by role: President, Chairman, CEO, CAO, VP, SVP Claims, 1099 SME (~' + String.fromCharCode(36) + '1B grants/incentives). ~50 team members across offices in Kenner (HQ), Shreveport, Alexandria, New Orleans. Phone: (504) 681-6135. Email: info@hgi-global.com. SAM UEI: DL4SJEVKZ6H4. Insurance: ' + String.fromCharCode(36) + '5M fidelity/' + String.fromCharCode(36) + '5M E&O/' + String.fromCharCode(36) + '2M GL. Rates: Built per-RFP from market analysis and financial agent output. Never copy standard rates or HGI_PP entries wholesale. HGI has NEVER had a direct federal contract. All work flows through state agencies, local governments, housing authorities, and insurance entities. RULES: (1) Every claim must cite source+date. Unverified = say so. (2) Set confidence:high only with source URL. Medium when extrapolating. Inferred when reasoning without sources. (3) Set source_url to specific URL or null. CRITICAL PERSONNEL UPDATE: Geoffrey Brien is NO LONGER with HGI — do not reference him in any proposals, staffing plans, or deliverables. The DR Manager position is currently unfilled. Any organism memories referencing Brien as current staff are OUTDATED. FOUNDING YEAR: HGI was founded in 1929. Use 1929 in all documents. OUTPUT FORMAT RULES (apply to ALL agent outputs): (1) Start directly with your findings. No title headers like HGI GLOBAL or agent name headers. (2) Never write Agent X of Y numbering. (3) No Classification, Eyes Only, Principals Only, Prepared for, or Capture-Sensitive labels. (4) No markdown headers (# ## ###), horizontal rules (---), or emoji. (5) No governing rules boilerplate or blockquote disclaimers at the top. (6) Use role titles only — never write Christopher Oney, Larry Oney, Lou Resweber, Candy Dottolo, Dillon Truax, Vanessa James, Chris Feduccia, or any staff names. Say President, Chairman, CEO, CAO, VP, SVP Claims, SME. (7) Be direct and concise. Substance over formatting. Write findings as clean prose, not decorated documents. (8) No markdown tables for internal analysis — use plain text. Tables are only for proposal content that will appear in final documents.';
 
 
 // RATE_CARD — only referenced by financial agent and rate-table endpoint. NOT sent to other agents or proposals.
 var RATE_CARD = 'HGI Rate Card (burdened/hr): Principal ' + String.fromCharCode(36) + '220, Prog Dir ' + String.fromCharCode(36) + '210, SME ' + String.fromCharCode(36) + '200, Sr Grant Mgr ' + String.fromCharCode(36) + '180, Grant Mgr ' + String.fromCharCode(36) + '175, Sr PM ' + String.fromCharCode(36) + '180, PM ' + String.fromCharCode(36) + '155, Grant Writer ' + String.fromCharCode(36) + '145, Arch/Eng ' + String.fromCharCode(36) + '135, Cost Est ' + String.fromCharCode(36) + '125, Appeals ' + String.fromCharCode(36) + '145, Sr Damage ' + String.fromCharCode(36) + '115, Damage ' + String.fromCharCode(36) + '105, Admin ' + String.fromCharCode(36) + '65.';
+
+// ============================================================
+// HGI_PP — CANONICAL PAST PERFORMANCE (S116, 9 entries)
+// Single source of truth. Restored from V1 ppq-automation.js which was
+// authored by Christopher during the St. George RFP clarifying-questions work.
+// Selector function below (selectHGIPP) ranks these for RFP-specific use.
+// HARD EXCLUSIONS (enforced by HGI_PP_EXCLUSIONS + senior_writer prompt):
+//   PBGC, Orleans Parish School Board (OPSB), LIGA, TPCIGA —
+//   DO NOT list as past performance without explicit President confirmation.
+//   No current FEMA PA contract may be claimed.
+// Fields tagged _provisional where source had variance requiring later
+// President confirmation (see S116 handoff Part D ambiguity list).
+// ============================================================
+var HGI_PP = [
+  {
+    id: 'pp-road-home',
+    client: 'Louisiana Office of Community Development',
+    contract_name: 'Road Home Program',
+    vertical: 'disaster_recovery',
+    period: { start: 2006, end: 2015 },
+    value: { hgi_direct: 67000000, program_total: 13000000000, currency: 'USD' },
+    scope: 'CDBG-DR housing recovery program management post-Katrina/Rita; applications, appraisals, title, closings; zero misappropriation across program life.',
+    outcome: 'completed',
+    geography: { state: 'LA', region: 'statewide' },
+    key_metrics: { applications: '185,000+', misappropriation_findings: 0 },
+    _provisional: { applications_basis: 'V1 ppq-automation canon confirmed by President; older files carried variant counts 130K/165K' }
+  },
+  {
+    id: 'pp-hap',
+    client: 'HAP program administrator',
+    contract_name: 'Homeowner Assistance Program (HAP)',
+    vertical: 'housing',
+    period: { start: null, end: null },
+    value: { hgi_direct: null, program_total: 950000000, currency: 'USD' },
+    scope: 'Disaster housing recovery assistance program administration.',
+    outcome: 'completed',
+    geography: { state: null, region: null },
+    key_metrics: {},
+    _provisional: { period: 'TBD confirm with President', geography: 'TBD', hgi_direct: 'slice TBD' }
+  },
+  {
+    id: 'pp-restore-la',
+    client: 'Louisiana Office of Community Development',
+    contract_name: 'Restore Louisiana',
+    vertical: 'disaster_recovery',
+    period: { start: 2016, end: null },
+    value: { hgi_direct: 42300000, program_total: null, currency: 'USD' },
+    scope: 'Post-2016 flood CDBG-DR recovery program; Baton Rouge region; HUD compliance; homeowner applications.',
+    outcome: 'completed',
+    geography: { state: 'LA', region: 'Baton Rouge' },
+    key_metrics: {},
+    _provisional: { end_year: 'TBD confirm completion year' }
+  },
+  {
+    id: 'pp-tpsd',
+    client: 'Terrebonne Parish School Board',
+    contract_name: 'TPSD Construction Management',
+    vertical: 'construction',
+    period: { start: 2022, end: 2025 },
+    value: { hgi_direct: 2960000, program_total: null, currency: 'USD' },
+    scope: 'Construction management services for parish school district.',
+    outcome: 'completed',
+    geography: { state: 'LA', region: 'Terrebonne Parish' },
+    key_metrics: {}
+  },
+  {
+    id: 'pp-st-john-sheriff',
+    client: 'St. John the Baptist Parish Sheriff',
+    contract_name: 'St. John Sheriff',
+    vertical: 'tpa_claims',
+    period: { start: null, end: null },
+    value: { hgi_direct: 788000, program_total: null, currency: 'USD' },
+    scope: 'Third-party administration / claims services for parish sheriff.',
+    outcome: 'completed',
+    geography: { state: 'LA', region: 'St. John the Baptist Parish' },
+    key_metrics: {},
+    _provisional: { period: 'TBD' }
+  },
+  {
+    id: 'pp-rebuild-nj',
+    client: 'State of New Jersey',
+    contract_name: 'Rebuild NJ',
+    vertical: 'disaster_recovery',
+    period: { start: null, end: null },
+    value: { hgi_direct: 67700000, program_total: null, currency: 'USD' },
+    scope: 'Post-Superstorm Sandy CDBG-DR rebuild program services; out-of-state engagement demonstrating national capability.',
+    outcome: 'completed',
+    geography: { state: 'NJ', region: 'statewide' },
+    key_metrics: {},
+    _provisional: { period: 'TBD' }
+  },
+  {
+    id: 'pp-bp-gccf',
+    client: 'BP / Gulf Coast Claims Facility (Kenneth Feinberg, Presidential Appointee)',
+    contract_name: 'BP Gulf Coast Claims Facility',
+    vertical: 'tpa_claims',
+    period: { start: 2010, end: 2013 },
+    value: { hgi_direct: 1650000, program_total: null, currency: 'USD' },
+    scope: 'Oil spill damage claims administration under complex federal oversight.',
+    outcome: 'completed',
+    geography: { state: null, region: 'Gulf Coast' },
+    key_metrics: { claims: '1,000,000+' }
+  },
+  {
+    id: 'pp-nola-wc-tpa',
+    client: 'City of New Orleans',
+    contract_name: 'City of New Orleans — Workers Compensation TPA',
+    vertical: 'tpa_claims',
+    period: { start: null, end: null },
+    value: { hgi_direct_monthly: 283000, hgi_direct_annualized: 3396000, currency: 'USD' },
+    scope: 'Workers Compensation third-party administration for City of New Orleans; continuous service engagement.',
+    outcome: 'active',
+    geography: { state: 'LA', region: 'New Orleans' },
+    key_metrics: {},
+    _provisional: { period_start: 'TBD confirm start year', annualized: '$283K/mo documented; multi-year term' }
+  },
+  {
+    id: 'pp-swbno-appeals',
+    client: 'Sewerage and Water Board of New Orleans (SWBNO)',
+    contract_name: 'SWBNO Billing Appeals',
+    vertical: 'property_tax',
+    period: { start: 2011, end: null },
+    value: { hgi_direct_monthly: 200000, hgi_direct_annualized: 2400000, currency: 'USD' },
+    scope: 'Billing appeals and dispute resolution services; quarterly reviews since 2011.',
+    outcome: 'active',
+    geography: { state: 'LA', region: 'New Orleans' },
+    key_metrics: {},
+    _provisional: { vertical_mapping: 'property_tax (HGI appeals vertical); SWBNO is billing-appeals, closest canonical match' }
+  }
+];
+
+// HGI_PP_EXCLUSIONS — do not reference as past performance without
+// explicit President confirmation. Enforced at generation time via
+// HGI context guardrail and senior_writer system prompt.
+var HGI_PP_EXCLUSIONS = ['PBGC', 'Orleans Parish School Board', 'OPSB', 'LIGA', 'TPCIGA'];
+
+// HGI_NAICS — canonical 7 (intake.js + presolicitation.js confirmed in S115 V1 audit)
+var HGI_NAICS = ['541611','541690','561110','561990','524291','923120','921190'];
+
+// ============================================================
+// selectHGIPP — ranks HGI_PP entries for a specific RFP, returns top 3
+// S116 Item 2. Pure function (no DB calls). Caller logs score breakdown
+// via storeMemory with agent='pp_selector' for auditability.
+// Weights: vertical 40% | agency-type 25% | scale 20% | recency 15%
+// Ties broken by recency.
+// ============================================================
+function selectHGIPP(opp, opts) {
+  opts = opts || {};
+  var vertical = (opts.vertical || (opp && opp.vertical) || '').toLowerCase().replace(/\s+/g, '_').replace('/', '_');
+  var agency = (opts.agency || (opp && opp.agency) || '').toLowerCase();
+  var state = (opts.state || (opp && opp.state) || '').toUpperCase().slice(0, 2);
+  var estValueRaw = opts.estimated_value || (opp && opp.estimated_value) || null;
+  var currentYear = new Date().getFullYear();
+
+  // Parse estimated_value — accepts $1.5M, $500K, $100,000, "1500000", numbers
+  function parseMoney(v) {
+    if (!v) return null;
+    if (typeof v === 'number') return v;
+    var s = String(v).replace(/[$,\s]/g, '').toLowerCase();
+    var m = s.match(/([0-9.]+)\s*([mkb])?/);
+    if (!m) return null;
+    var n = parseFloat(m[1]);
+    if (isNaN(n)) return null;
+    var mult = m[2] === 'b' ? 1e9 : m[2] === 'm' ? 1e6 : m[2] === 'k' ? 1e3 : 1;
+    return n * mult;
+  }
+  var estValue = parseMoney(estValueRaw);
+
+  // Vertical adjacency (soft matches get 0.5; unrelated 0.0)
+  var adjacency = {
+    'disaster_recovery': ['housing', 'grant', 'program_admin', 'construction'],
+    'housing': ['disaster_recovery', 'grant'],
+    'grant': ['program_admin', 'disaster_recovery', 'housing'],
+    'program_admin': ['grant', 'disaster_recovery'],
+    'tpa_claims': ['property_tax'],
+    'property_tax': ['tpa_claims'],
+    'construction': ['disaster_recovery'],
+    'workforce': ['program_admin', 'grant']
+  };
+
+  function agencyType(ag) {
+    if (!ag) return 'unknown';
+    if (/(?:school board|school district|isd|parish schools)/.test(ag)) return 'school_board';
+    if (/(?:city of|municipal|town of|village of|nola)/.test(ag)) return 'city';
+    if (/(?:sheriff)/.test(ag)) return 'sheriff';
+    if (/(?:parish|county)/.test(ag)) return 'parish_or_county';
+    if (/(?:state of|department of|gohsep|office of community|glo|ocd|dhhs|dot)/.test(ag)) return 'state_agency';
+    if (/(?:federal|u\.?s\.?\s|fema|hud|pbgc|doe|dod|dhs)/.test(ag)) return 'federal';
+    if (/(?:water board|sewerage|authority|board|commission|trust|insurance fund|guaranty)/.test(ag)) return 'authority_or_board';
+    return 'other';
+  }
+
+  function ppAgencyType(pp) {
+    var c = (pp.client || '').toLowerCase();
+    if (/school board|school district/.test(c)) return 'school_board';
+    if (/city of/.test(c)) return 'city';
+    if (/sheriff/.test(c)) return 'sheriff';
+    if (/parish|county/.test(c)) return 'parish_or_county';
+    if (/^state of|office of community|ocd|glo|gohsep|department of/.test(c)) return 'state_agency';
+    if (/bp|gulf coast|federal|presidential|feinberg|pbgc|hud|fema/.test(c)) return 'federal_or_national';
+    if (/water board|sewerage|authority|board|commission|program administrator/.test(c)) return 'authority_or_board';
+    return 'other';
+  }
+
+  var oppType = agencyType(agency);
+
+  function scaleScore(ppValue, rfpValue) {
+    if (!ppValue || !rfpValue) return 0.5;
+    var r = ppValue / rfpValue;
+    if (r <= 0) return 0.2;
+    var logR = Math.log10(r);
+    if (logR < -1.5) return 0.2;   // PP << RFP (<3%)
+    if (logR > 1.5) return 0.4;    // PP >> RFP (overqualified but capacity signal)
+    return Math.max(0.2, 1 - Math.abs(logR) * 0.4);
+  }
+
+  function recencyScore(pp) {
+    if (pp.outcome === 'active') return 1.0;
+    var end = (pp.period && pp.period.end) || null;
+    if (!end) return 0.5;
+    var yearsAgo = currentYear - end;
+    if (yearsAgo <= 2) return 1.0;
+    if (yearsAgo <= 5) return 0.8;
+    if (yearsAgo <= 10) return 0.6;
+    if (yearsAgo <= 15) return 0.4;
+    return 0.2;
+  }
+
+  function ppBestValue(pp) {
+    if (!pp.value) return null;
+    if (pp.value.hgi_direct) return pp.value.hgi_direct;
+    if (pp.value.hgi_direct_annualized) return pp.value.hgi_direct_annualized;
+    if (pp.value.hgi_direct_monthly) return pp.value.hgi_direct_monthly * 12;
+    if (pp.value.program_total) return pp.value.program_total;
+    return null;
+  }
+
+  function scorePP(pp) {
+    var ppVert = (pp.vertical || '').toLowerCase();
+    var vert = 0.0;
+    if (vertical && ppVert === vertical) vert = 1.0;
+    else if (vertical && (adjacency[vertical] || []).indexOf(ppVert) >= 0) vert = 0.5;
+    else if (!vertical) vert = 0.5;
+    else vert = 0.0;
+
+    var ppType = ppAgencyType(pp);
+    var ag = 0.2;
+    if (ppType === oppType && ppType !== 'unknown' && ppType !== 'other') ag = 1.0;
+    else if (
+      (ppType === 'state_agency' && oppType === 'state_agency') ||
+      (ppType === 'parish_or_county' && oppType === 'parish_or_county') ||
+      (ppType === 'city' && oppType === 'city') ||
+      (ppType === 'authority_or_board' && oppType === 'authority_or_board') ||
+      (ppType === 'school_board' && oppType === 'school_board')
+    ) ag = 1.0;
+    else if (oppType === 'federal' && ppType === 'federal_or_national') ag = 0.8;
+    // Same-state bonus
+    var ppState = (pp.geography && pp.geography.state) || '';
+    if (state && ppState && ppState === state) ag = Math.min(1.0, ag + 0.25);
+
+    var ppValue = ppBestValue(pp);
+    var scale = scaleScore(ppValue, estValue);
+    var rec = recencyScore(pp);
+
+    var total = (vert * 0.40) + (ag * 0.25) + (scale * 0.20) + (rec * 0.15);
+    return {
+      pp_id: pp.id,
+      vertical: Number(vert.toFixed(3)),
+      agency: Number(ag.toFixed(3)),
+      scale: Number(scale.toFixed(3)),
+      recency: Number(rec.toFixed(3)),
+      total: Number(total.toFixed(3)),
+      _pp_agency_type: ppType,
+      _pp_value: ppValue
+    };
+  }
+
+  var scored = HGI_PP.map(function(pp) { return { pp: pp, score: scorePP(pp) }; });
+  scored.sort(function(a, b) {
+    if (Math.abs(a.score.total - b.score.total) < 0.001) return b.score.recency - a.score.recency;
+    return b.score.total - a.score.total;
+  });
+
+  var top3 = scored.slice(0, 3);
+  return {
+    selected: top3.map(function(x) { return x.pp; }),
+    breakdown: scored.map(function(x, i) {
+      return { rank: i + 1, pp_id: x.pp.id, client: x.pp.client, contract_name: x.pp.contract_name, score: x.score };
+    }),
+    opp_context: {
+      vertical: vertical, agency: agency, state: state,
+      estimated_value_raw: estValueRaw, estimated_value_parsed: estValue,
+      opp_agency_type: oppType
+    }
+  };
+}
 
 
 // ============================================================
@@ -7098,19 +7449,21 @@ async function kbQuery(vertical, oppText) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// extractRFPRequirements — S115 D+E shared infrastructure
+// extractRFPRequirements — S115 D+E shared infrastructure (S116 cap lift)
 // Parses an RFP/RFQ/SOQ into a structured JSON requirements list. Output feeds:
 //   - D.gap-detector (S119): flags requirements without mapped proposal paragraphs
 //   - E.compliance-audit (S125): every-requirement compliance matrix
 //   - F.coverage-matrix (S127): visual evaluator-criteria coverage graphic
 // Called from orchestrateOpp scope step. Also exposed via /api/extract-rfp-reqs
-// for targeted re-runs. Respects the orchestrator's 40K char rfp_text truncation;
-// if that cap causes miss-rate issues on dense RFPs, chunked extraction is a
-// follow-up session concern (flagged as Doc 2 §3.1 Rule 1 in the build plan).
+// for targeted re-runs. S116: cap raised to 180K chars (from S115's 40K) —
+// Sonnet 4.6 native 200K window allows full-document extraction on dense RFPs.
 // ═════════════════════════════════════════════════════════════════════════════
 async function extractRFPRequirements(rfpText, opp) {
   if (!rfpText || rfpText.length < 500) return null;
-  var truncated = rfpText.slice(0, 40000);
+  // S116 Item 0: cap raised 40K → 180K. Sonnet 4.6 handles 200K context natively;
+  // 180K leaves ~20K headroom for system prompt + JSON output. Enables full-document
+  // extraction on dense RFPs (OPSB 187K, WashParish 144K were truncation-bound in S115).
+  var truncated = rfpText.slice(0, 180000);
   var oppTitle = ((opp && opp.title) || '').slice(0, 120);
   var oppAgency = ((opp && opp.agency) || '').slice(0, 80);
 
@@ -7148,7 +7501,7 @@ async function extractRFPRequirements(rfpText, opp) {
   var resp;
   try {
     resp = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6', max_tokens: 8000,
+      model: 'claude-sonnet-4-6', max_tokens: 12000,
       messages: [{ role: 'user', content: prompt }]
     });
     trackCost('orchestrator_rfp_requirements', 'claude-sonnet-4-6', resp.usage);
