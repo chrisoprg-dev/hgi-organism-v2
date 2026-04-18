@@ -1236,7 +1236,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
           await storeMemory('pp_selector', opp.id, (opp.agency||'')+',pp_selection,s116',
             'PP SELECTION for RFP "' + (opp.title||'').slice(0,120) + '". Top 3: ' +
             _topPPs.map(function(p){ return p.id; }).join(', ') +
-            '\nOpp context: vertical=' + vertical + ', agency_type=' + (_ppResult.opp_context && _ppResult.opp_context.opp_agency_type) +
+            '\nOpp context: vertical=' + ((_ppResult.opp_context && _ppResult.opp_context.vertical_raw && _ppResult.opp_context.vertical_normalized && _ppResult.opp_context.vertical_raw !== _ppResult.opp_context.vertical_normalized) ? (_ppResult.opp_context.vertical_raw + '→' + _ppResult.opp_context.vertical_normalized) : vertical) + ', agency_type=' + (_ppResult.opp_context && _ppResult.opp_context.opp_agency_type) +
             ', state=' + oppState + ', est_value=' + (_ppResult.opp_context && _ppResult.opp_context.estimated_value_parsed) +
             '\nFull breakdown: ' + JSON.stringify(_ppResult.breakdown),
             'pp_selection', null, 'high');
@@ -4462,6 +4462,109 @@ if (url === '/api/extract-rfp-reqs' && req.method === 'POST') {
     }));
   } catch(e) {
     log('EXTRACT-RFP-REQS ERROR: ' + e.message);
+    res.writeHead(500, {'Content-Type':'application/json'});
+    res.end(JSON.stringify({error: e.message}));
+  }
+  return;
+}
+
+// === BACKFILL FACT-CHECK — /api/backfill-fact-check (S118) ===
+// Runs the S107 Haiku fact-checker retroactively over scope_analyses that predate
+// the live fact-checker. Does NOT modify scope_analysis content. Stores verdicts to
+// organism_memory with agent='orchestrator_fact_check_backfill' to distinguish from
+// live-run findings. Body options: {limit: 1-50 (default 30), opp_id: optional filter}.
+if (url === '/api/backfill-fact-check' && req.method === 'POST') {
+  var bfBody = '';
+  for await (const chunk of req) bfBody += chunk;
+  var bfOpts = {};
+  try { bfOpts = JSON.parse(bfBody || '{}'); } catch(e) {}
+  var bfLimit = Math.max(1, Math.min(50, parseInt(bfOpts.limit || 30, 10)));
+  var bfOppFilter = bfOpts.opp_id || null;
+  try {
+    var bfQuery = supabase.from('opportunities')
+      .select('id,title,rfp_text,scope_analysis')
+      .not('scope_analysis', 'is', null)
+      .not('rfp_text', 'is', null);
+    if (bfOppFilter) bfQuery = bfQuery.eq('id', bfOppFilter);
+    var bfAll = await bfQuery;
+    var bfCandidates = (bfAll.data || []).filter(function(o) {
+      return (o.scope_analysis||'').length > 500 && (o.rfp_text||'').length > 500;
+    });
+    var bfSeen = await supabase.from('organism_memory')
+      .select('opportunity_id')
+      .in('agent', ['orchestrator_fact_check','orchestrator_fact_check_backfill']);
+    var bfSeenSet = {};
+    (bfSeen.data || []).forEach(function(r) { if (r.opportunity_id) bfSeenSet[r.opportunity_id] = true; });
+    var bfToRun = bfCandidates.filter(function(o) { return !bfSeenSet[o.id]; }).slice(0, bfLimit);
+    log('BACKFILL FACT-CHECK: ' + bfToRun.length + ' opps to check (of ' + bfCandidates.length + ' total w/scope; ' + Object.keys(bfSeenSet).length + ' already checked)');
+    var bfResults = [];
+    for (var bfi = 0; bfi < bfToRun.length; bfi++) {
+      var bfOpp = bfToRun[bfi];
+      try {
+        var bfPrompt = 'You are a fact-checker. I will give you (1) an RFP TEXT, and (2) a SCOPE ANALYSIS written about that RFP.\n\n' +
+          'Your job: find any CONCRETE CLAIMS in the SCOPE ANALYSIS that are NOT supported by the RFP TEXT.\n\n' +
+          'Look especially for invented framing like:\n' +
+          '- Funding source claims ("FEMA PA", "CDBG-DR", "HMGP", "federal funding") not in the RFP\n' +
+          '- Historical context ("post-Katrina", "post-COVID", "following Hurricane X") not in the RFP\n' +
+          '- Agency program names or priorities not in the RFP\n' +
+          '- Specific dollar amounts, dates, or quantities not in the RFP\n' +
+          '- Named people or positions not in the RFP\n\n' +
+          'Exclude from flagging: genuinely generic analysis ("HGI has experience with X"), competitive positioning ("vendor Y is likely to bid"), or forward-looking recommendations. These are OPINIONS, not claims about the RFP.\n\n' +
+          'Return JSON only: {"hallucinated_claims":[{"claim":"exact phrase from scope","why_invented":"brief reason"}],"verdict":"CLEAN|FLAGGED|CONTAMINATED"}\n' +
+          '- CLEAN: zero claims invented\n' +
+          '- FLAGGED: 1-2 minor claims invented (can be fixed with annotation)\n' +
+          '- CONTAMINATED: 3+ claims invented OR any claim that reframes the opportunity (like inventing a funding source). Scope should be regenerated.\n\n' +
+          'RFP TEXT:\n' + (bfOpp.rfp_text || '').slice(0, 30000) + '\n\n' +
+          'SCOPE ANALYSIS:\n' + bfOpp.scope_analysis;
+        var bfResp = await anthropic.messages.create({
+          model: 'claude-haiku-4-5-20251001', max_tokens: 1500,
+          messages: [{ role: 'user', content: bfPrompt }]
+        });
+        trackCost('orchestrator_fact_check_backfill', 'claude-haiku-4-5-20251001', bfResp.usage);
+        var bfText = (bfResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('').replace(/```json|```/g, '').trim();
+        var bfFc;
+        try { bfFc = JSON.parse(bfText); }
+        catch(pe) { var jm = bfText.match(/\{[\s\S]*\}/); if (jm) { try { bfFc = JSON.parse(jm[0]); } catch(pe2){} } }
+        var bfVerdict = (bfFc && bfFc.verdict) || 'PARSE_ERROR';
+        var bfClaims = (bfFc && bfFc.hallucinated_claims) || [];
+        var bfClaimsList = bfClaims.map(function(c){ return '- "' + (c.claim||'').slice(0,120) + '" (' + (c.why_invented||'').slice(0,80) + ')'; }).join('\n');
+        try {
+          await storeMemory('orchestrator_fact_check_backfill', bfOpp.id, 'backfill,fact_check,s118',
+            'BACKFILL FACT-CHECK: ' + bfVerdict + ' for ' + (bfOpp.title||'').slice(0,60) + '\n' +
+            'Scope analysis: ' + (bfOpp.scope_analysis||'').length + ' chars. RFP text: ' + (bfOpp.rfp_text||'').length + ' chars.\n' +
+            bfClaims.length + ' claims flagged' + (bfClaims.length > 0 ? ':\n' + bfClaimsList : '.') +
+            '\n\nNOTE: This is retroactive checking. Scope content in opportunities.scope_analysis was NOT modified.',
+            'analysis', null, bfVerdict === 'CLEAN' ? 'medium' : 'high');
+        } catch(sme) {}
+        bfResults.push({
+          opp_id: bfOpp.id,
+          title: (bfOpp.title||'').slice(0,60),
+          verdict: bfVerdict,
+          claims_flagged: bfClaims.length
+        });
+        log('BACKFILL FACT-CHECK [' + (bfi+1) + '/' + bfToRun.length + ']: ' + bfVerdict + ' for ' + bfOpp.id);
+      } catch(bfe) {
+        log('BACKFILL FACT-CHECK ERROR for ' + bfOpp.id + ': ' + (bfe.message||'').slice(0,120));
+        bfResults.push({ opp_id: bfOpp.id, title: (bfOpp.title||'').slice(0,60), verdict: 'ERROR', error: (bfe.message||'').slice(0,150) });
+      }
+    }
+    var bfSummary = {
+      clean: bfResults.filter(function(r){return r.verdict==='CLEAN';}).length,
+      flagged: bfResults.filter(function(r){return r.verdict==='FLAGGED';}).length,
+      contaminated: bfResults.filter(function(r){return r.verdict==='CONTAMINATED';}).length,
+      errors: bfResults.filter(function(r){return r.verdict==='ERROR' || r.verdict==='PARSE_ERROR';}).length
+    };
+    res.writeHead(200, {'Content-Type':'application/json'});
+    res.end(JSON.stringify({
+      ok: true,
+      checked: bfResults.length,
+      total_candidates: bfCandidates.length,
+      already_checked: Object.keys(bfSeenSet).length,
+      summary: bfSummary,
+      results: bfResults
+    }));
+  } catch(e) {
+    log('BACKFILL FACT-CHECK TOP ERROR: ' + e.message);
     res.writeHead(500, {'Content-Type':'application/json'});
     res.end(JSON.stringify({error: e.message}));
   }
