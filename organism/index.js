@@ -764,6 +764,53 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
   if (!ppId) { var qId = (req.url.split('?id=')[1]||'').split('&')[0]; ppId = qId; }
   if (!ppId) { res.writeHead(400); res.end(JSON.stringify({error:'id required'})); return; }
 
+  // === S119 Item 3: Contamination guardrail ===
+  // Block proposal generation on CONTAMINATED scope unless explicitly forced.
+  // Queries latest fact-check entry from organism_memory (orchestrator_fact_check
+  // or orchestrator_fact_check_backfill) for this opportunity.
+  // CONTAMINATED + !force => 409; FLAGGED => warn + proceed; CLEAN => proceed; NONE => warn + proceed.
+  var ppForce = false;
+  try { ppForce = !!JSON.parse(body || '{}').force; } catch(e) {}
+  try {
+    var fcCheckR = await supabase.from('organism_memory')
+      .select('id,observation,created_at')
+      .eq('opportunity_id', ppId)
+      .in('agent', ['orchestrator_fact_check','orchestrator_fact_check_backfill'])
+      .order('created_at', { ascending: false })
+      .limit(1);
+    var latestFC = (fcCheckR.data || [])[0];
+    if (latestFC) {
+      var fcObs = latestFC.observation || '';
+      var fcVerdictMatch = fcObs.match(/FACT-CHECK VERDICT:\s*(CLEAN|FLAGGED|CONTAMINATED)/i);
+      var fcVerdict = fcVerdictMatch ? fcVerdictMatch[1].toUpperCase() : 'UNKNOWN';
+      if (fcVerdict === 'CONTAMINATED' && !ppForce) {
+        log('PROPOSAL ENGINE: REFUSED — scope CONTAMINATED for ' + ppId + ' (memory entry ' + latestFC.id + '). Override with {force:true} or regenerate scope via /api/orchestrate.');
+        res.writeHead(409, {'Content-Type':'application/json'});
+        res.end(JSON.stringify({
+          error: 'scope_analysis is CONTAMINATED per latest fact-check. Regenerate scope via /api/orchestrate before producing proposal, or pass {force:true} to override.',
+          fact_check_entry_id: latestFC.id,
+          fact_check_observed_at: latestFC.created_at,
+          verdict: 'CONTAMINATED',
+          override_with: { id: ppId, force: true }
+        }));
+        return;
+      }
+      if (fcVerdict === 'FLAGGED') {
+        log('PROPOSAL ENGINE: WARN — scope FLAGGED for ' + ppId + ' (memory entry ' + latestFC.id + '). Proceeding with proposal generation.');
+      } else if (fcVerdict === 'CLEAN') {
+        log('PROPOSAL ENGINE: scope CLEAN for ' + ppId + '. Proceeding.');
+      } else if (fcVerdict === 'CONTAMINATED' && ppForce) {
+        log('PROPOSAL ENGINE: WARN — scope CONTAMINATED for ' + ppId + ' but {force:true} provided. Proceeding under explicit override.');
+      } else {
+        log('PROPOSAL ENGINE: fact-check verdict UNKNOWN for ' + ppId + ' (memory entry ' + latestFC.id + ' did not contain parseable verdict). Proceeding.');
+      }
+    } else {
+      log('PROPOSAL ENGINE: WARN — no fact-check entry found for ' + ppId + ' (freshly orchestrated, predates backfill, or no scope_analysis). Proceeding with caution.');
+    }
+  } catch(fcErr) {
+    log('PROPOSAL ENGINE: fact-check guardrail query failed for ' + ppId + ' (' + (fcErr.message||fcErr) + '). Proceeding without block.');
+  }
+
   log('PROPOSAL ENGINE: Starting for ' + ppId);
   res.writeHead(200, {'Content-Type':'application/json'});
   res.end(JSON.stringify({started:true, id:ppId}));
@@ -7821,7 +7868,7 @@ async function orchestrateOpp(opp) {
   try {
     var scopeCall = await callWithContinuation({
       model: 'claude-sonnet-4-6', max_tokens: 8000,
-      system: 'Senior government contracting scope analyst. ' + classGuide + ' Geography: LA TX FL MS AL GA. Be exhaustive ABOUT WHAT THE RFP ACTUALLY SAYS. Do not infer or embellish. Cite specific RFP sections. If the RFP does not mention a funding source, program history, or scope element, do not claim it does.',
+      system: 'Senior government contracting scope analyst. ' + classGuide + ' Geography: LA TX FL MS AL GA. Be exhaustive ABOUT WHAT THE RFP ACTUALLY SAYS. Do not infer or embellish. Cite specific RFP sections. If the RFP does not mention a funding source, program history, or scope element, do not claim it does. OUTPUT FORMAT (S119): Do NOT add classification headers, analyst-role attributions, document banners, "Principal Eyes Only" / "Eyes Only" / "Principals Only" / "Capture-Sensitive" markings, date/version stamps, session numbers, "Prepared for" labels, or any boilerplate metadata to your output. The orchestrator handles all framing. Return only the requested analysis content. This also applies to trailing sign-offs, attribution lines, or footer text.',
       messages: [{ role: 'user', content: 'Deep scope analysis for HGI go/no-go.\n\nGROUND RULE: Every factual claim in your output must be directly supported by the RFP TEXT below. Do NOT infer program funding sources (e.g., FEMA, CDBG, CDBG-DR), historical context (e.g., post-Katrina, post-COVID), or agency priorities from your general knowledge or from the organism intelligence unless the RFP text explicitly confirms them. If the RFP does not mention FEMA, do not frame the opportunity as a FEMA play. If the RFP does not mention CDBG, do not frame it as a CDBG play. The organism intelligence below is for COMPETITIVE positioning (who else is bidding, what rates they charge, who the incumbent is) — NOT for inferring scope or funding. If you are uncertain whether something is in the RFP, say so explicitly.\n\nOPPORTUNITY: ' + opp.title + '\nAGENCY: ' + (opp.agency || '') + '\nSTATE: ' + (opp.state || 'LA') + '\nVERTICAL: ' + (opp.vertical || 'general') + '\nRFP TEXT:\n' + rfpContent + '\n' + kbContext.slice(0, 2000) + '\n\nORGANISM INTELLIGENCE (competitors, contacts, disasters, budgets, regulations, patterns — FOR COMPETITIVE POSITIONING ONLY):\n' + orchSlice + '\n\nProvide:\n1. SUB-VERTICAL CLASSIFICATION — exact type of work, is this HGI core? (Base this ONLY on what the RFP describes, not on HGI past performance patterns.)\n2. SCOPE SUMMARY — what is being asked, plain English, 3-5 sentences. Stick to the RFP.\n3. DETAILED DELIVERABLES — every task and work product from the RFP. If you cite a task, it must be in the RFP text above.\n4. EVALUATION CRITERIA — exact criteria and point values from RFP. Quote or paraphrase from the RFP.\n5. HGI CAPABILITY ALIGNMENT — map each deliverable to HGI past performance, flag gaps. Use the competitor intelligence above to identify where HGI is stronger or weaker than likely bidders.\n6. COMPLIANCE REQUIREMENTS — licenses, certs, insurance, bonding AS SPECIFIED IN THE RFP. Do not add requirements from your general knowledge unless the RFP triggers them.\n7. CRITICAL QUESTIONS — what must HGI clarify before committing\n8. COMPETITIVE POSITIONING — based on the competitor data above, who is the primary threat and why? What is HGI\'s key differentiator?\n9. SOURCE CHECK — briefly note any claim you made that you are NOT 100% certain is in the RFP text above, so Christopher can verify.' }]
     }, 'orchestrator_scope', 2);
     var scopeText = scopeCall.text;
