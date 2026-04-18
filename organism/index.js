@@ -781,7 +781,8 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
     var latestFC = (fcCheckR.data || [])[0];
     if (latestFC) {
       var fcObs = latestFC.observation || '';
-      var fcVerdictMatch = fcObs.match(/FACT-CHECK VERDICT:\s*(CLEAN|FLAGGED|CONTAMINATED)/i);
+      // Match both formats: live ('FACT-CHECK VERDICT: <V>') and backfill ('BACKFILL FACT-CHECK: <V>')
+      var fcVerdictMatch = fcObs.match(/(?:^|\n)\s*(?:BACKFILL\s+)?FACT-CHECK(?:\s+VERDICT)?:\s*(CLEAN|FLAGGED|CONTAMINATED)/i);
       var fcVerdict = fcVerdictMatch ? fcVerdictMatch[1].toUpperCase() : 'UNKNOWN';
       if (fcVerdict === 'CONTAMINATED' && !ppForce) {
         log('PROPOSAL ENGINE: REFUSED — scope CONTAMINATED for ' + ppId + ' (memory entry ' + latestFC.id + '). Override with {force:true} or regenerate scope via /api/orchestrate.');
