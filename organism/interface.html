@@ -1124,12 +1124,14 @@ function OpportunityDetail(p){
   var stDM4=useState(null),detToast=stDM4[0],setDetToast=stDM4[1];
   var stD1=useState([]),discriminators=stD1[0],setDiscriminators=stD1[1];
   var stD2=useState(false),discGenerating=stD2[0],setDiscGenerating=stD2[1];
+  var stR1=useState(null),refinementHistory=stR1[0],setRefinementHistory=stR1[1];
   function detShowToast(m){setDetToast(m);setTimeout(function(){setDetToast(null)},5000)}
 
   useEffect(function(){
     fetch('/api/opportunity-detail?id='+encodeURIComponent(opp.id)).then(function(r){return r.json()}).then(setFullOpp).catch(function(){});
     fetch('/api/opportunity-memories?id='+encodeURIComponent(opp.id)).then(function(r){return r.json()}).then(function(d){setMemories(Array.isArray(d)?d:d.memories||[])}).catch(function(){});
     fetch('/api/discriminators?id='+encodeURIComponent(opp.id)).then(function(r){return r.json()}).then(function(d){setDiscriminators((d&&d.discriminators)||[])}).catch(function(){});
+    fetch('/api/refinement-history?id='+encodeURIComponent(opp.id)).then(function(r){return r.json()}).then(setRefinementHistory).catch(function(){});
   },[opp.id]);
 
   function generateDiscriminators(){
@@ -1155,6 +1157,24 @@ function OpportunityDetail(p){
     }).join('\n\n');
   }
 
+  var refStepData = null;
+  var refStepDone = false;
+  if (refinementHistory) {
+    var iters = refinementHistory.iterations || [];
+    if (iters.length > 0) {
+      refStepDone = true;
+      refStepData = 'Refinement trajectory ('+iters.length+' iteration'+(iters.length>1?'s':'')+'):\n\n'+
+        iters.map(function(it){
+          return 'Iteration '+it.iteration+': PWIN '+it.pwin_before+'% → '+it.pwin_after+'% ('+
+            (it.delta>=0?'+':'')+it.delta+')';
+        }).join('\n')+
+        (refinementHistory.summary?'\n\n'+refinementHistory.summary.text:'');
+    } else if (refinementHistory.summary && refinementHistory.summary.skipped) {
+      refStepDone = true;
+      refStepData = refinementHistory.summary.text;
+    }
+  }
+
   var steps=[
     {name:'INTAKE',done:true,data:o.source_url||o.created_at||'Discovered'},
     {name:'SCOPE ANALYSIS',done:!!(o.scope_analysis||o.has_scope),data:o.scope_analysis},
@@ -1163,13 +1183,14 @@ function OpportunityDetail(p){
     {name:'DISCRIMINATORS',done:discriminators&&discriminators.length>0,data:discStepData,action:{label:discGenerating?'Generating...':'Generate',fn:generateDiscriminators,disabled:discGenerating}},
     {name:'WINNABILITY',done:!!(o.capture_action||o.winnability_score),data:o.capture_action},
     {name:'PROPOSAL',done:!!(o.proposal_content||o.has_proposal),data:o.proposal_content},
+    {name:'REFINEMENT',done:refStepDone,data:refStepData},
     {name:'RED TEAM',done:false,data:null}
   ];
 
   // Check red team from memories
   if(memories){
     var rtMems=memories.filter(function(m){return (m.agent_name||m.agent)==='red_team_agent'||(m.agent_name||m.agent)==='agentRedTeam'});
-    if(rtMems.length>0){steps[7].done=true;steps[7].data=rtMems.map(function(m){return m.observation}).join('\n\n');}
+    if(rtMems.length>0){steps[8].done=true;steps[8].data=rtMems.map(function(m){return m.observation}).join('\n\n');}
   }
 
   var subTabs=['overview','intel','proposal','activity'];
