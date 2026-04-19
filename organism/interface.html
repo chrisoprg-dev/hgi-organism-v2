@@ -1122,21 +1122,45 @@ function OpportunityDetail(p){
   var stDM2=useState({winner:'',theirPrice:'',ourPrice:'',notes:''}),detLossFields=stDM2[0],setDetLossFields=stDM2[1];
   var stDM3=useState(null),detStageModal=stDM3[0],setDetStageModal=stDM3[1];
   var stDM4=useState(null),detToast=stDM4[0],setDetToast=stDM4[1];
+  var stD1=useState([]),discriminators=stD1[0],setDiscriminators=stD1[1];
+  var stD2=useState(false),discGenerating=stD2[0],setDiscGenerating=stD2[1];
   function detShowToast(m){setDetToast(m);setTimeout(function(){setDetToast(null)},5000)}
 
   useEffect(function(){
     fetch('/api/opportunity-detail?id='+encodeURIComponent(opp.id)).then(function(r){return r.json()}).then(setFullOpp).catch(function(){});
     fetch('/api/opportunity-memories?id='+encodeURIComponent(opp.id)).then(function(r){return r.json()}).then(function(d){setMemories(Array.isArray(d)?d:d.memories||[])}).catch(function(){});
+    fetch('/api/discriminators?id='+encodeURIComponent(opp.id)).then(function(r){return r.json()}).then(function(d){setDiscriminators((d&&d.discriminators)||[])}).catch(function(){});
   },[opp.id]);
+
+  function generateDiscriminators(){
+    setDiscGenerating(true);
+    fetch('/api/discriminators-generate?id='+encodeURIComponent(opp.id),{method:'POST'}).then(function(r){return r.json()}).then(function(d){
+      setDiscGenerating(false);
+      fetch('/api/discriminators?id='+encodeURIComponent(opp.id)).then(function(r){return r.json()}).then(function(dd){setDiscriminators((dd&&dd.discriminators)||[])});
+      detShowToast('Generated '+((d&&d.result&&d.result.written)||0)+' discriminators');
+    }).catch(function(){setDiscGenerating(false);detShowToast('Discriminator generation failed')});
+  }
 
   var o=fullOpp||opp;
   var sc=o.opi_score||0;
+
+  var discStepData = null;
+  if (discriminators && discriminators.length > 0) {
+    discStepData = discriminators.map(function(d){
+      return d.discriminator_num+'. '+d.title+'\n'+
+        '   Claim: '+d.claim+'\n'+
+        '   Evidence: '+d.evidence_anchor_type+(d.evidence_anchor_id?' ('+d.evidence_anchor_id+')':'')+
+        (d.evidence_quote?'\n   Quote: "'+d.evidence_quote+'"':'')+
+        (d.competitor_gap?'\n   Gap: '+d.competitor_gap:'');
+    }).join('\n\n');
+  }
 
   var steps=[
     {name:'INTAKE',done:true,data:o.source_url||o.created_at||'Discovered'},
     {name:'SCOPE ANALYSIS',done:!!(o.scope_analysis||o.has_scope),data:o.scope_analysis},
     {name:'FINANCIAL ANALYSIS',done:!!(o.financial_analysis||o.has_financial),data:o.financial_analysis},
     {name:'COMPETITIVE RESEARCH',done:!!(o.research_brief||o.has_intel),data:o.research_brief},
+    {name:'DISCRIMINATORS',done:discriminators&&discriminators.length>0,data:discStepData,action:{label:discGenerating?'Generating...':'Generate',fn:generateDiscriminators,disabled:discGenerating}},
     {name:'WINNABILITY',done:!!(o.capture_action||o.winnability_score),data:o.capture_action},
     {name:'PROPOSAL',done:!!(o.proposal_content||o.has_proposal),data:o.proposal_content},
     {name:'RED TEAM',done:false,data:null}
@@ -1145,7 +1169,7 @@ function OpportunityDetail(p){
   // Check red team from memories
   if(memories){
     var rtMems=memories.filter(function(m){return (m.agent_name||m.agent)==='red_team_agent'||(m.agent_name||m.agent)==='agentRedTeam'});
-    if(rtMems.length>0){steps[6].done=true;steps[6].data=rtMems.map(function(m){return m.observation}).join('\n\n');}
+    if(rtMems.length>0){steps[7].done=true;steps[7].data=rtMems.map(function(m){return m.observation}).join('\n\n');}
   }
 
   var subTabs=['overview','intel','proposal','activity'];
@@ -1185,6 +1209,7 @@ function OpportunityDetail(p){
             e('span',{style:{color:clr,fontWeight:'bold',width:20,textAlign:'center'}},icon),
             e('span',{style:{flex:1,fontSize:13,color:step.done?TEXT:TEXT_D}},step.name),
             charCount>0?e('span',{style:{fontSize:10,color:TEXT_D}},Math.round(charCount/1000)+'K chars'):null,
+            step.action?e('span',{onClick:function(ev){ev.stopPropagation();if(!step.action.disabled)step.action.fn()},style:{fontSize:10,color:step.action.disabled?TEXT_D:GOLD,cursor:step.action.disabled?'default':'pointer',border:'1px solid '+(step.action.disabled?BORDER:GOLD),padding:'2px 8px',borderRadius:3,marginRight:4}},step.action.label):null,
             step.data?e('span',{style:{color:CYAN,fontSize:10}},expandedStep===i?'▼':'▶'):null
           ),
           expandedStep===i&&step.data?e('div',{style:{padding:'8px 32px',fontSize:12,whiteSpace:'pre-wrap',color:TEXT_D,maxHeight:300,overflowY:'auto',background:BG3,borderRadius:4,margin:'4px 0'}},
