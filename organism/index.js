@@ -6425,6 +6425,16 @@ async function runIterationToPlateau(opp, initialProposal, initialReview, initia
     var refinedText = refResult.refinedText;
     log(log_prefix + ' iter ' + iter + ' refined to ' + refinedText.length + ' chars (was ' + currentProposal.length + ')');
 
+    // Durability: persist refined proposal IMMEDIATELY (before red team can fail/crash)
+    try {
+      await supabase.from('opportunities').update({
+        proposal_content: refinedText,
+        last_updated: new Date().toISOString()
+      }).eq('id', oppId);
+    } catch (pe) {
+      log(log_prefix + ' iter ' + iter + ' proposal_content save error: ' + (pe.message||'').slice(0,150));
+    }
+
     // Step B: Re-run red team on refined version
     var rtResult;
     try {
@@ -6438,9 +6448,8 @@ async function runIterationToPlateau(opp, initialProposal, initialReview, initia
     var delta = newPWIN - currentPWIN;
     log(log_prefix + ' iter ' + iter + ' new PWIN=' + newPWIN + ' (delta=' + delta + ')');
 
-    // Step C: Persist refined proposal + new review
+    // Step C: Persist new review (proposal_content already saved above)
     await supabase.from('opportunities').update({
-      proposal_content: refinedText,
       proposal_review: rtResult.reviewStorage,
       last_updated: new Date().toISOString()
     }).eq('id', oppId);
