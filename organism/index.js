@@ -6084,15 +6084,17 @@ async function agentDiscriminatorSynthesizer(opp, opts) {
   }
 
   // 8. Log to organism_memory
-  await supabase.from('organism_memory').insert({
-    id: 'mem_disc_' + opp.id + '_' + Date.now(),
-    agent: 'discriminator_synthesizer',
-    opportunity_id: opp.id,
-    observation: 'DISCRIMINATORS GENERATED: ' + written + ' discriminators for ' + (opp.title||'?').slice(0,80) +
-      ' (' + compRows.length + ' comp_intel + ' + factRows.length + ' fact_check + ' + memRows.length + ' mem inputs)',
-    memory_type: 'analysis',
-    created_at: new Date().toISOString()
-  }).catch(function(){});
+  try {
+    await supabase.from('organism_memory').insert({
+      id: 'mem_disc_' + opp.id + '_' + Date.now(),
+      agent: 'discriminator_synthesizer',
+      opportunity_id: opp.id,
+      observation: 'DISCRIMINATORS GENERATED: ' + written + ' discriminators for ' + (opp.title||'?').slice(0,80) +
+        ' (' + compRows.length + ' comp_intel + ' + factRows.length + ' fact_check + ' + memRows.length + ' mem inputs)',
+      memory_type: 'analysis',
+      created_at: new Date().toISOString()
+    });
+  } catch(_me) { /* non-fatal */ }
 
   log(log_prefix + ' wrote ' + written + ' discriminators');
   return { written: written, input_counts: { comp_intel: compRows.length, fact_check: factRows.length, memory: memRows.length, hgi_pp_top: (pp.top3||[]).length } };
