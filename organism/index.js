@@ -1751,6 +1751,49 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         log('KB ENRICHMENT ERROR: ' + kbErr.message);
       }
 
+      // === L7 ITERATION-TO-PLATEAU REFINEMENT (S121) ===
+      // After initial proposal + red team + KB enrichment, loop refine + re-red-team
+      // until PWIN delta < 2 between consecutive passes OR max 3 iterations.
+      // Each iteration replaces proposal_content + proposal_review in place.
+      // Kill-switch: skip if initial PWIN already >= 90 (already excellent).
+      try {
+        // Re-read review to get initial PWIN (survives scope cleanly)
+        var l7InitOpp = await supabase.from('opportunities').select('proposal_content,proposal_review').eq('id', ppId).single();
+        var l7Proposal = (l7InitOpp.data && l7InitOpp.data.proposal_content) || '';
+        var l7Review = (l7InitOpp.data && l7InitOpp.data.proposal_review) || '';
+        var l7InitPWIN = 0;
+        try {
+          var fb = l7Review.indexOf('{'), lb = l7Review.lastIndexOf('}');
+          if (fb >= 0 && lb > fb) {
+            var pj = JSON.parse(l7Review.slice(fb, lb + 1));
+            l7InitPWIN = pj.pwin_estimate || 0;
+          }
+        } catch (pe) {
+          var m = l7Review.match(/PWIN\s+(\d{1,3})%/);
+          if (m) l7InitPWIN = parseInt(m[1], 10) || 0;
+        }
+
+        if (l7Proposal.length < 500 || l7Review.length < 100) {
+          log('L7 SKIP: proposal ' + l7Proposal.length + ' chars, review ' + l7Review.length + ' chars (need 500/100)');
+        } else if (l7InitPWIN >= 90) {
+          log('L7 SKIP: initial PWIN already ' + l7InitPWIN + '% (>=90 threshold, no refinement needed)');
+          await supabase.from('organism_memory').insert({
+            id: 'mem_l7_skip_' + ppId + '_' + Date.now(),
+            agent: 'refinement_loop',
+            opportunity_id: ppId,
+            observation: 'L7 SKIPPED: initial PWIN ' + l7InitPWIN + '% already at/above 90% threshold — no refinement iterations needed.',
+            memory_type: 'analysis',
+            created_at: new Date().toISOString()
+          });
+        } else {
+          log('L7 STARTING: initial PWIN=' + l7InitPWIN + '%, launching iteration loop');
+          var l7Result = await runIterationToPlateau(opp, l7Proposal, l7Review, l7InitPWIN, { maxIter: 3, plateauDelta: 2 });
+          log('L7 DONE: ' + l7Result.iterations + ' iterations, PWIN ' + l7Result.initialPWIN + ' -> ' + l7Result.finalPWIN + ' (' + l7Result.stopReason + ')');
+        }
+      } catch (l7Err) {
+        log('L7 ERROR: ' + (l7Err.message||'').slice(0,300));
+      }
+
       log('PROPOSAL ENGINE: Complete for ' + (opp.title||'').slice(0,40));
 
     } catch(e) {
@@ -3394,6 +3437,108 @@ if (url.startsWith('/api/proposal-refine')) {
       }).catch(function() {});
     }
   });
+  return;
+}
+
+// === L7 MANUAL REFINEMENT TRIGGER — /api/refinement-loop?id= (POST) ===
+// Runs runIterationToPlateau on an existing opportunity's current proposal_content + proposal_review.
+// Useful for: (a) manually triggering additional iterations if PWIN hasn't plateaued, (b) testing L7 without re-running produce-proposal.
+if (url.startsWith('/api/refinement-loop') && req.method === 'POST') {
+  var rlId = (req.url.split('?id=')[1]||'').split('&')[0];
+  if (!rlId) { res.writeHead(400, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' }); res.end(JSON.stringify({error:'id required'})); return; }
+  try {
+    var rlOpp = await supabase.from('opportunities').select('*').eq('id', rlId).single();
+    if (!rlOpp.data) {
+      res.writeHead(404, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+      res.end(JSON.stringify({error:'opportunity not found', id: rlId}));
+      return;
+    }
+    var rlOppData = rlOpp.data;
+    var rlProposal = rlOppData.proposal_content || '';
+    var rlReview = rlOppData.proposal_review || '';
+    if (rlProposal.length < 500) {
+      res.writeHead(400, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+      res.end(JSON.stringify({error:'proposal_content too short', chars: rlProposal.length, note:'Run /api/produce-proposal first'}));
+      return;
+    }
+    if (rlReview.length < 100) {
+      res.writeHead(400, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+      res.end(JSON.stringify({error:'proposal_review missing', chars: rlReview.length, note:'Red team review required for refinement; run /api/produce-proposal first'}));
+      return;
+    }
+    // Parse initial PWIN
+    var rlInitPWIN = 0;
+    try {
+      var rlfb = rlReview.indexOf('{'), rllb = rlReview.lastIndexOf('}');
+      if (rlfb >= 0 && rllb > rlfb) {
+        var rlpj = JSON.parse(rlReview.slice(rlfb, rllb + 1));
+        rlInitPWIN = rlpj.pwin_estimate || 0;
+      }
+    } catch (rlpe) {
+      var rlm = rlReview.match(/PWIN\s+(\d{1,3})%/);
+      if (rlm) rlInitPWIN = parseInt(rlm[1], 10) || 0;
+    }
+    log('MANUAL REFINEMENT LOOP: starting for ' + rlId + ' with initial PWIN=' + rlInitPWIN);
+    res.writeHead(200, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+    res.end(JSON.stringify({ started: true, id: rlId, initial_pwin: rlInitPWIN, note: 'Refinement loop running async. Poll /api/refinement-history?id=' + rlId + ' for trajectory.' }));
+
+    setImmediate(async function() {
+      try {
+        var rlResult = await runIterationToPlateau(rlOppData, rlProposal, rlReview, rlInitPWIN, { maxIter: 3, plateauDelta: 2 });
+        log('MANUAL REFINEMENT LOOP complete: ' + rlResult.iterations + ' iters, PWIN ' + rlResult.initialPWIN + ' -> ' + rlResult.finalPWIN + ' (' + rlResult.stopReason + ')');
+      } catch (rlErr) {
+        log('MANUAL REFINEMENT LOOP error: ' + (rlErr.message||'').slice(0,300));
+      }
+    });
+  } catch (rle) {
+    res.writeHead(500, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+    res.end(JSON.stringify({ error: rle.message }));
+  }
+  return;
+}
+
+// === L7 REFINEMENT HISTORY — /api/refinement-history?id= (GET) ===
+if (url.startsWith('/api/refinement-history')) {
+  var rhId = (req.url.split('?id=')[1]||'').split('&')[0];
+  if (!rhId) { res.writeHead(400, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' }); res.end(JSON.stringify({error:'id required'})); return; }
+  try {
+    var rhRows = await supabase.from('organism_memory')
+      .select('id,agent,observation,memory_type,created_at')
+      .eq('opportunity_id', rhId)
+      .in('agent', ['refinement_loop','refinement_loop_summary'])
+      .order('created_at', { ascending: true });
+    var rows = rhRows.data || [];
+    var iterations = [];
+    var summary = null;
+    rows.forEach(function(r){
+      if (r.agent === 'refinement_loop_summary') {
+        summary = { text: r.observation, at: r.created_at };
+      } else if (r.memory_type === 'refinement_iteration') {
+        // parse "L7 ITERATION 1: PWIN 68 -> 74 (delta +6)..."
+        var obs = r.observation || '';
+        var im = obs.match(/L7 ITERATION (\d+): PWIN (\d+) -> (\d+) \(delta ([+\-]?\d+)\)/);
+        if (im) {
+          iterations.push({
+            iteration: parseInt(im[1],10),
+            pwin_before: parseInt(im[2],10),
+            pwin_after: parseInt(im[3],10),
+            delta: parseInt(im[4],10),
+            at: r.created_at,
+            observation: obs
+          });
+        } else {
+          iterations.push({ iteration: null, observation: obs, at: r.created_at });
+        }
+      } else if (obs && obs.indexOf('L7 SKIPPED') >= 0) {
+        summary = { text: obs, at: r.created_at, skipped: true };
+      }
+    });
+    res.writeHead(200, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+    res.end(JSON.stringify({ id: rhId, iterations: iterations, summary: summary, iteration_count: iterations.length }));
+  } catch (rhe) {
+    res.writeHead(500, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+    res.end(JSON.stringify({ error: rhe.message }));
+  }
   return;
 }
 
@@ -6110,6 +6255,264 @@ async function agentDiscriminatorSynthesizer(opp, opts) {
 
   log(log_prefix + ' wrote ' + written + ' discriminators');
   return { written: written, input_counts: { comp_intel: compRows.length, fact_check: factRows.length, memory: memRows.length, hgi_pp_top: topPPs.length } };
+}
+
+
+// ============================================================
+// L7 — ITERATION-TO-PLATEAU REFINEMENT (S121)
+// Loops refine + re-red-team until PWIN delta < 2 between consecutive
+// passes OR max iterations hit (default 3). Each iteration replaces
+// proposal_content + proposal_review in place; iteration history is
+// logged to organism_memory with memory_type='refinement_iteration'.
+// Cost per iteration: ~$2-5 (Opus refine) + ~$0.17 (Sonnet red team) = ~$2-5.
+// Max loop cost: 3 × $5 = $15 per opp. Kill-switch: MAX_ITER_DEFAULT = 3.
+// ============================================================
+
+async function runSingleRefinementPass(opp, proposalText, reviewText) {
+  var vertical = (opp.vertical || 'professional services').trim();
+  var agency = (opp.agency || '').trim();
+  var oppState = (opp.state || 'Louisiana').trim();
+  var scopeSnippet = (opp.scope_analysis || '').replace(/[^a-zA-Z0-9 .,\-]/g, ' ').slice(0, 150).trim();
+
+  var researchResults = await Promise.allSettled([
+    multiSearch([
+      { q: scopeSnippet.slice(0,100) + ' ' + vertical + ' methodology best practices 2025 2026', label: 'Best practices' },
+      { q: agency + ' ' + oppState + ' contracts awarded ' + vertical + ' 2024 2025', label: 'Agency awards' }
+    ]),
+    supabase.from('knowledge_chunks').select('chunk_text,filename,vertical')
+      .or('vertical.eq.' + vertical.toLowerCase() + ',document_class.eq.quality_gated_draft')
+      .limit(20)
+  ]);
+  var webResearch = (researchResults[0].status === 'fulfilled' ? researchResults[0].value : '') || '';
+  var kbChunks = (researchResults[1].status === 'fulfilled' && researchResults[1].value.data) || [];
+  var kbContent = kbChunks.map(function(c) { return c.chunk_text || ''; }).join('\n---\n').slice(0, 8000);
+
+  var prMems = await supabase.from('organism_memory')
+    .select('agent,observation')
+    .eq('opportunity_id', opp.id)
+    .neq('memory_type', 'decision_point')
+    .order('created_at', { ascending: false })
+    .limit(30);
+  var memContext = (prMems.data || []).map(function(m) {
+    return '[' + m.agent + ']: ' + (m.observation || '').slice(0, 400);
+  }).join('\n\n').slice(0, 6000);
+
+  var refineSystem =
+    'You are the most capable government proposal writer in the world. You are performing a refinement pass.' +
+    '\n\nOpportunity: ' + (opp.title||'') + ' | Agency: ' + agency + ' | Vertical: ' + vertical + ' | OPI: ' + (opp.opi_score||0) +
+    '\n\nYou have the current proposal, a red team review identifying every weakness, fresh web research on best practices, HGI knowledge base content from winning proposals, and full organism intelligence.' +
+    '\n\nYour mission: OUTPUT THE COMPLETE REFINED PROPOSAL — every section, start to finish. Keep sections the red team rated clean. REBUILD sections flagged as critical or major. Add any missing sections.' +
+    '\n\nCRITICAL RULES:' +
+    '\n1. Output the FULL proposal, not just changed sections' +
+    '\n2. Every claim must have specific evidence (dates, amounts, project names)' +
+    '\n3. No Geoffrey Brien. All positions [TO BE ASSIGNED] except Christopher J. Oney on cover letter' +
+    '\n4. Founded 1929, ~50 employees, Kenner HQ Suite 510, UEI DL4SJEVKZ6H4' +
+    '\n5. Use web research for current methodology. Use KB for HGI proof points' +
+    '\n6. Minimize [ACTION REQUIRED] — only for wet signatures, real resumes, final rate approvals' +
+    '\n7. Match the RFP structure exactly' +
+    '\n8. NEVER list PBGC, Orleans Parish School Board, OPSB, LIGA, TPCIGA as HGI past performance';
+
+  var refinePrompt =
+    '=== CURRENT PROPOSAL (refine this) ===\n' + proposalText.slice(0, 80000) +
+    '\n\n=== RED TEAM REVIEW (fix every critical/major finding) ===\n' + reviewText.slice(0, 15000) +
+    '\n\n=== RFP/SOQ REQUIREMENTS ===\n' + (opp.rfp_text || opp.scope_analysis || opp.description || '').slice(0, 15000) +
+    (webResearch.length > 50 ? '\n\n=== FRESH WEB RESEARCH ===\n' + webResearch.slice(0, 4000) : '') +
+    (kbContent.length > 100 ? '\n\n=== HGI KNOWLEDGE BASE (winning proposal sections) ===\n' + kbContent.slice(0, 6000) : '') +
+    (memContext.length > 100 ? '\n\n=== ORGANISM INTELLIGENCE ===\n' + memContext.slice(0, 4000) : '') +
+    '\n\n=== TASK ===\nRead the red team review. For every CRITICAL and MAJOR finding, fix it using the research and KB. Output the COMPLETE REFINED PROPOSAL — all sections, start to finish.';
+
+  var opusResp = await anthropic.messages.create({
+    model: 'claude-opus-4-6',
+    max_tokens: 16000,
+    thinking: { type: 'enabled', budget_tokens: 5000 },
+    system: refineSystem,
+    messages: [{ role: 'user', content: refinePrompt }]
+  });
+  trackCost('refinement_pass', 'claude-opus-4-6', opusResp.usage);
+
+  var refinedText = (opusResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
+  if (refinedText.length < 500) return null;
+
+  // Post-process — same as /api/proposal-refine
+  refinedText = refinedText.replace(/\[ACTION REQUIRED[^\]]*(?:insurance|WC coverage|workers.?comp|auto policy|umbrella|E&O|fidelity|GL |general liability)[^\]]*\]/gi, 'HGI maintains $5M fidelity bond, $5M Errors & Omissions, $2M General Liability, Workers Compensation at statutory limits, and $1M Commercial Auto coverage. Certificates of insurance with Additional Insured endorsement naming CLIENT will be provided upon contract execution.');
+  refinedText = refinedText.replace(/\[ACTION REQUIRED[^\]]*(?:professional regulation|DPR|Confirm.*(?:applicable|applicability))[^\]]*\]/gi, 'No Louisiana Department of Professional Regulation license is required for disaster recovery consulting, program management, claims administration, construction management oversight, or grant management services.');
+  refinedText = refinedText.replace(/\[ACTION REQUIRED[^\]]*(?:SAM|UEI|registration.*print)[^\]]*\]/gi, 'HGI Global is registered in SAM.gov with active status. UEI: DL4SJEVKZ6H4.');
+  refinedText = refinedText.replace(/\[ACTION REQUIRED[^\]]*(?:org.*chart|organizational)[^\]]*\]/gi, 'See Organizational Chart (Appendix A).');
+
+  var arCount = (refinedText.match(/ACTION REQUIRED/gi) || []).length;
+  return { refinedText: refinedText, arCount: arCount, kbChunks: kbChunks.length, webChars: webResearch.length };
+}
+
+async function runSingleRedTeamPass(opp, proposalText) {
+  var reviewPrompt = 'You are a ruthless government proposal red team reviewer and PWIN estimator. Review this proposal against the RFP and return ONLY valid JSON.\n\n' +
+    '=== RFP ===\n' + ((opp.rfp_text || opp.scope_analysis || opp.description || '').slice(0, 12000)) + '\n\n' +
+    '=== PROPOSAL ===\n' + proposalText.slice(0, 30000) + '\n\n' +
+    'Return ONLY this JSON schema (no preamble, no markdown, no explanation):\n' +
+    '{\n' +
+    '  "overall_status": "SUBMISSION_READY" | "NEEDS_MAJOR_REVISION" | "NEEDS_MINOR_REVISION" | "DO_NOT_SUBMIT",\n' +
+    '  "pwin_estimate": 0-100,\n' +
+    '  "pwin_rationale": "One paragraph explaining the PWIN estimate based on proposal quality, compliance, and competitive position",\n' +
+    '  "scoring_matrix": [\n' +
+    '    {"section": "section name", "evaluator_score": 0-100, "rationale": "why this score"}\n' +
+    '  ],\n' +
+    '  "findings": [\n' +
+    '    {"severity": "DISQUALIFYING" | "CRITICAL" | "MAJOR" | "MINOR", "category": "compliance" | "content" | "formatting" | "pricing" | "competitive" | "evidence", "issue": "what is wrong", "location": "where in proposal", "fix": "what to do"}\n' +
+    '  ],\n' +
+    '  "competitive_vulnerabilities": ["how a competitor would attack this"],\n' +
+    '  "top_3_improvements": ["the 3 changes that would most increase PWIN"]\n' +
+    '}';
+
+  var reviewResp = await claudeCall('Red team proposal review', reviewPrompt, 12000, { model: 'claude-sonnet-4-6', agent: 'red_team_reviewer' });
+  var rtReport = null;
+  try {
+    var cleaned = (reviewResp || '').replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    var fb = cleaned.indexOf('{'), lb = cleaned.lastIndexOf('}');
+    if (fb >= 0 && lb > fb) cleaned = cleaned.slice(fb, lb + 1);
+    rtReport = JSON.parse(cleaned);
+  } catch (pe) { /* fall through */ }
+
+  var pwinEst = 0, critCount = 0, majCount = 0, minCount = 0, summary = '';
+  if (rtReport) {
+    pwinEst = rtReport.pwin_estimate || 0;
+    (rtReport.findings || []).forEach(function(f) {
+      if (f.severity === 'CRITICAL' || f.severity === 'DISQUALIFYING') critCount++;
+      else if (f.severity === 'MAJOR') majCount++;
+      else if (f.severity === 'MINOR') minCount++;
+    });
+    summary = 'RED TEAM REVIEW [STRUCTURED]: ' + rtReport.overall_status + ' | PWIN ' + pwinEst + '% | ' +
+      (rtReport.scoring_matrix || []).length + ' sections scored | ' +
+      critCount + ' critical, ' + majCount + ' major, ' + minCount + ' minor findings';
+  } else {
+    summary = 'RED TEAM REVIEW [TEXT FALLBACK]: parse failed, raw: ' + (reviewResp || '').slice(0, 200);
+  }
+
+  var reviewStorage = rtReport ? (summary + '\n\n' + JSON.stringify(rtReport, null, 2)) : (summary + '\n\n' + (reviewResp || ''));
+  return { reviewStorage: reviewStorage, pwinEstimate: pwinEst, rtReport: rtReport, critCount: critCount, majCount: majCount, summary: summary };
+}
+
+async function runIterationToPlateau(opp, initialProposal, initialReview, initialPWIN, options) {
+  options = options || {};
+  var MAX_ITER = options.maxIter || 3;
+  var PLATEAU_DELTA = options.plateauDelta || 2;
+  var oppId = opp.id;
+  var log_prefix = 'L7[' + oppId.slice(0, 30) + ']';
+
+  var trajectory = [{ iteration: 0, pwin: initialPWIN || 0, chars: (initialProposal || '').length, delta: null, timestamp: new Date().toISOString() }];
+  var currentProposal = initialProposal;
+  var currentReview = initialReview;
+  var currentPWIN = initialPWIN || 0;
+  var stopReason = 'max_iterations_reached';
+
+  log(log_prefix + ' starting. Initial PWIN=' + currentPWIN + ', max_iter=' + MAX_ITER + ', plateau_delta=' + PLATEAU_DELTA);
+
+  for (var iter = 1; iter <= MAX_ITER; iter++) {
+    log(log_prefix + ' iteration ' + iter + ' begin (current PWIN=' + currentPWIN + ')');
+
+    // Step A: Refinement pass
+    var refResult;
+    try {
+      refResult = await runSingleRefinementPass(opp, currentProposal, currentReview);
+    } catch (re) {
+      log(log_prefix + ' iter ' + iter + ' refine error: ' + (re.message||'').slice(0,200));
+      stopReason = 'refinement_error';
+      break;
+    }
+    if (!refResult || !refResult.refinedText) {
+      log(log_prefix + ' iter ' + iter + ' refinement returned nothing');
+      stopReason = 'refinement_empty';
+      break;
+    }
+    var refinedText = refResult.refinedText;
+    log(log_prefix + ' iter ' + iter + ' refined to ' + refinedText.length + ' chars (was ' + currentProposal.length + ')');
+
+    // Step B: Re-run red team on refined version
+    var rtResult;
+    try {
+      rtResult = await runSingleRedTeamPass(opp, refinedText);
+    } catch (rte) {
+      log(log_prefix + ' iter ' + iter + ' red team error: ' + (rte.message||'').slice(0,200));
+      stopReason = 'redteam_error';
+      break;
+    }
+    var newPWIN = rtResult.pwinEstimate || 0;
+    var delta = newPWIN - currentPWIN;
+    log(log_prefix + ' iter ' + iter + ' new PWIN=' + newPWIN + ' (delta=' + delta + ')');
+
+    // Step C: Persist refined proposal + new review
+    await supabase.from('opportunities').update({
+      proposal_content: refinedText,
+      proposal_review: rtResult.reviewStorage,
+      last_updated: new Date().toISOString()
+    }).eq('id', oppId);
+
+    // Step D: Log iteration to memory
+    try {
+      await supabase.from('organism_memory').insert({
+        id: 'mem_l7_' + oppId + '_' + iter + '_' + Date.now(),
+        agent: 'refinement_loop',
+        opportunity_id: oppId,
+        observation: 'L7 ITERATION ' + iter + ': PWIN ' + currentPWIN + ' -> ' + newPWIN +
+          ' (delta ' + (delta >= 0 ? '+' : '') + delta + '). ' +
+          'Chars ' + currentProposal.length + ' -> ' + refinedText.length + '. ' +
+          rtResult.critCount + ' critical, ' + rtResult.majCount + ' major findings remaining. ' +
+          (refResult.kbChunks || 0) + ' KB chunks used.',
+        memory_type: 'refinement_iteration',
+        created_at: new Date().toISOString()
+      });
+    } catch (me) { /* non-fatal */ }
+
+    trajectory.push({
+      iteration: iter,
+      pwin: newPWIN,
+      chars: refinedText.length,
+      delta: delta,
+      crit_findings: rtResult.critCount,
+      major_findings: rtResult.majCount,
+      timestamp: new Date().toISOString()
+    });
+
+    // Step E: Plateau check
+    if (Math.abs(delta) < PLATEAU_DELTA) {
+      log(log_prefix + ' plateau reached at iter ' + iter + ' (delta ' + delta + ' < ' + PLATEAU_DELTA + ')');
+      stopReason = 'plateau';
+      currentProposal = refinedText;
+      currentReview = rtResult.reviewStorage;
+      currentPWIN = newPWIN;
+      break;
+    }
+
+    // Step F: Regression check — if PWIN drops materially, stop
+    if (delta < -5) {
+      log(log_prefix + ' regression detected (delta ' + delta + '), stopping');
+      stopReason = 'regression';
+      currentProposal = refinedText;
+      currentReview = rtResult.reviewStorage;
+      currentPWIN = newPWIN;
+      break;
+    }
+
+    currentProposal = refinedText;
+    currentReview = rtResult.reviewStorage;
+    currentPWIN = newPWIN;
+  }
+
+  // Final summary memory
+  try {
+    await supabase.from('organism_memory').insert({
+      id: 'mem_l7_summary_' + oppId + '_' + Date.now(),
+      agent: 'refinement_loop_summary',
+      opportunity_id: oppId,
+      observation: 'L7 COMPLETE: ' + (trajectory.length - 1) + ' iterations ran. ' +
+        'Initial PWIN ' + (initialPWIN||0) + ' -> final PWIN ' + currentPWIN + '. ' +
+        'Stop reason: ' + stopReason + '. ' +
+        'Trajectory: ' + trajectory.map(function(t){ return 'i'+t.iteration+'=PWIN'+t.pwin; }).join(' -> '),
+      memory_type: 'analysis',
+      created_at: new Date().toISOString()
+    });
+  } catch (se) { /* non-fatal */ }
+
+  log(log_prefix + ' complete. ' + (trajectory.length - 1) + ' iterations. PWIN ' + (initialPWIN||0) + ' -> ' + currentPWIN + '. Stop: ' + stopReason);
+  return { iterations: trajectory.length - 1, initialPWIN: initialPWIN || 0, finalPWIN: currentPWIN, stopReason: stopReason, trajectory: trajectory };
 }
 
 
