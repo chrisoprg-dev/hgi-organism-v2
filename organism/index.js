@@ -5937,7 +5937,7 @@ async function agentDiscriminatorSynthesizer(opp, opts) {
 
   // 1. Gather evidence inputs
   var compIntel = await supabase.from('competitive_intelligence')
-    .select('id,competitor_name,observation,source_url,vertical,created_at')
+    .select('id,competitor_name,strengths,weaknesses,strategic_notes,threat_level,vertical,created_at')
     .eq('opportunity_id', opp.id)
     .order('created_at', { ascending: false })
     .limit(20);
@@ -5960,23 +5960,35 @@ async function agentDiscriminatorSynthesizer(opp, opts) {
   var memRows = oppMems.data || [];
 
   // 2. Select relevant HGI_PP entries for this opp (reuse existing selector)
-  var pp = { top3: [], all: [] };
+  var ppResult = null;
+  var topPPs = [];
   try {
-    pp = selectHGIPP(opp, {});
+    ppResult = selectHGIPP(opp, {
+      vertical: opp.vertical,
+      agency: opp.agency,
+      state: opp.state,
+      estimated_value: opp.estimated_value,
+      rfpText: opp.rfp_text
+    });
+    topPPs = (ppResult && ppResult.selected) || [];
   } catch (ppe) {
     log(log_prefix + ' selectHGIPP error: ' + (ppe.message||'').slice(0,120));
   }
 
   // 3. Build evidence corpus for the prompt
-  var ppBlock = (pp.top3 || []).map(function(p, i) {
-    return '[HGI_PP_' + i + '] ' + (p.client || '?') + ' — ' + (p.contract || '?') +
-      ' — Value: ' + (p.value || '?') + ' — Years: ' + (p.years || '?') +
+  var ppBlock = topPPs.map(function(p, i) {
+    return '[HGI_PP_' + i + '] ' + (p.client || p.contract_name || '?') + ' — ' + (p.contract_name || p.id || '?') +
+      ' — Scope: ' + (p.scope || '?').slice(0,160) +
       ' — Outcome: ' + (p.outcome || '?');
   }).join('\n');
 
   var compBlock = compRows.map(function(c, i) {
-    return '[COMP_INTEL_' + c.id + '] Competitor: ' + (c.competitor_name || '?') +
-      ' — Observation: ' + (c.observation || '').slice(0, 400);
+    var parts = [];
+    if (c.strengths) parts.push('Strengths: ' + String(c.strengths).slice(0, 200));
+    if (c.weaknesses) parts.push('Weaknesses: ' + String(c.weaknesses).slice(0, 200));
+    if (c.strategic_notes) parts.push('Notes: ' + String(c.strategic_notes).slice(0, 300));
+    if (c.threat_level) parts.push('Threat: ' + c.threat_level);
+    return '[COMP_INTEL_' + c.id + '] Competitor: ' + (c.competitor_name || '?') + ' — ' + parts.join(' | ');
   }).join('\n---\n');
 
   var factBlock = factRows.map(function(f, i) {
@@ -6012,7 +6024,7 @@ async function agentDiscriminatorSynthesizer(opp, opts) {
     compRows.length + ' comp_intel + ' +
     factRows.length + ' fact_check + ' +
     memRows.length + ' memory + ' +
-    (pp.top3||[]).length + ' PP inputs');
+    topPPs.length + ' PP inputs');
 
   var OPUS_MODEL = 'claude-opus-4-6';
   var raw;
@@ -6097,7 +6109,7 @@ async function agentDiscriminatorSynthesizer(opp, opts) {
   } catch(_me) { /* non-fatal */ }
 
   log(log_prefix + ' wrote ' + written + ' discriminators');
-  return { written: written, input_counts: { comp_intel: compRows.length, fact_check: factRows.length, memory: memRows.length, hgi_pp_top: (pp.top3||[]).length } };
+  return { written: written, input_counts: { comp_intel: compRows.length, fact_check: factRows.length, memory: memRows.length, hgi_pp_top: topPPs.length } };
 }
 
 
