@@ -3582,6 +3582,62 @@ if (url.startsWith('/api/discriminators')) {
   return;
 }
 
+// === LAYER B PURSUIT RESEARCH (S122) — /api/pursuit-research?id= (POST triggers, GET reads) ===
+if (url.startsWith('/api/pursuit-research') && req.method === 'POST') {
+  var prId = (req.url.split('?id=')[1]||'').split('&')[0];
+  if (!prId) { res.writeHead(400, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' }); res.end(JSON.stringify({error:'id required'})); return; }
+  log('PURSUIT-RESEARCH POST: Starting sync run for ' + prId);
+  try {
+    var prOpp = await supabase.from('opportunities').select('*').eq('id', prId).single();
+    if (!prOpp.data) {
+      res.writeHead(404, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+      res.end(JSON.stringify({error:'opportunity not found', id: prId}));
+      return;
+    }
+    var prResult = await agentPursuitResearcher(prOpp.data, {});
+    res.writeHead(200, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+    res.end(JSON.stringify({ id: prId, result: prResult }));
+  } catch (pre) {
+    log('PURSUIT-RESEARCH POST error: ' + (pre.message||'').slice(0,200));
+    res.writeHead(500, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+    res.end(JSON.stringify({ error: pre.message }));
+  }
+  return;
+}
+
+if (url.startsWith('/api/pursuit-research')) {
+  var prgId = (req.url.split('?id=')[1]||'').split('&')[0];
+  if (!prgId) { res.writeHead(400, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' }); res.end(JSON.stringify({error:'id required'})); return; }
+  try {
+    var prgRunsResp = await supabase.from('pursuit_research_runs')
+      .select('*')
+      .eq('opportunity_id', prgId)
+      .order('created_at', { ascending: false })
+      .limit(10);
+    var prgRuns = prgRunsResp.data || [];
+    var prgFindingsResp = await supabase.from('pursuit_research')
+      .select('*')
+      .eq('opportunity_id', prgId)
+      .order('finding_num', { ascending: true })
+      .limit(200);
+    var prgFindings = prgFindingsResp.data || [];
+    var latest = prgRuns[0] || null;
+    res.writeHead(200, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+    res.end(JSON.stringify({
+      id: prgId,
+      latest_run: latest,
+      runs: prgRuns,
+      findings: prgFindings,
+      findings_count: prgFindings.length,
+      runs_count: prgRuns.length
+    }));
+  } catch (prge) {
+    res.writeHead(500, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+    res.end(JSON.stringify({ error: prge.message }));
+  }
+  return;
+}
+
 // === COMPLIANCE CHECK — /api/compliance-check?id= ===
 if (url.startsWith('/api/compliance-check')) {
   var ccRawUrl = req.url || '';
@@ -6255,6 +6311,339 @@ async function agentDiscriminatorSynthesizer(opp, opts) {
 
   log(log_prefix + ' wrote ' + written + ' discriminators');
   return { written: written, input_counts: { comp_intel: compRows.length, fact_check: factRows.length, memory: memRows.length, hgi_pp_top: topPPs.length } };
+}
+
+// ============================================================
+// LAYER B — PURSUIT RESEARCH (S122)
+// Opportunity-specific deep research: agency context, competitor
+// field, regulatory posture, decision makers, operational gaps,
+// political moment, financial signals. Disposable per-opp. Findings
+// promoted to Layer A (methodology corpus) later. Feeds L4
+// discriminators, produce-proposal mega-prompt, L7 refinement.
+// Cost target: $2-10 per run. Hard cap $15.
+// ============================================================
+
+async function agentPursuitResearcher(opp, opts) {
+  opts = opts || {};
+  var SOFT_CAP = typeof opts.softCap === 'number' ? opts.softCap : 10.00;
+  var HARD_CAP = typeof opts.hardCap === 'number' ? opts.hardCap : 15.00;
+  var MAX_PLAN_ITEMS = opts.maxPlanItems || 25;
+  var MIN_PLAN_ITEMS = 15;
+  var log_prefix = 'PURSUIT_RESEARCH[' + (opp.id || '?').slice(0, 30) + ']';
+  var runId = 'prr_' + (opp.id || 'unknown') + '_' + Date.now();
+  var runStart = Date.now();
+  var runCost = 0;
+
+  function addCost(model, usage) {
+    if (!usage) return;
+    var p = PRICING[model] || PRICING['claude-haiku-4-5-20251001'];
+    runCost += (usage.input_tokens || 0) * p.in_per_tok + (usage.output_tokens || 0) * p.out_per_tok;
+  }
+
+  // 1. Load context
+  var ctxResults = await Promise.allSettled([
+    supabase.from('organism_memory')
+      .select('agent,observation,memory_type,created_at')
+      .eq('opportunity_id', opp.id)
+      .neq('memory_type', 'decision_point')
+      .order('created_at', { ascending: false })
+      .limit(30),
+    supabase.from('competitive_intelligence')
+      .select('competitor_name,strengths,weaknesses,strategic_notes,threat_level,vertical,created_at')
+      .or('opportunity_id.eq.' + opp.id + ',agency.eq.' + (opp.agency || '').replace(/,/g, ' '))
+      .order('created_at', { ascending: false })
+      .limit(20),
+    supabase.from('pursuit_research')
+      .select('category,finding,confidence,source_url,generated_at')
+      .eq('opportunity_id', opp.id)
+      .order('generated_at', { ascending: false })
+      .limit(100)
+  ]);
+
+  var oppMems = (ctxResults[0].status === 'fulfilled' && ctxResults[0].value.data) || [];
+  var compRows = (ctxResults[1].status === 'fulfilled' && ctxResults[1].value.data) || [];
+  var priorFindings = (ctxResults[2].status === 'fulfilled' && ctxResults[2].value.data) || [];
+
+  var memBlock = oppMems.map(function(m) {
+    return '[' + (m.agent || '?') + ']: ' + (m.observation || '').slice(0, 300);
+  }).join('\n').slice(0, 4000);
+
+  var compBlock = compRows.map(function(c) {
+    var parts = [];
+    if (c.strengths) parts.push('Strengths: ' + String(c.strengths).slice(0, 150));
+    if (c.weaknesses) parts.push('Weaknesses: ' + String(c.weaknesses).slice(0, 150));
+    if (c.strategic_notes) parts.push('Notes: ' + String(c.strategic_notes).slice(0, 200));
+    return (c.competitor_name || '?') + ' — ' + parts.join(' | ');
+  }).join('\n').slice(0, 3000);
+
+  var priorBlock = priorFindings.map(function(f) {
+    return '[' + f.category + '] ' + (f.finding || '').slice(0, 200);
+  }).join('\n').slice(0, 2000);
+
+  // 2. Create initial run row (status=running) so UI/monitoring can see it
+  try {
+    await supabase.from('pursuit_research_runs').insert({
+      id: runId,
+      opportunity_id: opp.id,
+      status: 'running',
+      generator_version: 's122_v1',
+      created_at: new Date().toISOString()
+    });
+  } catch (ie) { /* non-fatal; keep going */ }
+
+  // 3. Reasoning pass — produce numbered research plan
+  var planSystem =
+    'You are a senior capture strategist at HGI Global, a 97-year-old 100% minority-owned Louisiana professional services firm. ' +
+    'You are producing a PURSUIT RESEARCH PLAN for a specific RFP. The plan lists 15-25 numbered research items that, answered together, ' +
+    'give HGI decisive pursuit advantage. Each item targets ONE specific, answerable question grounded in this RFP, this agency, ' +
+    'this political moment, or this competitive field. NO generic items. NO "research industry best practices." NO "understand the vertical." ' +
+    'Every item must be something a researcher can actually answer with a targeted web search plus one or two source fetches. ' +
+    '\n\nCATEGORIES (each item tagged with exactly one):' +
+    '\n- agency: how THIS agency operates, recent contracting history, known preferences, leadership changes, recent audit findings' +
+    '\n- competitor: who is likely bidding, their prior work for THIS agency, their recent wins/losses in this space' +
+    '\n- regulatory: statute/regulatory context specific to THIS solicitation (not generic vertical knowledge)' +
+    '\n- decision_maker: who scores, who influences, who recommended the solicitation, their backgrounds' +
+    '\n- operational: incumbent performance, known pain points, infrastructure gaps THIS solicitation addresses' +
+    '\n- political: budget cycle context, state/federal priorities, interest groups, recent policy moves' +
+    '\n- financial: award value history for this agency in this space, margin context, payment terms, contract vehicles' +
+    '\n- other: anything material that does not fit above' +
+    '\n\nOutput ONLY valid JSON. No preamble. No markdown fences. Format:' +
+    '\n[{"num": 1, "category": "agency", "question": "...", "priority": "high|medium|low", "suggested_sources": ["gao.gov", "ppi.louisiana.gov"]}]';
+
+  var planUser =
+    'OPPORTUNITY:' +
+    '\nTitle: ' + (opp.title || '?') +
+    '\nAgency: ' + (opp.agency || '?') +
+    '\nState: ' + (opp.state || '?') +
+    '\nVertical: ' + (opp.vertical || '?') +
+    '\nOPI: ' + (opp.opi_score || 0) +
+    '\nDue: ' + (opp.deadline || 'not specified') +
+    '\nEstimated Value: ' + (opp.estimated_value || 'not specified') +
+    '\n\nRFP TEXT (excerpt up to 12K chars):\n' + ((opp.rfp_text || opp.scope_analysis || opp.description || '').slice(0, 12000)) +
+    '\n\nPRIOR ORGANISM MEMORIES FOR THIS OPP:\n' + (memBlock || '(none)') +
+    '\n\nKNOWN COMPETITIVE INTEL (same agency or this opp):\n' + (compBlock || '(none)') +
+    (priorFindings.length > 0 ? '\n\nPRIOR PURSUIT RESEARCH FINDINGS FOR THIS OPP (do NOT duplicate):\n' + priorBlock : '') +
+    '\n\nTASK: Produce a numbered research plan of 15-25 items. Be specific. Be answerable. Return ONLY the JSON array.';
+
+  log(log_prefix + ' reasoning pass begin (ctx: ' + oppMems.length + ' mem + ' + compRows.length + ' comp + ' + priorFindings.length + ' prior findings)');
+
+  var planResp;
+  try {
+    planResp = await anthropic.messages.create({
+      model: 'claude-opus-4-6',
+      max_tokens: 8000,
+      thinking: { type: 'enabled', budget_tokens: 4000 },
+      system: planSystem,
+      messages: [{ role: 'user', content: planUser }]
+    });
+    trackCost('pursuit_research_plan', 'claude-opus-4-6', planResp.usage);
+    addCost('claude-opus-4-6', planResp.usage);
+  } catch (pe) {
+    log(log_prefix + ' reasoning pass error: ' + (pe.message || '').slice(0, 200));
+    try {
+      await supabase.from('pursuit_research_runs').update({
+        status: 'failed',
+        findings_count: 0,
+        cost_usd: Number(runCost.toFixed(4)),
+        wall_time_seconds: Math.floor((Date.now() - runStart) / 1000),
+        completed_at: new Date().toISOString()
+      }).eq('id', runId);
+    } catch (_u) { /* ignore */ }
+    return { run_id: runId, status: 'failed', error: (pe.message || '').slice(0, 200) };
+  }
+
+  var planText = (planResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
+  var planClean = planText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+  var fb = planClean.indexOf('['), lb = planClean.lastIndexOf(']');
+  if (fb >= 0 && lb > fb) planClean = planClean.slice(fb, lb + 1);
+  var plan = null;
+  try { plan = JSON.parse(planClean); } catch (pje) { plan = null; }
+  if (!Array.isArray(plan) || plan.length < MIN_PLAN_ITEMS) {
+    log(log_prefix + ' plan invalid or short (' + (plan ? plan.length : 0) + ' items, need ' + MIN_PLAN_ITEMS + '+). raw: ' + planText.slice(0, 300));
+    try {
+      await supabase.from('pursuit_research_runs').update({
+        status: 'failed',
+        research_plan: plan || null,
+        plan_item_count: plan ? plan.length : 0,
+        findings_count: 0,
+        cost_usd: Number(runCost.toFixed(4)),
+        wall_time_seconds: Math.floor((Date.now() - runStart) / 1000),
+        completed_at: new Date().toISOString()
+      }).eq('id', runId);
+    } catch (_u) { /* ignore */ }
+    return { run_id: runId, status: 'failed', error: 'plan_invalid_or_short', plan_items: plan ? plan.length : 0 };
+  }
+  if (plan.length > MAX_PLAN_ITEMS) plan = plan.slice(0, MAX_PLAN_ITEMS);
+  log(log_prefix + ' plan built: ' + plan.length + ' items, cost so far $' + runCost.toFixed(4));
+
+  // 4. Execute plan items
+  var findings = [];
+  var gaps = [];
+  var confDist = { high: 0, medium: 0, low: 0 };
+  var costCapped = false;
+  var softWarned = false;
+
+  for (var i = 0; i < plan.length; i++) {
+    if (runCost >= HARD_CAP) {
+      log(log_prefix + ' HARD CAP hit at item ' + (i + 1) + ' ($' + runCost.toFixed(2) + '), stopping');
+      costCapped = true;
+      for (var j = i; j < plan.length; j++) {
+        gaps.push({ item_num: plan[j].num || (j + 1), question: plan[j].question || '', category: plan[j].category || 'other', reason: 'cost_cap' });
+      }
+      break;
+    }
+    if (runCost >= SOFT_CAP && !softWarned) {
+      log(log_prefix + ' SOFT CAP warning at item ' + (i + 1) + ' ($' + runCost.toFixed(2) + ')');
+      softWarned = true;
+    }
+
+    var item = plan[i] || {};
+    var execSystem =
+      'You are a pursuit research executor for HGI Global. Given ONE research item, perform targeted web search (and fetch the most relevant sources) to answer it. ' +
+      'Return ONLY valid JSON, no markdown, no preamble. Format: ' +
+      '{"finding": "<2-5 sentence factual finding>", "confidence": "high|medium|low", "source_url": "<primary source URL>", "source_title": "<source title>", "retrieval_date": "<YYYY-MM-DD>", "category": "<same as input item>", "unresolved": false}. ' +
+      'If you cannot find a real source, set unresolved=true and describe what you looked for in finding. ' +
+      'NEVER fabricate URLs. NEVER paraphrase without a source. Confidence=high only if primary source from authoritative site (.gov, .edu, original agency, GAO, Federal Register, court filing, named publication of record).';
+
+    var execUser =
+      'RESEARCH ITEM:' +
+      '\nCategory: ' + (item.category || 'other') +
+      '\nQuestion: ' + (item.question || '') +
+      '\nPriority: ' + (item.priority || 'medium') +
+      (item.suggested_sources ? '\nSuggested sources: ' + JSON.stringify(item.suggested_sources) : '') +
+      '\n\nCONTEXT (do not duplicate these):' +
+      '\nOpportunity: ' + (opp.title || '?') + ' | Agency: ' + (opp.agency || '?') + ' | State: ' + (opp.state || '?') +
+      '\n\nProduce the finding now. Return ONLY the JSON object.';
+
+    var execResp;
+    try {
+      execResp = await anthropic.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 2500,
+        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        system: execSystem,
+        messages: [{ role: 'user', content: execUser }]
+      });
+      trackCost('pursuit_research_exec', 'claude-sonnet-4-6', execResp.usage);
+      addCost('claude-sonnet-4-6', execResp.usage);
+    } catch (ee) {
+      log(log_prefix + ' item ' + (i + 1) + ' exec error: ' + (ee.message || '').slice(0, 120));
+      gaps.push({ item_num: item.num || (i + 1), question: item.question || '', category: item.category || 'other', reason: 'execution_error' });
+      continue;
+    }
+
+    var execText = (execResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
+    var execClean = execText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    var ofb = execClean.indexOf('{'), olb = execClean.lastIndexOf('}');
+    if (ofb >= 0 && olb > ofb) execClean = execClean.slice(ofb, olb + 1);
+    var finding = null;
+    try { finding = JSON.parse(execClean); } catch (fje) { finding = null; }
+
+    if (!finding || !finding.finding || finding.unresolved) {
+      gaps.push({
+        item_num: item.num || (i + 1),
+        question: item.question || '',
+        category: item.category || 'other',
+        reason: finding ? (finding.unresolved ? 'unresolved' : 'no_finding') : 'parse_failed'
+      });
+      continue;
+    }
+
+    var conf = String(finding.confidence || 'medium').toLowerCase();
+    if (conf !== 'high' && conf !== 'medium' && conf !== 'low') conf = 'medium';
+    if (confDist[conf] !== undefined) confDist[conf]++;
+
+    findings.push({
+      id: 'pr_' + runId + '_' + (i + 1),
+      run_id: runId,
+      opportunity_id: opp.id,
+      finding_num: i + 1,
+      category: String(finding.category || item.category || 'other').slice(0, 60),
+      finding: String(finding.finding).slice(0, 3000),
+      confidence: conf,
+      source_url: finding.source_url ? String(finding.source_url).slice(0, 600) : null,
+      source_title: finding.source_title ? String(finding.source_title).slice(0, 400) : null,
+      retrieval_date: (finding.retrieval_date && /^\d{4}-\d{2}-\d{2}/.test(String(finding.retrieval_date))) ? String(finding.retrieval_date).slice(0, 10) : new Date().toISOString().slice(0, 10),
+      research_plan_item: String(item.question || '').slice(0, 1000),
+      generator_version: 's122_v1'
+    });
+  }
+
+  log(log_prefix + ' execution complete: ' + findings.length + ' findings / ' + gaps.length + ' gaps / $' + runCost.toFixed(4));
+
+  // 5. Insert findings (delete-before-insert for idempotency on re-runs of same runId — shouldn't happen, but safe)
+  if (findings.length > 0) {
+    try {
+      var insF = await supabase.from('pursuit_research').insert(findings);
+      if (insF.error) log(log_prefix + ' findings insert error: ' + (insF.error.message || '').slice(0, 200));
+    } catch (fie) {
+      log(log_prefix + ' findings insert exception: ' + (fie.message || '').slice(0, 200));
+    }
+  }
+
+  // 6. Self-report — rewrite gaps as clarifying questions suitable for proposal Q section
+  var clarifyingQuestions = [];
+  if (gaps.length > 0 && runCost < HARD_CAP) {
+    try {
+      var gapSystem = 'You convert unresolved research items into clarifying questions suitable for inclusion in the CLARIFYING QUESTIONS section of a government proposal. Questions must be professional, specific, and actionable by the procuring agency. Return ONLY valid JSON array: [{"item_num": N, "clarifying_question": "..."}]. No preamble. No markdown.';
+      var gapUser = 'Unresolved research items:\n' + JSON.stringify(gaps.slice(0, 20), null, 2) + '\n\nReturn the JSON array of clarifying questions now.';
+      var gapRaw = await claudeCall(gapSystem, gapUser, 2500, { model: 'claude-sonnet-4-6', agent: 'pursuit_research_gap' });
+      var gapClean = (gapRaw || '').replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      var gfb = gapClean.indexOf('['), glb = gapClean.lastIndexOf(']');
+      if (gfb >= 0 && glb > gfb) gapClean = gapClean.slice(gfb, glb + 1);
+      try {
+        var parsedGaps = JSON.parse(gapClean);
+        if (Array.isArray(parsedGaps)) clarifyingQuestions = parsedGaps;
+      } catch (_gpe) { /* keep raw gaps only */ }
+    } catch (_gce) { /* non-fatal */ }
+  }
+
+  // 7. Final run row update
+  var runStatus = costCapped ? 'cost_capped' : 'complete';
+  try {
+    await supabase.from('pursuit_research_runs').update({
+      research_plan: plan,
+      plan_item_count: plan.length,
+      findings_count: findings.length,
+      confidence_distribution: confDist,
+      gaps: { raw: gaps, clarifying_questions: clarifyingQuestions },
+      cost_usd: Number(runCost.toFixed(4)),
+      wall_time_seconds: Math.floor((Date.now() - runStart) / 1000),
+      status: runStatus,
+      completed_at: new Date().toISOString()
+    }).eq('id', runId);
+  } catch (ue) {
+    log(log_prefix + ' run update error: ' + (ue.message || '').slice(0, 200));
+  }
+
+  // 8. Memory trail
+  try {
+    await supabase.from('organism_memory').insert({
+      id: 'mem_pr_' + opp.id + '_' + Date.now(),
+      agent: 'pursuit_researcher',
+      opportunity_id: opp.id,
+      observation: 'PURSUIT RESEARCH ' + runStatus.toUpperCase() + ': ' + findings.length + ' findings (' +
+        confDist.high + 'H/' + confDist.medium + 'M/' + confDist.low + 'L), ' +
+        gaps.length + ' gaps, ' + clarifyingQuestions.length + ' clarifying Qs, $' +
+        runCost.toFixed(2) + ', ' + Math.floor((Date.now() - runStart) / 1000) + 's. Run: ' + runId,
+      memory_type: 'analysis',
+      created_at: new Date().toISOString()
+    });
+  } catch (_me) { /* non-fatal */ }
+
+  log(log_prefix + ' DONE: ' + findings.length + ' findings, ' + gaps.length + ' gaps, ' + clarifyingQuestions.length + ' clarifying Qs, $' + runCost.toFixed(2) + ', status=' + runStatus);
+
+  return {
+    run_id: runId,
+    status: runStatus,
+    plan_item_count: plan.length,
+    findings_count: findings.length,
+    gaps_count: gaps.length,
+    clarifying_questions_count: clarifyingQuestions.length,
+    confidence_distribution: confDist,
+    cost_usd: Number(runCost.toFixed(4)),
+    wall_time_seconds: Math.floor((Date.now() - runStart) / 1000)
+  };
 }
 
 
