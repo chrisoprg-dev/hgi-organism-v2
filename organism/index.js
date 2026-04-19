@@ -3658,7 +3658,7 @@ if (url.startsWith('/api/discriminators')) {
 if (url.startsWith('/api/pursuit-research') && req.method === 'POST') {
   var prId = (req.url.split('?id=')[1]||'').split('&')[0];
   if (!prId) { res.writeHead(400, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' }); res.end(JSON.stringify({error:'id required'})); return; }
-  log('PURSUIT-RESEARCH POST: Starting sync run for ' + prId);
+  log('PURSUIT-RESEARCH POST: Starting async run for ' + prId);
   try {
     var prOpp = await supabase.from('opportunities').select('*').eq('id', prId).single();
     if (!prOpp.data) {
@@ -3666,9 +3666,17 @@ if (url.startsWith('/api/pursuit-research') && req.method === 'POST') {
       res.end(JSON.stringify({error:'opportunity not found', id: prId}));
       return;
     }
-    var prResult = await agentPursuitResearcher(prOpp.data, {});
+    // Respond immediately; run agent in background (~8-12 min)
     res.writeHead(200, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
-    res.end(JSON.stringify({ id: prId, result: prResult }));
+    res.end(JSON.stringify({ started: true, id: prId, note: 'Layer B pursuit research running async (~8-12 min). Poll GET /api/pursuit-research?id= to see status.' }));
+    setImmediate(async function() {
+      try {
+        var prResult = await agentPursuitResearcher(prOpp.data, {});
+        log('PURSUIT-RESEARCH POST (async) done: status=' + (prResult && prResult.status) + ', findings=' + (prResult && prResult.findings_count) + ', cost=$' + (prResult && prResult.cost_usd));
+      } catch(_aee) {
+        log('PURSUIT-RESEARCH POST (async) error: ' + (_aee.message||'').slice(0,200));
+      }
+    });
   } catch (pre) {
     log('PURSUIT-RESEARCH POST error: ' + (pre.message||'').slice(0,200));
     res.writeHead(500, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
