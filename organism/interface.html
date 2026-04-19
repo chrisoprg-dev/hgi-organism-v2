@@ -1125,6 +1125,9 @@ function OpportunityDetail(p){
   var stD1=useState([]),discriminators=stD1[0],setDiscriminators=stD1[1];
   var stD2=useState(false),discGenerating=stD2[0],setDiscGenerating=stD2[1];
   var stR1=useState(null),refinementHistory=stR1[0],setRefinementHistory=stR1[1];
+  var stPR1=useState(null),pursuitResearch=stPR1[0],setPursuitResearch=stPR1[1];
+  var stPR2=useState(false),prGenerating=stPR2[0],setPrGenerating=stPR2[1];
+  var stPR3=useState(null),prPollTimer=stPR3[0],setPrPollTimer=stPR3[1];
   function detShowToast(m){setDetToast(m);setTimeout(function(){setDetToast(null)},5000)}
 
   useEffect(function(){
@@ -1132,6 +1135,7 @@ function OpportunityDetail(p){
     fetch('/api/opportunity-memories?id='+encodeURIComponent(opp.id)).then(function(r){return r.json()}).then(function(d){setMemories(Array.isArray(d)?d:d.memories||[])}).catch(function(){});
     fetch('/api/discriminators?id='+encodeURIComponent(opp.id)).then(function(r){return r.json()}).then(function(d){setDiscriminators((d&&d.discriminators)||[])}).catch(function(){});
     fetch('/api/refinement-history?id='+encodeURIComponent(opp.id)).then(function(r){return r.json()}).then(setRefinementHistory).catch(function(){});
+    fetch('/api/pursuit-research?id='+encodeURIComponent(opp.id)).then(function(r){return r.json()}).then(setPursuitResearch).catch(function(){});
   },[opp.id]);
 
   function generateDiscriminators(){
@@ -1141,6 +1145,43 @@ function OpportunityDetail(p){
       fetch('/api/discriminators?id='+encodeURIComponent(opp.id)).then(function(r){return r.json()}).then(function(dd){setDiscriminators((dd&&dd.discriminators)||[])});
       detShowToast('Generated '+((d&&d.result&&d.result.written)||0)+' discriminators');
     }).catch(function(){setDiscGenerating(false);detShowToast('Discriminator generation failed')});
+  }
+
+  function refreshPursuitResearch(){
+    return fetch('/api/pursuit-research?id='+encodeURIComponent(opp.id)).then(function(r){return r.json()}).then(function(d){setPursuitResearch(d);return d;});
+  }
+
+  function generatePursuitResearch(){
+    if(prGenerating) return;
+    setPrGenerating(true);
+    detShowToast('Pursuit research started (~8-12 min). Polling for results...');
+    fetch('/api/pursuit-research?id='+encodeURIComponent(opp.id),{method:'POST'}).then(function(r){return r.json()}).then(function(d){
+      if(d && d.started){
+        // Poll every 20s for up to 15 min
+        var polls=0;
+        var timer=setInterval(function(){
+          polls++;
+          refreshPursuitResearch().then(function(dd){
+            var status = dd && dd.latest_run && dd.latest_run.status;
+            if(status && status !== 'running'){
+              clearInterval(timer);
+              setPrGenerating(false);
+              var fc = (dd.latest_run && dd.latest_run.findings_count) || 0;
+              var cost = (dd.latest_run && dd.latest_run.cost_usd) || 0;
+              detShowToast('Pursuit research '+status+': '+fc+' findings, $'+cost);
+            } else if(polls >= 45){
+              clearInterval(timer);
+              setPrGenerating(false);
+              detShowToast('Pursuit research still running after 15 min — check back later');
+            }
+          });
+        }, 20000);
+        setPrPollTimer(timer);
+      } else {
+        setPrGenerating(false);
+        detShowToast('Failed to start pursuit research: '+((d&&d.error)||'unknown'));
+      }
+    }).catch(function(){setPrGenerating(false);detShowToast('Pursuit research start failed')});
   }
 
   var o=fullOpp||opp;
@@ -1175,11 +1216,39 @@ function OpportunityDetail(p){
     }
   }
 
+  var prStepData = null;
+  var prStepDone = false;
+  var prLatestRun = pursuitResearch && pursuitResearch.latest_run;
+  var prFindings = (pursuitResearch && pursuitResearch.findings) || [];
+  if(prLatestRun && prLatestRun.status && prLatestRun.status !== 'running' && prFindings.length > 0){
+    prStepDone = true;
+    var cd = prLatestRun.confidence_distribution || {};
+    var header = 'Layer B pursuit research — '+prLatestRun.status+'\n'+
+      'Plan items: '+(prLatestRun.plan_item_count||'?')+' | Findings: '+prFindings.length+
+      ' (H:'+(cd.high||0)+' M:'+(cd.medium||0)+' L:'+(cd.low||0)+')\n'+
+      'Cost: $'+(prLatestRun.cost_usd||0)+' | Wall time: '+(prLatestRun.wall_time_seconds||'?')+'s\n\n';
+    var findingsText = prFindings.slice(0,25).map(function(f){
+      return '['+String(f.category||'other').toUpperCase()+' | '+(f.confidence||'medium')+'] '+
+        String(f.finding||'').slice(0,500)+
+        (f.source_url?'\n   Source: '+(f.source_title?f.source_title+' — ':'')+f.source_url:'');
+    }).join('\n\n');
+    prStepData = header + findingsText;
+    var gaps = (prLatestRun.gaps && prLatestRun.gaps.clarifying_questions) || [];
+    if(gaps.length > 0){
+      prStepData += '\n\n=== CLARIFYING QUESTIONS ('+gaps.length+') ===\n' + gaps.map(function(g){
+        return (g.item_num?'Q'+g.item_num+': ':'')+g.clarifying_question;
+      }).join('\n\n');
+    }
+  } else if(prLatestRun && prLatestRun.status === 'running'){
+    prStepData = 'Pursuit research in progress (started '+(prLatestRun.created_at||'?')+')...';
+  }
+
   var steps=[
     {name:'INTAKE',done:true,data:o.source_url||o.created_at||'Discovered'},
     {name:'SCOPE ANALYSIS',done:!!(o.scope_analysis||o.has_scope),data:o.scope_analysis},
     {name:'FINANCIAL ANALYSIS',done:!!(o.financial_analysis||o.has_financial),data:o.financial_analysis},
     {name:'COMPETITIVE RESEARCH',done:!!(o.research_brief||o.has_intel),data:o.research_brief},
+    {name:'PURSUIT RESEARCH',done:prStepDone,data:prStepData,action:{label:prGenerating?'Running...':(prStepDone?'Refresh':'Generate'),fn:generatePursuitResearch,disabled:prGenerating}},
     {name:'DISCRIMINATORS',done:discriminators&&discriminators.length>0,data:discStepData,action:{label:discGenerating?'Generating...':'Generate',fn:generateDiscriminators,disabled:discGenerating}},
     {name:'WINNABILITY',done:!!(o.capture_action||o.winnability_score),data:o.capture_action},
     {name:'PROPOSAL',done:!!(o.proposal_content||o.has_proposal),data:o.proposal_content},
@@ -1190,7 +1259,7 @@ function OpportunityDetail(p){
   // Check red team from memories
   if(memories){
     var rtMems=memories.filter(function(m){return (m.agent_name||m.agent)==='red_team_agent'||(m.agent_name||m.agent)==='agentRedTeam'});
-    if(rtMems.length>0){steps[8].done=true;steps[8].data=rtMems.map(function(m){return m.observation}).join('\n\n');}
+    if(rtMems.length>0){steps[9].done=true;steps[9].data=rtMems.map(function(m){return m.observation}).join('\n\n');}
   }
 
   var subTabs=['overview','intel','proposal','activity'];
