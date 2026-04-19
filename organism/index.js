@@ -1295,6 +1295,45 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         topPPText = '(PP selector unavailable — senior_writer must reference HGI_PP canon conservatively and avoid exclusions: PBGC, Orleans Parish School Board, OPSB, LIGA, TPCIGA)';
       }
 
+      // ═══ S121 L4: DISCRIMINATOR FETCH (auto-generate if missing) ═══
+      var discriminatorsText = '';
+      try {
+        var _discQuery = await supabase.from('opportunity_discriminators')
+          .select('*')
+          .eq('opportunity_id', opp.id)
+          .order('discriminator_num', { ascending: true });
+        var _discRows = _discQuery.data || [];
+        if (_discRows.length === 0) {
+          log('L4 DISCRIMINATORS: none found for ' + opp.id + ', generating inline before proposal build');
+          try {
+            var _dRes = await agentDiscriminatorSynthesizer(opp, {});
+            log('L4 DISCRIMINATORS inline gen: wrote=' + (_dRes && _dRes.written));
+            var _reQuery = await supabase.from('opportunity_discriminators')
+              .select('*')
+              .eq('opportunity_id', opp.id)
+              .order('discriminator_num', { ascending: true });
+            _discRows = _reQuery.data || [];
+          } catch(_dge) {
+            log('L4 DISCRIMINATORS inline gen error: ' + (_dge.message||'').slice(0,200));
+          }
+        }
+        if (_discRows.length > 0) {
+          discriminatorsText = _discRows.map(function(d){
+            return d.discriminator_num + '. ' + d.title + '\n' +
+              '   Claim: ' + d.claim + '\n' +
+              '   Evidence anchor: ' + d.evidence_anchor_type + (d.evidence_anchor_id ? ' (' + d.evidence_anchor_id + ')' : '') + '\n' +
+              (d.evidence_quote ? '   Evidence quote: "' + d.evidence_quote + '"\n' : '') +
+              (d.competitor_gap ? '   Competitor gap: ' + d.competitor_gap : '');
+          }).join('\n\n');
+          log('L4 DISCRIMINATORS: injected ' + _discRows.length + ' into prompt');
+        } else {
+          discriminatorsText = '(no discriminators generated — senior writer must infer competitive differentiation from scope + past performance + competitive intelligence)';
+        }
+      } catch(_discErr) {
+        log('L4 DISCRIMINATORS fetch error: ' + (_discErr.message||'').slice(0,200));
+        discriminatorsText = '(discriminator layer unavailable — fallback to implicit differentiation)';
+      }
+
       // ═══ BUILD THE MEGA-PROMPT WITH ALL INTELLIGENCE ═══
       var D = String.fromCharCode(36);
       var proposalPrompt = 'You are the HGI Global proposal production engine. Your job is to produce a COMPLETE, SUBMISSION-READY response document.\n\n' +
@@ -1316,6 +1355,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         '## RFP/SOQ REQUIREMENTS (THE ACTUAL DOCUMENT)\n' + ((opp.rfp_text && opp.rfp_text.trim().length > 200) ? opp.rfp_text.slice(0, 20000) : (opp.scope_analysis || opp.description || 'No RFP text available')) + '\n\n' +
         '## HGI COMPANY PROFILE\n' + HGI + '\n\n' +
         '## TOP-RELEVANT PAST PERFORMANCE FOR THIS RFP (selected by HGI_PP selector; ranks 1-3 based on vertical match, agency-type match, scale, recency)\nFeature these 3 prominently in Past Performance and Experience sections. You may reference other HGI_PP canonical entries as supporting citations, but these 3 must be the primary feature. DO NOT list these exclusions under any circumstances without explicit President confirmation: PBGC, Orleans Parish School Board, OPSB, LIGA, TPCIGA. No current FEMA Public Assistance contract may be claimed.\n\n' + topPPText + '\n\n' +
+        '## WINNING DISCRIMINATORS FOR THIS SPECIFIC OPPORTUNITY (L4 synthesis)\nThese are the 3-5 specific, evidence-anchored claims that differentiate HGI in this particular pursuit. Each discriminator has an evidence anchor pointing to concrete past performance or research. Weave these throughout Executive Summary, Technical Approach, Past Performance, and Conclusion sections. Do not merely list them — integrate them as thematic throughlines. Cite evidence when stating discriminators; never make unsupported claims. Never name competitor companies by name; cite gap characteristics instead.\n\n' + discriminatorsText + '\n\n' +
         '## SCOPE ANALYSIS (Organism deep analysis of requirements)\n' + (opp.scope_analysis || 'Not yet produced') + '\n\n' +
         '## FINANCIAL ANALYSIS (Pricing strategy, market benchmarks)\n' + (opp.financial_analysis || 'Not yet produced') + '\n\n' +
         '## RESEARCH BRIEF (Win strategy, competitive positioning)\n' + (opp.research_brief || 'Not yet produced') + '\n\n' +
@@ -3354,6 +3394,46 @@ if (url.startsWith('/api/proposal-refine')) {
       }).catch(function() {});
     }
   });
+  return;
+}
+
+// === L4 DISCRIMINATOR SYNTHESIS — /api/discriminators-generate?id= (POST) and /api/discriminators?id= (GET) ===
+if (url.startsWith('/api/discriminators-generate') && req.method === 'POST') {
+  var dgId = (req.url.split('?id=')[1]||'').split('&')[0];
+  if (!dgId) { res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }); res.end(JSON.stringify({error:'id required'})); return; }
+  log('DISCRIMINATORS-GENERATE: Starting sync run for ' + dgId);
+  try {
+    var dgOpp = await supabase.from('opportunities').select('*').eq('id', dgId).single();
+    if (!dgOpp.data) {
+      res.writeHead(404, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+      res.end(JSON.stringify({error:'opportunity not found', id: dgId}));
+      return;
+    }
+    var dgResult = await agentDiscriminatorSynthesizer(dgOpp.data, {});
+    res.writeHead(200, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+    res.end(JSON.stringify({ id: dgId, result: dgResult }));
+  } catch (dge) {
+    log('DISCRIMINATORS-GENERATE error: ' + (dge.message||'').slice(0,200));
+    res.writeHead(500, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+    res.end(JSON.stringify({ error: dge.message }));
+  }
+  return;
+}
+
+if (url.startsWith('/api/discriminators')) {
+  var drId = (req.url.split('?id=')[1]||'').split('&')[0];
+  if (!drId) { res.writeHead(400, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' }); res.end(JSON.stringify({error:'id required'})); return; }
+  try {
+    var drRows = await supabase.from('opportunity_discriminators')
+      .select('*')
+      .eq('opportunity_id', drId)
+      .order('discriminator_num', { ascending: true });
+    res.writeHead(200, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+    res.end(JSON.stringify({ id: drId, discriminators: drRows.data || [], count: (drRows.data||[]).length }));
+  } catch (dre) {
+    res.writeHead(500, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+    res.end(JSON.stringify({ error: dre.message }));
+  }
   return;
 }
 
@@ -5837,6 +5917,185 @@ function selectHGIPP(opp, opts) {
       opp_agency_type: oppType
     }
   };
+}
+
+
+// ============================================================
+// L4 — DISCRIMINATOR SYNTHESIS (S121)
+// Produces 3-5 evidence-anchored discriminators per opportunity.
+// Each discriminator = title + claim + evidence anchor (pointer back
+// to HGI_PP entry, competitive_intelligence row, fact_check memory,
+// or other organism_memory). Writes to opportunity_discriminators table.
+// Called by: /api/discriminators-generate endpoint, and injected into
+// /api/produce-proposal prompt before proposal generation.
+// Cost target: <$0.50 per run (single Opus call, ~6K tokens out).
+// ============================================================
+
+async function agentDiscriminatorSynthesizer(opp, opts) {
+  opts = opts || {};
+  var log_prefix = 'DISCRIMINATORS[' + (opp.id || '?') + ']';
+
+  // 1. Gather evidence inputs
+  var compIntel = await supabase.from('competitive_intelligence')
+    .select('id,competitor_name,observation,source_url,vertical,created_at')
+    .eq('opportunity_id', opp.id)
+    .order('created_at', { ascending: false })
+    .limit(20);
+  var compRows = compIntel.data || [];
+
+  var factChecks = await supabase.from('organism_memory')
+    .select('id,agent,observation,entity_tags,created_at')
+    .eq('opportunity_id', opp.id)
+    .ilike('agent', 'orchestrator_fact_check%')
+    .order('created_at', { ascending: false })
+    .limit(5);
+  var factRows = factChecks.data || [];
+
+  var oppMems = await supabase.from('organism_memory')
+    .select('id,agent,observation,memory_type,created_at')
+    .eq('opportunity_id', opp.id)
+    .in('memory_type', ['analysis','pattern','competitive_intel','winnability'])
+    .order('created_at', { ascending: false })
+    .limit(10);
+  var memRows = oppMems.data || [];
+
+  // 2. Select relevant HGI_PP entries for this opp (reuse existing selector)
+  var pp = { top3: [], all: [] };
+  try {
+    pp = selectHGIPP(opp, {});
+  } catch (ppe) {
+    log(log_prefix + ' selectHGIPP error: ' + (ppe.message||'').slice(0,120));
+  }
+
+  // 3. Build evidence corpus for the prompt
+  var ppBlock = (pp.top3 || []).map(function(p, i) {
+    return '[HGI_PP_' + i + '] ' + (p.client || '?') + ' — ' + (p.contract || '?') +
+      ' — Value: ' + (p.value || '?') + ' — Years: ' + (p.years || '?') +
+      ' — Outcome: ' + (p.outcome || '?');
+  }).join('\n');
+
+  var compBlock = compRows.map(function(c, i) {
+    return '[COMP_INTEL_' + c.id + '] Competitor: ' + (c.competitor_name || '?') +
+      ' — Observation: ' + (c.observation || '').slice(0, 400);
+  }).join('\n---\n');
+
+  var factBlock = factRows.map(function(f, i) {
+    return '[FACT_CHECK_' + f.id + '] ' + (f.observation || '').slice(0, 600);
+  }).join('\n---\n');
+
+  var memBlock = memRows.map(function(m, i) {
+    return '[MEM_' + m.id + '] (' + m.agent + ') ' + (m.observation || '').slice(0, 400);
+  }).join('\n---\n');
+
+  // 4. Construct prompt
+  var system = 'You are a senior capture strategist at HGI Global. You produce discriminators — the specific, evidence-anchored claims that differentiate an HGI proposal from any competitor in this space. Discriminators are NOT generic capabilities. They are specific combinations of proven capability + competitor gap + documented outcome that no one else can credibly claim. Every discriminator must cite evidence from the inputs provided. Never fabricate. Never name specific competitor companies by name in the discriminator text (cite gap characteristics instead). Output ONLY valid JSON. No preamble. No markdown fences.';
+
+  var userPrompt = 'OPPORTUNITY:\nTitle: ' + (opp.title || '?') +
+    '\nAgency: ' + (opp.agency || '?') +
+    '\nVertical: ' + (opp.vertical || '?') +
+    '\nScope (excerpt): ' + ((opp.scope_analysis || opp.description || '').slice(0, 3000)) +
+    '\n\nHGI CANONICAL PAST PERFORMANCE (top 3 for this opp):\n' + (ppBlock || '(none selected)') +
+    '\n\nCOMPETITIVE INTELLIGENCE (from research on this opp):\n' + (compBlock || '(no comp intel rows)') +
+    '\n\nFACT-CHECK FINDINGS (scope verification):\n' + (factBlock || '(no fact-check rows)') +
+    '\n\nRELEVANT AGENT MEMORIES:\n' + (memBlock || '(no memory rows)') +
+    '\n\nTASK: Produce 3-5 discriminators for this specific opportunity. Each discriminator must have:' +
+    '\n- title: short claim (5-10 words), outcome-forward' +
+    '\n- claim: 1-2 sentence substantive claim stating what HGI delivers that competitors do not' +
+    '\n- evidence_anchor_type: one of [hgi_pp, competitive_intel, fact_check, org_memory]' +
+    '\n- evidence_anchor_id: the exact ID from the bracketed reference (e.g. for [HGI_PP_0] use "HGI_PP_0"; for [COMP_INTEL_abc-123] use "abc-123")' +
+    '\n- evidence_quote: the exact phrase from the evidence source that backs this discriminator (<=200 chars)' +
+    '\n- competitor_gap: what competitors in this space typically LACK (gap characteristic, not competitor name)' +
+    '\n\nReturn ONLY a JSON array of 3-5 objects. Example format:' +
+    '\n[{"title":"...","claim":"...","evidence_anchor_type":"hgi_pp","evidence_anchor_id":"HGI_PP_0","evidence_quote":"...","competitor_gap":"..."}]';
+
+  log(log_prefix + ' calling Opus with ' +
+    compRows.length + ' comp_intel + ' +
+    factRows.length + ' fact_check + ' +
+    memRows.length + ' memory + ' +
+    (pp.top3||[]).length + ' PP inputs');
+
+  var OPUS_MODEL = 'claude-opus-4-6';
+  var raw;
+  try {
+    raw = await claudeCall(system, userPrompt, 6000, {
+      model: OPUS_MODEL,
+      agent: 'discriminator_synthesizer'
+    });
+  } catch (ce) {
+    log(log_prefix + ' Opus error: ' + (ce.message||'').slice(0,200));
+    return { written: 0, error: ce.message };
+  }
+
+  if (!raw || raw.length < 40) {
+    log(log_prefix + ' Opus returned empty/short response: ' + (raw||'').slice(0,200));
+    return { written: 0, error: 'empty response' };
+  }
+
+  // 5. Parse JSON
+  var cleaned = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+  var firstBracket = cleaned.indexOf('[');
+  var lastBracket = cleaned.lastIndexOf(']');
+  if (firstBracket >= 0 && lastBracket > firstBracket) {
+    cleaned = cleaned.slice(firstBracket, lastBracket + 1);
+  }
+  var parsed;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (pe) {
+    log(log_prefix + ' JSON parse error: ' + (pe.message||'').slice(0,120) + ' — first 300: ' + cleaned.slice(0,300));
+    return { written: 0, error: 'json_parse_failed', raw_preview: raw.slice(0, 500) };
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    log(log_prefix + ' parsed but not array or empty: ' + JSON.stringify(parsed).slice(0,200));
+    return { written: 0, error: 'not_array_or_empty' };
+  }
+
+  // 6. Clear prior discriminators for this opp (regeneration is idempotent)
+  try {
+    await supabase.from('opportunity_discriminators').delete().eq('opportunity_id', opp.id);
+  } catch (de) { /* ignore */ }
+
+  // 7. Write new rows
+  var written = 0;
+  var rows = [];
+  for (var i = 0; i < Math.min(parsed.length, 5); i++) {
+    var d = parsed[i] || {};
+    if (!d.title || !d.claim) continue;
+    var anchorType = d.evidence_anchor_type;
+    var validTypes = ['hgi_pp','competitive_intel','fact_check','org_memory','naics','rate_card'];
+    if (validTypes.indexOf(anchorType) < 0) anchorType = 'org_memory';
+    rows.push({
+      id: 'disc_' + opp.id + '_' + (i+1) + '_' + Date.now(),
+      opportunity_id: opp.id,
+      discriminator_num: i + 1,
+      title: String(d.title).slice(0, 200),
+      claim: String(d.claim).slice(0, 2000),
+      evidence_anchor_type: anchorType,
+      evidence_anchor_id: d.evidence_anchor_id ? String(d.evidence_anchor_id).slice(0, 200) : null,
+      evidence_quote: d.evidence_quote ? String(d.evidence_quote).slice(0, 600) : null,
+      competitor_gap: d.competitor_gap ? String(d.competitor_gap).slice(0, 600) : null,
+      generator_version: 's121_v1'
+    });
+  }
+  if (rows.length > 0) {
+    var ins = await supabase.from('opportunity_discriminators').insert(rows);
+    if (!ins.error) written = rows.length;
+    else log(log_prefix + ' insert error: ' + (ins.error.message||'').slice(0,200));
+  }
+
+  // 8. Log to organism_memory
+  await supabase.from('organism_memory').insert({
+    id: 'mem_disc_' + opp.id + '_' + Date.now(),
+    agent: 'discriminator_synthesizer',
+    opportunity_id: opp.id,
+    observation: 'DISCRIMINATORS GENERATED: ' + written + ' discriminators for ' + (opp.title||'?').slice(0,80) +
+      ' (' + compRows.length + ' comp_intel + ' + factRows.length + ' fact_check + ' + memRows.length + ' mem inputs)',
+    memory_type: 'analysis',
+    created_at: new Date().toISOString()
+  }).catch(function(){});
+
+  log(log_prefix + ' wrote ' + written + ' discriminators');
+  return { written: written, input_counts: { comp_intel: compRows.length, fact_check: factRows.length, memory: memRows.length, hgi_pp_top: (pp.top3||[]).length } };
 }
 
 
