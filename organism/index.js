@@ -1295,6 +1295,50 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         topPPText = '(PP selector unavailable — senior_writer must reference HGI_PP canon conservatively and avoid exclusions: PBGC, Orleans Parish School Board, OPSB, LIGA, TPCIGA)';
       }
 
+      // ═══ S122 LAYER B: PURSUIT RESEARCH FETCH (auto-generate if missing or stale) ═══
+      var pursuitResearchText = '';
+      try {
+        var _prCutoff = new Date(Date.now() - 14*24*60*60*1000).toISOString();
+        var _prCheck = await supabase.from('pursuit_research_runs')
+          .select('id,status,findings_count,completed_at')
+          .eq('opportunity_id', opp.id)
+          .eq('status', 'complete')
+          .gte('completed_at', _prCutoff)
+          .order('completed_at', { ascending: false })
+          .limit(1);
+        var _hasRecentPR = (_prCheck.data || []).length > 0 && (_prCheck.data[0].findings_count || 0) > 0;
+        if (!_hasRecentPR) {
+          log('LAYER B PURSUIT RESEARCH: no recent complete run for ' + opp.id + ', generating inline before proposal build');
+          try {
+            var _prRes = await agentPursuitResearcher(opp, {});
+            log('LAYER B inline gen: status=' + (_prRes && _prRes.status) + ', findings=' + (_prRes && _prRes.findings_count) + ', cost=$' + (_prRes && _prRes.cost_usd));
+          } catch(_prge) {
+            log('LAYER B inline gen error: ' + (_prge.message||'').slice(0,200));
+          }
+        } else {
+          log('LAYER B: recent pursuit research exists (' + _prCheck.data[0].findings_count + ' findings, ' + _prCheck.data[0].completed_at + '), skipping regeneration');
+        }
+        var _prFindings = await supabase.from('pursuit_research')
+          .select('finding_num,category,finding,confidence,source_url,source_title,research_plan_item')
+          .eq('opportunity_id', opp.id)
+          .order('finding_num', { ascending: true })
+          .limit(50);
+        var _prRows = _prFindings.data || [];
+        if (_prRows.length > 0) {
+          pursuitResearchText = _prRows.map(function(f) {
+            return '[' + String(f.category||'other').toUpperCase() + ' | ' + String(f.confidence||'medium') + '] ' +
+              String(f.finding||'').slice(0, 900) +
+              (f.source_url ? '\n   Source: ' + (f.source_title ? f.source_title + ' — ' : '') + f.source_url : '');
+          }).join('\n\n');
+          log('LAYER B: injected ' + _prRows.length + ' pursuit research findings into prompt');
+        } else {
+          pursuitResearchText = '(no pursuit research findings available — senior writer should treat agency/competitor context conservatively)';
+        }
+      } catch(_prErr) {
+        log('LAYER B PURSUIT RESEARCH fetch error: ' + (_prErr.message||'').slice(0,200));
+        pursuitResearchText = '(pursuit research layer unavailable)';
+      }
+
       // ═══ S121 L4: DISCRIMINATOR FETCH (auto-generate if missing) ═══
       var discriminatorsText = '';
       try {
@@ -1361,6 +1405,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         '## RESEARCH BRIEF (Win strategy, competitive positioning)\n' + (opp.research_brief || 'Not yet produced') + '\n\n' +
         '## CAPTURE ACTION (GO/NO-GO analysis, PWIN assessment)\n' + (opp.capture_action || 'Not yet produced') + '\n\n' +
         '## STAFFING PLAN\n' + (opp.staffing_plan || 'Not yet produced') + '\n\n' +
+        '## PURSUIT RESEARCH FINDINGS (Layer B: opportunity-specific deep research on THIS agency, THIS moment, THIS competitive field)\nThese are factual findings from live web research on this specific pursuit. Use them as source material for concrete claims in Technical Approach, Past Performance context, Win Themes, and any section requiring specific knowledge of the agency, decision makers, competitors, regulatory context, or funding environment. Every finding has a source URL — cite specific facts with confidence. Do NOT repeat findings verbatim; weave them into substantive writing.\n\n' + (pursuitResearchText || 'No pursuit research available') + '\n\n' +
         '## AGENT INTELLIGENCE — DIRECT FINDINGS ON THIS OPPORTUNITY\n' + (intelSummary || 'No agent memories yet') + '\n\n' +
         '## CROSS-OPPORTUNITY INTELLIGENCE — PATTERNS FROM OTHER PURSUITS\n' + (crossIntel || 'No cross-opp patterns found') + '\n\n' +
         '## COMPETITIVE INTELLIGENCE DATABASE\n' + (ciText || 'No competitor data yet') + '\n\n' +
@@ -3290,6 +3335,33 @@ if (url === '/api/update-stage' && req.method === 'POST') {
       if (validStages.indexOf(params.stage) < 0) { res.end(JSON.stringify({ error: 'stage must be: ' + validStages.join(', ') })); return; }
       await supabase.from('opportunities').update({ stage: params.stage, last_updated: new Date().toISOString() }).eq('id', params.id);
       log('STAGE UPDATE: ' + params.id.slice(0,40) + ' -> ' + params.stage);
+
+      // S122 LAYER B: auto-fire pursuit research when opp moves to pursuing
+      if (params.stage === 'pursuing') {
+        setImmediate(async function() {
+          try {
+            var _prCutoff = new Date(Date.now() - 14*24*60*60*1000).toISOString();
+            var _prExisting = await supabase.from('pursuit_research_runs')
+              .select('id,findings_count,completed_at')
+              .eq('opportunity_id', params.id)
+              .eq('status', 'complete')
+              .gte('completed_at', _prCutoff)
+              .limit(1);
+            if ((_prExisting.data || []).length > 0 && (_prExisting.data[0].findings_count || 0) > 0) {
+              log('STAGE HOOK: pursuing — recent pursuit research already exists for ' + params.id.slice(0,40) + ', skipping auto-fire');
+              return;
+            }
+            var _prOpp = await supabase.from('opportunities').select('*').eq('id', params.id).single();
+            if (!_prOpp.data) { log('STAGE HOOK: opp not found for pursuit research ' + params.id.slice(0,40)); return; }
+            log('STAGE HOOK: pursuing — firing agentPursuitResearcher for ' + params.id.slice(0,40));
+            var _prRes = await agentPursuitResearcher(_prOpp.data, {});
+            log('STAGE HOOK: pursuit research done — status=' + (_prRes && _prRes.status) + ', findings=' + (_prRes && _prRes.findings_count) + ', cost=$' + (_prRes && _prRes.cost_usd));
+          } catch(_she) {
+            log('STAGE HOOK pursuit research error: ' + (_she.message||'').slice(0,200));
+          }
+        });
+      }
+
       res.end(JSON.stringify({ success: true, stage: params.stage }));
     } catch (e) { res.end(JSON.stringify({ error: e.message })); }
   });
