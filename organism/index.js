@@ -1381,7 +1381,20 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       // ═══ S123 L3 LAYER A: METHODOLOGY CORPUS FETCH (vertical-matched published briefs) ═══
       var methodologyCorpusText = '';
       try {
-        var _mbVertical = (vertical || '').toLowerCase();
+        // Normalize opp vertical to canonical form used in methodology_briefs (mirrors VERTICAL_NORMALIZE in selectHGIPP)
+        var _mbVerticalRaw = (vertical || '').toLowerCase().replace(/\s+/g, '_').replace(/\//g, '_');
+        var _MB_VERTICAL_NORM = {
+          'disaster': 'disaster_recovery', 'disaster_recovery_consulting': 'disaster_recovery',
+          'cdbg': 'disaster_recovery', 'cdbg_dr': 'disaster_recovery', 'fema': 'disaster_recovery',
+          'grant_management': 'grant', 'grants_management': 'grant', 'grant_admin': 'grant', 'grant_administration': 'grant',
+          'infrastructure': 'construction', 'construction_management': 'construction', 'cm': 'construction',
+          'tpa': 'tpa_claims', 'claims': 'tpa_claims', 'workers_comp': 'tpa_claims', 'tpa_claims_workers_comp': 'tpa_claims',
+          'property_tax_appeals': 'property_tax', 'appeals': 'property_tax', 'billing_appeals': 'property_tax',
+          'housing_hud': 'housing', 'hud': 'housing',
+          'program_administration': 'program_admin', 'program_management': 'program_admin',
+          'workforce_wioa': 'workforce', 'workforce_services': 'workforce', 'wioa': 'workforce'
+        };
+        var _mbVertical = _MB_VERTICAL_NORM[_mbVerticalRaw] || _mbVerticalRaw;
         var _mbResp = await supabase.from('methodology_briefs')
           .select('id,vertical,work_area,title,brief_text,word_count,citation_count,quality_score,last_researched')
           .eq('vertical', _mbVertical)
