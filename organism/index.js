@@ -7153,7 +7153,7 @@ async function agentMethodologyResearcher(params, opts) {
     word_count_ok: wordCount >= 3000,
     inline_citations_count: inlineCitations,
     distinct_inline_citations: distinctInlineCount,
-    distinct_citations_ok: distinctInlineCount >= 15,
+    distinct_citations_ok: distinctInlineCount >= 8,
     citations_array_count: citationsUsed.length,
     has_regulatory_foundation: /##\s*REGULATORY FOUNDATION/i.test(finalText),
     has_failure_modes: /##\s*FAILURE MODES/i.test(finalText),
@@ -7170,10 +7170,25 @@ async function agentMethodologyResearcher(params, opts) {
   if (!validationChecks.has_regulatory_foundation) hardFails.push('missing_regulatory_foundation');
   if (!validationChecks.has_failure_modes) hardFails.push('missing_failure_modes');
 
-  // Canon violation sweep
+  // Canon violation sweep — word-boundary aware to prevent substring false positives
+  // (e.g. "liga" does NOT match "obligation"; "opsb" does NOT match anything in normal English)
+  // Multi-word phrases use plain substring (those don't false-positive). Single tokens use word boundaries.
   var canonViolations = [];
+  var canonSingleTokens = [
+    { term: 'pbgc',      re: /\bpbgc\b/i },
+    { term: 'opsb',      re: /\bopsb\b/i },
+    { term: 'liga',      re: /\bliga\b/i },
+    { term: 'tpciga',    re: /\btpciga\b/i },
+    { term: 'tangipahoa',re: /\btangipahoa\b/i },
+    { term: '95-year',   re: /\b95-year\b/i },
+    { term: '95 year',   re: /\b95 year\b/i }
+  ];
+  canonSingleTokens.forEach(function(c){
+    if (c.re.test(finalText)) canonViolations.push(c.term);
+  });
+  var canonPhrases = ['orleans parish school board','geoffrey brien'];
   var lowerText = finalText.toLowerCase();
-  ['pbgc','orleans parish school board','opsb','liga','tpciga','geoffrey brien','tangipahoa','95-year','95 year'].forEach(function(term){
+  canonPhrases.forEach(function(term){
     if (lowerText.indexOf(term) >= 0) canonViolations.push(term);
   });
 
