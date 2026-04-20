@@ -7272,9 +7272,28 @@ async function agentMethodologyResearcher(params, opts) {
   }
 
   // sync brief to knowledge_chunks for retrieval compatibility
-  // S124 fix: column is chunk_text (not content); no created_at column exists; populate document_id with briefId for queryability
+  // S124 fix: (a) column is chunk_text (not content); (b) no created_at column; (c) document_id FK requires parent knowledge_documents row first
   try {
+    var kbFilename = 'methodology-' + vertical + '-' + workAreaSlug + '.md';
+    // (a) upsert parent knowledge_documents row (FK target)
+    await supabase.from('knowledge_documents').delete().eq('id', briefId);
+    var insKdoc = await supabase.from('knowledge_documents').insert({
+      id: briefId,
+      filename: kbFilename,
+      document_class: 'methodology_brief',
+      vertical: vertical,
+      summary: (title || '').slice(0, 500),
+      chunk_count: Math.ceil(finalText.length / 2500),
+      char_count: finalText.length,
+      status: 'chunked',
+      processed_at: new Date().toISOString()
+    });
+    if (insKdoc.error) {
+      log(log_prefix + ' KB parent doc insert error: ' + (insKdoc.error.message||'').slice(0,200));
+    }
+    // (b) delete stale chunks for this brief
     await supabase.from('knowledge_chunks').delete().eq('document_id', briefId);
+    // (c) insert chunks with correct column names + FK-satisfying document_id
     var CHUNK_SIZE = 2500;
     var chunks = [];
     for (var ci = 0; ci < finalText.length; ci += CHUNK_SIZE) {
@@ -7282,7 +7301,7 @@ async function agentMethodologyResearcher(params, opts) {
         id: 'mb_' + briefId + '_' + Math.floor(ci / CHUNK_SIZE),
         document_id: briefId,
         document_class: 'methodology_brief',
-        filename: 'methodology-' + vertical + '-' + workAreaSlug + '.md',
+        filename: kbFilename,
         vertical: vertical,
         chunk_index: Math.floor(ci / CHUNK_SIZE),
         chunk_text: finalText.slice(ci, ci + CHUNK_SIZE)
@@ -7291,10 +7310,10 @@ async function agentMethodologyResearcher(params, opts) {
     if (chunks.length > 0) {
       var insK = await supabase.from('knowledge_chunks').insert(chunks);
       if (insK.error) log(log_prefix + ' KB chunks insert error: ' + (insK.error.message||'').slice(0,200));
-      else log(log_prefix + ' KB chunks synced: ' + chunks.length + ' chunks');
+      else log(log_prefix + ' KB synced: 1 parent doc + ' + chunks.length + ' chunks');
     }
   } catch (kce) {
-    log(log_prefix + ' KB chunk sync exception: ' + (kce.message||'').slice(0,200));
+    log(log_prefix + ' KB sync exception: ' + (kce.message||'').slice(0,200));
   }
 
   // ═══ 5. MEMORY TRAIL ═══
