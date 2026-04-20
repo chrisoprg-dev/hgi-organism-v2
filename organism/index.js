@@ -1378,6 +1378,48 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         discriminatorsText = '(discriminator layer unavailable — fallback to implicit differentiation)';
       }
 
+      // ═══ S123 L3 LAYER A: METHODOLOGY CORPUS FETCH (vertical-matched published briefs) ═══
+      var methodologyCorpusText = '';
+      try {
+        var _mbVertical = (vertical || '').toLowerCase();
+        var _mbResp = await supabase.from('methodology_briefs')
+          .select('id,vertical,work_area,title,brief_text,word_count,citation_count,quality_score,last_researched')
+          .eq('vertical', _mbVertical)
+          .eq('status', 'published')
+          .order('quality_score', { ascending: false })
+          .limit(6);
+        var _mbRows = _mbResp.data || [];
+        if (_mbRows.length > 0) {
+          // Cap total chars to ~30K (prevent mega-prompt bloat when many briefs exist per vertical)
+          var _mbTotalChars = 0;
+          var _mbMAX = 30000;
+          var _mbParts = [];
+          for (var _mbi = 0; _mbi < _mbRows.length; _mbi++) {
+            var _mb = _mbRows[_mbi];
+            var _mbHdr = '### ' + (_mb.title || (_mb.vertical + ' — ' + _mb.work_area)) +
+              '  (quality ' + (_mb.quality_score||0) + ' | ' + (_mb.word_count||0) + ' words | ' + (_mb.citation_count||0) + ' citations)';
+            var _mbBody = String(_mb.brief_text || '');
+            var _mbBlock = _mbHdr + '\n\n' + _mbBody;
+            if (_mbTotalChars + _mbBlock.length > _mbMAX) {
+              // trim the last one to fit
+              var _mbRemaining = _mbMAX - _mbTotalChars;
+              if (_mbRemaining > 2000) _mbParts.push(_mbHdr + '\n\n' + _mbBody.slice(0, _mbRemaining));
+              break;
+            }
+            _mbParts.push(_mbBlock);
+            _mbTotalChars += _mbBlock.length;
+          }
+          methodologyCorpusText = _mbParts.join('\n\n---\n\n');
+          log('L3 METHODOLOGY: injected ' + _mbRows.length + ' briefs (' + _mbTotalChars + ' chars) for vertical=' + _mbVertical);
+        } else {
+          methodologyCorpusText = '(no methodology briefs available for vertical=' + _mbVertical + ' — senior writer should rely on pursuit research + KB chunks for methodology substance)';
+          log('L3 METHODOLOGY: no published briefs for vertical=' + _mbVertical);
+        }
+      } catch (_l3e) {
+        log('L3 METHODOLOGY fetch error: ' + (_l3e.message||'').slice(0,200));
+        methodologyCorpusText = '(methodology corpus unavailable)';
+      }
+
       // ═══ BUILD THE MEGA-PROMPT WITH ALL INTELLIGENCE ═══
       var D = String.fromCharCode(36);
       var proposalPrompt = 'You are the HGI Global proposal production engine. Your job is to produce a COMPLETE, SUBMISSION-READY response document.\n\n' +
@@ -1406,6 +1448,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         '## CAPTURE ACTION (GO/NO-GO analysis, PWIN assessment)\n' + (opp.capture_action || 'Not yet produced') + '\n\n' +
         '## STAFFING PLAN\n' + (opp.staffing_plan || 'Not yet produced') + '\n\n' +
         '## PURSUIT RESEARCH FINDINGS (Layer B: opportunity-specific deep research on THIS agency, THIS moment, THIS competitive field)\nThese are factual findings from live web research on this specific pursuit. Use them as source material for concrete claims in Technical Approach, Past Performance context, Win Themes, and any section requiring specific knowledge of the agency, decision makers, competitors, regulatory context, or funding environment. Every finding has a source URL — cite specific facts with confidence. Do NOT repeat findings verbatim; weave them into substantive writing.\n\n' + (pursuitResearchText || 'No pursuit research available') + '\n\n' +
+        '## METHODOLOGY CORPUS (Layer A: durable SME-depth methodology for this vertical, grounded in primary-source citations — regulations, GAO decisions, OIG reports, industry publications)\nThese are pre-produced methodology briefs covering how experienced teams actually execute work in this vertical. Each brief has inline [N] citations to authoritative sources. Use these briefs as DEEP METHODOLOGY SOURCE for Technical Approach, Operational Plan, Quality Control, Risk Management, and any section that describes HOW HGI will perform the work. Preserve the level of specificity (named systems, week-level sequences, quantified benchmarks, documented failure modes). Do NOT copy briefs verbatim — weave the substance into the proposal voice. Do NOT repeat the same citation bracket numbers — the brief [N] markers are internal to each brief; if you pull a fact, paraphrase and attribute.\n\n' + (methodologyCorpusText || 'No methodology briefs available for this vertical') + '\n\n' +
         '## AGENT INTELLIGENCE — DIRECT FINDINGS ON THIS OPPORTUNITY\n' + (intelSummary || 'No agent memories yet') + '\n\n' +
         '## CROSS-OPPORTUNITY INTELLIGENCE — PATTERNS FROM OTHER PURSUITS\n' + (crossIntel || 'No cross-opp patterns found') + '\n\n' +
         '## COMPETITIVE INTELLIGENCE DATABASE\n' + (ciText || 'No competitor data yet') + '\n\n' +
@@ -3717,6 +3760,144 @@ if (url.startsWith('/api/pursuit-research')) {
   }
   return;
 }
+
+// === L3 METHODOLOGY CORPUS (S123) — /api/methodology-generate, /api/methodology-batch, /api/methodology-briefs, /api/methodology-retrieve ===
+
+// POST /api/methodology-generate — single brief async
+if (url.startsWith('/api/methodology-generate') && req.method === 'POST') {
+  var mgBody = '';
+  req.on('data', function(ch){ mgBody += ch; });
+  req.on('end', async function(){
+    var mgParams = {};
+    try { mgParams = JSON.parse(mgBody || '{}'); } catch(_) {}
+    var mgVertical = String(mgParams.vertical || '').trim();
+    var mgWorkArea = String(mgParams.work_area || '').trim();
+    if (!mgVertical || !mgWorkArea) {
+      res.writeHead(400, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+      res.end(JSON.stringify({ error: 'vertical and work_area required in body' }));
+      return;
+    }
+    log('METHODOLOGY-GENERATE POST: ' + mgVertical + ' / ' + mgWorkArea);
+    res.writeHead(200, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+    res.end(JSON.stringify({ started: true, vertical: mgVertical, work_area: mgWorkArea, note: 'Methodology brief running async (~4-6 min). Poll GET /api/methodology-briefs?vertical=X&work_area=Y to see result.' }));
+    setImmediate(async function(){
+      try {
+        var mgRes = await agentMethodologyResearcher({ vertical: mgVertical, work_area: mgWorkArea, title: mgParams.title, force: !!mgParams.force }, {});
+        log('METHODOLOGY-GENERATE (async) done: ' + JSON.stringify({ status: mgRes && mgRes.status, words: mgRes && mgRes.word_count, cost: mgRes && mgRes.cost_usd }));
+      } catch(_aee) {
+        log('METHODOLOGY-GENERATE (async) error: ' + (_aee.message||'').slice(0,200));
+      }
+    });
+  });
+  return;
+}
+
+// POST /api/methodology-batch — seed batch async, serial
+if (url.startsWith('/api/methodology-batch') && req.method === 'POST') {
+  var mbBody = '';
+  req.on('data', function(ch){ mbBody += ch; });
+  req.on('end', async function(){
+    var mbParams = {};
+    try { mbParams = JSON.parse(mbBody || '{}'); } catch(_) {}
+    var mbBriefs = Array.isArray(mbParams.briefs) ? mbParams.briefs : [];
+    if (mbBriefs.length === 0) {
+      res.writeHead(400, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+      res.end(JSON.stringify({ error: 'briefs array required in body: [{vertical, work_area, title?}, ...]' }));
+      return;
+    }
+    var mbCount = mbBriefs.length;
+    log('METHODOLOGY-BATCH POST: starting serial batch of ' + mbCount + ' briefs');
+    res.writeHead(200, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+    res.end(JSON.stringify({ started: true, count: mbCount, note: 'Serial batch running async (~' + Math.ceil(mbCount * 4) + '-' + Math.ceil(mbCount * 6) + ' min total). Poll GET /api/methodology-briefs to see results.' }));
+    setImmediate(async function(){
+      var bResults = [];
+      var batchStart = Date.now();
+      for (var bi = 0; bi < mbBriefs.length; bi++) {
+        var b = mbBriefs[bi] || {};
+        if (!b.vertical || !b.work_area) continue;
+        try {
+          log('METHODOLOGY-BATCH ' + (bi+1) + '/' + mbCount + ': ' + b.vertical + ' / ' + b.work_area);
+          var bRes = await agentMethodologyResearcher({ vertical: b.vertical, work_area: b.work_area, title: b.title, force: !!mbParams.force }, {});
+          bResults.push({ idx: bi+1, vertical: b.vertical, work_area: b.work_area, status: bRes && bRes.status, words: bRes && bRes.word_count, cost: bRes && bRes.cost_usd });
+        } catch (_be) {
+          log('METHODOLOGY-BATCH ' + (bi+1) + ' error: ' + (_be.message||'').slice(0,200));
+          bResults.push({ idx: bi+1, vertical: b.vertical, work_area: b.work_area, status: 'exception', error: (_be.message||'').slice(0,200) });
+        }
+      }
+      var batchWall = Math.floor((Date.now() - batchStart)/1000);
+      var batchCost = bResults.reduce(function(s,r){return s + (r.cost||0);}, 0);
+      log('METHODOLOGY-BATCH done: ' + bResults.length + ' briefs attempted, ' + bResults.filter(function(r){return r.status==='published';}).length + ' published, ' + batchWall + 's, $' + batchCost.toFixed(2));
+    });
+  });
+  return;
+}
+
+// GET /api/methodology-briefs — list briefs, filter by vertical/work_area optional
+if (url.startsWith('/api/methodology-briefs')) {
+  var mbqRaw = req.url || '';
+  var mbqQS = mbqRaw.indexOf('?') >= 0 ? mbqRaw.split('?')[1] : '';
+  var mbqParams = {};
+  mbqQS.split('&').forEach(function(p){ var kv = p.split('='); if(kv[0]) mbqParams[decodeURIComponent(kv[0])] = decodeURIComponent(kv[1]||''); });
+  try {
+    var mbqQuery = supabase.from('methodology_briefs').select('id,vertical,work_area,work_area_slug,title,word_count,citation_count,quality_score,status,last_researched,generation_cost_usd,generation_wall_time_seconds,created_at,updated_at').order('updated_at', { ascending: false });
+    if (mbqParams.vertical) mbqQuery = mbqQuery.eq('vertical', mbqParams.vertical);
+    if (mbqParams.work_area_slug) mbqQuery = mbqQuery.eq('work_area_slug', mbqParams.work_area_slug);
+    if (mbqParams.status) mbqQuery = mbqQuery.eq('status', mbqParams.status);
+    var mbqResp = await mbqQuery.limit(200);
+    res.writeHead(200, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+    res.end(JSON.stringify({
+      count: (mbqResp.data||[]).length,
+      briefs: mbqResp.data || []
+    }));
+  } catch (mbqe) {
+    res.writeHead(500, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+    res.end(JSON.stringify({ error: mbqe.message }));
+  }
+  return;
+}
+
+// GET /api/methodology-retrieve — fetch full brief text + citations (for L6 specialists and wire-in)
+if (url.startsWith('/api/methodology-retrieve')) {
+  var mrRaw = req.url || '';
+  var mrQS = mrRaw.indexOf('?') >= 0 ? mrRaw.split('?')[1] : '';
+  var mrParams = {};
+  mrQS.split('&').forEach(function(p){ var kv = p.split('='); if(kv[0]) mrParams[decodeURIComponent(kv[0])] = decodeURIComponent(kv[1]||''); });
+  var mrVertical = mrParams.vertical || '';
+  var mrWorkArea = mrParams.work_area || '';
+  var mrWorkAreaSlug = mrParams.work_area_slug || '';
+  if (!mrVertical) {
+    res.writeHead(400, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+    res.end(JSON.stringify({ error: 'vertical required' }));
+    return;
+  }
+  try {
+    var mrQuery = supabase.from('methodology_briefs').select('*').eq('vertical', mrVertical).eq('status', 'published');
+    if (mrWorkAreaSlug) mrQuery = mrQuery.eq('work_area_slug', mrWorkAreaSlug);
+    else if (mrWorkArea) mrQuery = mrQuery.eq('work_area', mrWorkArea);
+    var mrResp = await mrQuery.order('updated_at', { ascending: false }).limit(10);
+    var briefs = mrResp.data || [];
+    var briefIds = briefs.map(function(b){return b.id;});
+    var citations = [];
+    if (briefIds.length > 0) {
+      var mrCites = await supabase.from('methodology_citations').select('*').in('brief_id', briefIds).order('relevance_score', { ascending: false });
+      citations = mrCites.data || [];
+    }
+    res.writeHead(200, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+    res.end(JSON.stringify({
+      vertical: mrVertical,
+      work_area: mrWorkArea || null,
+      brief_count: briefs.length,
+      briefs: briefs,
+      citation_count: citations.length,
+      citations: citations
+    }));
+  } catch (mre) {
+    res.writeHead(500, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+    res.end(JSON.stringify({ error: mre.message }));
+  }
+  return;
+}
+
 
 // === COMPLIANCE CHECK — /api/compliance-check?id= ===
 if (url.startsWith('/api/compliance-check')) {
@@ -6723,6 +6904,391 @@ async function agentPursuitResearcher(opp, opts) {
     confidence_distribution: confDist,
     cost_usd: Number(runCost.toFixed(4)),
     wall_time_seconds: Math.floor((Date.now() - runStart) / 1000)
+  };
+}
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// L3 METHODOLOGY CORPUS (Layer A) — S123
+// Produces SME-depth methodology briefs per vertical × work-area.
+// Each brief: ~3,200-3,800 words, 15-30 primary-source citations, Opus-generated
+// with 8K extended thinking, grounded in live web research on regulations,
+// GAO decisions, OIG reports, and industry publications.
+//
+// Called by:
+//   - POST /api/methodology-generate?vertical=X&work_area=Y (single brief)
+//   - POST /api/methodology-batch with {briefs: [{vertical, work_area, title?}, ...]} (seed batch)
+// Retrieved by:
+//   - produce-proposal mega-prompt (inject vertical-matched briefs as ## METHODOLOGY CORPUS)
+//   - GET /api/methodology-retrieve?vertical=X&work_area=Y
+// Validation: functional (word_count >= 3000, citation_count >= 15, inline [N] markers,
+//   failure modes present, regulatory citations present). Fails -> status='flagged'.
+// ════════════════════════════════════════════════════════════════════════════
+
+async function agentMethodologyResearcher(params, opts) {
+  params = params || {};
+  opts = opts || {};
+  var SOFT_CAP = typeof opts.softCap === 'number' ? opts.softCap : 2.50;
+  var HARD_CAP = typeof opts.hardCap === 'number' ? opts.hardCap : 4.00;
+  var vertical = String(params.vertical || '').toLowerCase().trim();
+  var workArea = String(params.work_area || '').trim();
+  var providedTitle = String(params.title || '').trim();
+
+  if (!vertical || !workArea) {
+    return { status: 'failed', error: 'vertical_and_work_area_required' };
+  }
+
+  var workAreaSlug = workArea.toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80);
+
+  var briefId = 'methodology-' + vertical + '-' + workAreaSlug;
+  var title = providedTitle || (vertical.replace(/_/g, ' ').replace(/\b\w/g, function(c){return c.toUpperCase();}) + ' — ' + workArea);
+  var log_prefix = 'METHODOLOGY[' + briefId.slice(0, 60) + ']';
+  var runStart = Date.now();
+  var runCost = 0;
+
+  function addCost(model, usage) {
+    if (!usage) return;
+    var p = PRICING[model] || PRICING['claude-haiku-4-5-20251001'];
+    runCost += (usage.input_tokens || 0) * p.in_per_tok + (usage.output_tokens || 0) * p.out_per_tok;
+  }
+
+  // 0. Check freshness — skip if recent published brief exists unless force
+  if (!opts.force) {
+    try {
+      var existing = await supabase.from('methodology_briefs')
+        .select('id,status,updated_at,word_count,citation_count')
+        .eq('id', briefId)
+        .single();
+      if (existing.data && existing.data.status === 'published') {
+        var ageDays = (Date.now() - new Date(existing.data.updated_at).getTime()) / (24*60*60*1000);
+        if (ageDays < 90) {
+          log(log_prefix + ' fresh brief exists (' + ageDays.toFixed(1) + ' days old), skipping');
+          return { status: 'skipped_fresh', brief_id: briefId, age_days: ageDays, word_count: existing.data.word_count, citation_count: existing.data.citation_count };
+        }
+      }
+    } catch (_ee) { /* non-fatal, continue */ }
+  }
+
+  log(log_prefix + ' START: vertical=' + vertical + ' work_area=' + workArea);
+
+  // ═══ 1. RESEARCH PHASE ═══
+  // Four web-search passes via Sonnet+web_search_20250305:
+  //  (a) regulation and authoritative guidance
+  //  (b) GAO protest decisions and winning proposal archives
+  //  (c) OIG audit findings and failure modes
+  //  (d) industry best-practices publications
+  var researchSystem =
+    'You are a senior research librarian. For the vertical and work area described, use web_search to retrieve authoritative primary sources ONLY. Prioritize: (1) Code of Federal Regulations and equivalent state regulations, (2) agency guidance documents (FEMA PAPPG, HUD HOCs, DOL WIOA directives, etc.), (3) GAO bid protest decisions, (4) Office of Inspector General audit reports, (5) Louisiana Legislative Auditor reports, (6) industry SME publications (NIGP, NCMA, ICMA, PMI, AACE, SHRM, DRJ, etc.). Avoid: Wikipedia, blogs, vendor marketing, general news.\n\n' +
+    'For each source you find, extract the most substantive passage (200-500 words) that directly addresses the work area. Tag each extract with category: regulation / guidance / gao_decision / oig_report / auditor_report / publication. Include source URL, source title, and source date.\n\n' +
+    'Return ONLY JSON: [{"category":"regulation","source_title":"...","source_url":"...","source_date":"YYYY-MM-DD","excerpt":"..."}]. No preamble. No markdown fences.';
+
+  var researchQueries = [
+    {
+      focus: 'regulations and authoritative guidance',
+      query: 'Find the canonical regulations, statutes, and authoritative agency guidance for: ' + vertical + ' — ' + workArea + '. Examples of primary sources: eCFR sections, FEMA PAPPG, HUD guidance, NOFOs, Federal Register rules. Extract 3-5 distinct authoritative sources.'
+    },
+    {
+      focus: 'GAO decisions and winning proposal references',
+      query: 'Find GAO bid protest decisions and publicly accessible winning proposal excerpts relevant to: ' + vertical + ' — ' + workArea + '. Focus on decisions that describe evaluator-noted strengths or methodology. Extract 2-4 decisions with specific citations.'
+    },
+    {
+      focus: 'OIG audit reports and failure modes',
+      query: 'Find Office of Inspector General (OIG) audit findings and GAO reports describing specific failure modes, improper payments, or deficiencies in: ' + vertical + ' — ' + workArea + '. Focus on concrete, specific findings. Extract 2-4 reports.'
+    },
+    {
+      focus: 'industry SME publications and quantified benchmarks',
+      query: 'Find industry SME publications with methodology benchmarks, standard cycle times, compliance metrics, or operational best practices for: ' + vertical + ' — ' + workArea + '. Priority: NIGP, NCMA, ICMA, PMI, SHRM, DRJ, HUD.gov, FEMA.gov library. Extract 2-4 publications.'
+    }
+  ];
+
+  var allSources = [];
+  for (var ri = 0; ri < researchQueries.length; ri++) {
+    if (runCost >= SOFT_CAP) { log(log_prefix + ' SOFT_CAP hit at research phase ' + ri); break; }
+    var rq = researchQueries[ri];
+    var rResp;
+    try {
+      rResp = await anthropic.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 3500,
+        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        system: researchSystem,
+        messages: [{ role: 'user', content: 'RESEARCH FOCUS: ' + rq.focus + '\n\n' + rq.query + '\n\nReturn ONLY the JSON array of source extracts.' }]
+      });
+      trackCost('methodology_research', 'claude-sonnet-4-6', rResp.usage);
+      addCost('claude-sonnet-4-6', rResp.usage);
+    } catch (re) {
+      log(log_prefix + ' research pass ' + ri + ' error: ' + (re.message||'').slice(0,150));
+      continue;
+    }
+    var rText = (rResp.content || []).filter(function(b){return b.type==='text';}).map(function(b){return b.text;}).join('');
+    var rClean = rText.replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
+    var rFb = rClean.indexOf('['), rLb = rClean.lastIndexOf(']');
+    if (rFb >= 0 && rLb > rFb) rClean = rClean.slice(rFb, rLb+1);
+    try {
+      var parsed = JSON.parse(rClean);
+      if (Array.isArray(parsed)) {
+        allSources = allSources.concat(parsed.filter(function(s){return s && s.source_title && s.excerpt;}));
+      }
+    } catch(_rpe) { /* skip bad parse */ }
+    log(log_prefix + ' research ' + ri + ': +' + (allSources.length) + ' total sources, cost=$' + runCost.toFixed(3));
+  }
+
+  if (allSources.length < 5) {
+    log(log_prefix + ' insufficient sources (' + allSources.length + '), failing');
+    return { status: 'failed', error: 'insufficient_sources', source_count: allSources.length, cost_usd: Number(runCost.toFixed(4)) };
+  }
+
+  // Build research context block
+  var researchBlock = allSources.map(function(s, idx) {
+    return '[' + (idx+1) + '] ' + String(s.category||'other').toUpperCase() + ' — ' + (s.source_title||'') +
+      (s.source_date ? ' (' + s.source_date + ')' : '') + '\n' +
+      'URL: ' + (s.source_url||'') + '\n' +
+      'Excerpt: ' + String(s.excerpt||'').slice(0, 1500);
+  }).join('\n\n').slice(0, 60000);
+
+  log(log_prefix + ' research assembled: ' + allSources.length + ' sources, ' + researchBlock.length + ' chars, cost=$' + runCost.toFixed(3));
+
+  // ═══ 2. BRIEF GENERATION ═══
+  var briefSystem =
+    'You are a senior subject-matter expert with 20 years of hands-on execution experience in the specific vertical and work-area named in the user message. You have personally managed operational details of this work across dozens of engagements. You have read every relevant regulation, every government guidance document, every OIG audit, every winning proposal in this space, every industry publication, and every lessons-learned paper. You write methodology documentation that senior government evaluators immediately recognize as coming from someone who has done the work — not from someone reading about it.\n\n' +
+    'You are producing a METHODOLOGY BRIEF. A methodology brief is NOT a summary, NOT a general overview, and NOT a list of tasks. It is the operational play-by-play for how an experienced team actually executes this work, grounded in cited sources, written for a government proposal evaluator who is themselves a senior specialist in this work-area.\n\n' +
+    'The brief MUST include these sections (in this order):\n' +
+    '1. REGULATORY FOUNDATION — specific CFR sections, statutes, guidance documents that govern this work. Cite each with inline bracket reference [N] matching the numbered source list.\n' +
+    '2. WEEK-LEVEL EXECUTION SEQUENCE — the actual week-by-week operational rhythm of a competent team doing this work. Not generic PM phases. The real sequence: what happens Week 1, Week 2, what artifacts are produced, what decisions get made, what escalations trigger.\n' +
+    '3. SYSTEMS AND PLATFORMS — named systems actually used (e.g., "EMMIE," "FEMA GO," "DRGR," "IDIS," "PIC/IMS," "PMS/ASAP"). Version references where they matter. No generic "project management software."\n' +
+    '4. FAILURE MODES AND FIXES — specific failure modes documented in OIG audits, GAO decisions, or IG reports, with the corrective control HGI embeds to prevent them. Cite each failure mode.\n' +
+    '5. QUANTIFIED BENCHMARKS — cycle times, compliance metrics, error rates, productivity numbers from published industry sources. Real numbers, cited.\n' +
+    '6. PROVEN METHODOLOGY — HGI\'s specific methodology for this work, referencing HGI\'s 1929 founding, Louisiana roots, and relevant past performance patterns. Make it concrete, not generic.\n' +
+    '7. DISCRIMINATORS — the 3-5 aspects of HGI\'s approach that differentiate from typical competitor delivery. Each anchored to evidence.\n\n' +
+    'FORMAT RULES:\n' +
+    '- Target length: 3,200-3,800 words total.\n' +
+    '- Inline citations: use [N] where N matches the numbered source list provided to you. Minimum 15 inline citations across the brief.\n' +
+    '- Use ## section headers for the 7 sections above.\n' +
+    '- Write in HGI voice: authoritative, specific, relationship-forward, mission-driven. Avoid: "leverage synergies," "best-in-class," "cutting-edge," "world-class," "innovative solutions."\n' +
+    '- NO PERSONAL NAMES. Use role titles only (President, Chairman, CEO, CAO, VP, SVP Claims). Geoffrey Brien is no longer with HGI — do not reference.\n' +
+    '- DO NOT list: PBGC, Orleans Parish School Board, OPSB, LIGA, TPCIGA. These are hard exclusions.\n' +
+    '- HGI founded 1929. Never write "95-year" — compute from 1929 if needed.\n' +
+    '- Terrebonne Parish School District is abbreviated TPSD. Not Tangipahoa.\n\n' +
+    'OUTPUT FORMAT:\n' +
+    'Return ONLY valid JSON with this exact shape. No preamble. No markdown fences.\n' +
+    '{\n' +
+    '  "brief_text": "## REGULATORY FOUNDATION\\n\\nFull brief text with inline [N] citations, 3200-3800 words, 7 sections...",\n' +
+    '  "citations_used": [\n' +
+    '    {"n": 1, "source_title": "...", "source_url": "...", "source_date": "YYYY-MM-DD", "citation_type": "regulation", "relevance_score": 95, "citation_text": "brief quote or paraphrase"},\n' +
+    '    ...\n' +
+    '  ]\n' +
+    '}\n' +
+    'citation_type must be one of: regulation, gao_decision, foia_proposal, publication, oig_report, academic, guidance\n' +
+    'Every [N] you use in the brief MUST appear in citations_used.';
+
+  var briefUser =
+    'VERTICAL: ' + vertical + '\n' +
+    'WORK AREA: ' + workArea + '\n' +
+    'BRIEF TITLE: ' + title + '\n' +
+    '\nRESEARCH CONTEXT — USE THESE AS YOUR SOURCE MATERIAL (cite by [N] matching the bracketed numbers):\n\n' +
+    researchBlock +
+    '\n\nProduce the methodology brief now. Follow the 7-section structure exactly. Minimum 3,200 words. Minimum 15 inline [N] citations. Return ONLY the JSON object.';
+
+  log(log_prefix + ' brief generation begin (Opus + 8K thinking, 16K max)');
+
+  var briefResp;
+  try {
+    briefResp = await anthropic.messages.create({
+      model: 'claude-opus-4-6',
+      max_tokens: 16000,
+      thinking: { type: 'enabled', budget_tokens: 8000 },
+      system: briefSystem,
+      messages: [{ role: 'user', content: briefUser }]
+    });
+    trackCost('methodology_brief', 'claude-opus-4-6', briefResp.usage);
+    addCost('claude-opus-4-6', briefResp.usage);
+  } catch (bge) {
+    log(log_prefix + ' brief generation error: ' + (bge.message||'').slice(0,200));
+    return { status: 'failed', error: 'brief_generation_error', detail: (bge.message||'').slice(0,200), cost_usd: Number(runCost.toFixed(4)) };
+  }
+
+  var briefText = (briefResp.content || []).filter(function(b){return b.type==='text';}).map(function(b){return b.text;}).join('');
+  var briefClean = briefText.replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
+  var bFb = briefClean.indexOf('{'), bLb = briefClean.lastIndexOf('}');
+  if (bFb >= 0 && bLb > bFb) briefClean = briefClean.slice(bFb, bLb+1);
+
+  var briefObj = null;
+  try { briefObj = JSON.parse(briefClean); } catch (bpe) {
+    log(log_prefix + ' brief JSON parse failed: ' + (bpe.message||'').slice(0,120) + '. Raw first 300: ' + briefText.slice(0,300));
+    return { status: 'failed', error: 'brief_parse_failed', cost_usd: Number(runCost.toFixed(4)) };
+  }
+
+  if (!briefObj.brief_text || typeof briefObj.brief_text !== 'string') {
+    return { status: 'failed', error: 'missing_brief_text', cost_usd: Number(runCost.toFixed(4)) };
+  }
+
+  var finalText = briefObj.brief_text;
+  var citationsUsed = Array.isArray(briefObj.citations_used) ? briefObj.citations_used : [];
+
+  // ═══ 3. VALIDATION (functional) ═══
+  var wordCount = (finalText.match(/\b\w+\b/g) || []).length;
+  var inlineCitations = (finalText.match(/\[\d+\]/g) || []).length;
+  var distinctInlineCitations = {};
+  (finalText.match(/\[\d+\]/g) || []).forEach(function(m){ distinctInlineCitations[m] = true; });
+  var distinctInlineCount = Object.keys(distinctInlineCitations).length;
+
+  var validationChecks = {
+    word_count: wordCount,
+    word_count_ok: wordCount >= 3000,
+    inline_citations_count: inlineCitations,
+    distinct_inline_citations: distinctInlineCount,
+    distinct_citations_ok: distinctInlineCount >= 15,
+    citations_array_count: citationsUsed.length,
+    has_regulatory_foundation: /##\s*REGULATORY FOUNDATION/i.test(finalText),
+    has_failure_modes: /##\s*FAILURE MODES/i.test(finalText),
+    has_systems_platforms: /##\s*SYSTEMS AND PLATFORMS/i.test(finalText),
+    has_week_level: /##\s*WEEK-LEVEL/i.test(finalText),
+    has_benchmarks: /##\s*QUANTIFIED BENCHMARKS/i.test(finalText),
+    has_methodology: /##\s*PROVEN METHODOLOGY/i.test(finalText),
+    has_discriminators: /##\s*DISCRIMINATORS/i.test(finalText)
+  };
+
+  var hardFails = [];
+  if (!validationChecks.word_count_ok) hardFails.push('word_count_low:' + wordCount);
+  if (!validationChecks.distinct_citations_ok) hardFails.push('distinct_citations_low:' + distinctInlineCount);
+  if (!validationChecks.has_regulatory_foundation) hardFails.push('missing_regulatory_foundation');
+  if (!validationChecks.has_failure_modes) hardFails.push('missing_failure_modes');
+
+  // Canon violation sweep
+  var canonViolations = [];
+  var lowerText = finalText.toLowerCase();
+  ['pbgc','orleans parish school board','opsb','liga','tpciga','geoffrey brien','tangipahoa','95-year','95 year'].forEach(function(term){
+    if (lowerText.indexOf(term) >= 0) canonViolations.push(term);
+  });
+
+  var briefStatus = (hardFails.length === 0 && canonViolations.length === 0) ? 'published' : 'flagged';
+  var qualityScore = 0;
+  var passCount = 0;
+  Object.keys(validationChecks).forEach(function(k){ if (k.indexOf('_ok')>=0 || k.indexOf('has_')===0) { if (validationChecks[k] === true) passCount++; } });
+  qualityScore = Math.round((passCount / 9) * 100); // 9 boolean checks
+  if (canonViolations.length > 0) qualityScore = Math.max(0, qualityScore - 30);
+
+  log(log_prefix + ' validation: status=' + briefStatus + ', words=' + wordCount + ', distinct_cites=' + distinctInlineCount + ', quality=' + qualityScore + (hardFails.length ? ', hardFails=' + hardFails.join(',') : '') + (canonViolations.length ? ', canon=' + canonViolations.join(',') : ''));
+
+  // ═══ 4. STORAGE — brief, citations, sync to knowledge_chunks ═══
+  var wallTime = Math.floor((Date.now() - runStart) / 1000);
+
+  // UPSERT brief
+  try {
+    // delete existing citations for idempotency
+    await supabase.from('methodology_citations').delete().eq('brief_id', briefId);
+    await supabase.from('methodology_briefs').delete().eq('id', briefId);
+  } catch (_de) { /* non-fatal */ }
+
+  try {
+    var insertBrief = await supabase.from('methodology_briefs').insert({
+      id: briefId,
+      vertical: vertical,
+      work_area: workArea,
+      work_area_slug: workAreaSlug,
+      title: title,
+      brief_text: finalText,
+      word_count: wordCount,
+      citation_count: citationsUsed.length,
+      last_researched: new Date().toISOString(),
+      version: 1,
+      status: briefStatus,
+      quality_score: qualityScore,
+      generation_cost_usd: Number(runCost.toFixed(4)),
+      generation_wall_time_seconds: wallTime,
+      generator_version: 's123_v1',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    });
+    if (insertBrief.error) log(log_prefix + ' brief insert error: ' + (insertBrief.error.message||'').slice(0,200));
+  } catch (bie) {
+    log(log_prefix + ' brief insert exception: ' + (bie.message||'').slice(0,200));
+    return { status: 'failed', error: 'storage_error', detail: (bie.message||'').slice(0,200), cost_usd: Number(runCost.toFixed(4)) };
+  }
+
+  // insert citations (bulk)
+  if (citationsUsed.length > 0) {
+    var citationRows = citationsUsed.filter(function(c){return c && c.source_title;}).map(function(c){
+      return {
+        brief_id: briefId,
+        citation_type: String(c.citation_type||'publication').slice(0, 60),
+        source_title: String(c.source_title||'').slice(0, 500),
+        source_url: c.source_url ? String(c.source_url).slice(0, 600) : null,
+        source_date: (c.source_date && /^\d{4}-\d{2}-\d{2}/.test(String(c.source_date))) ? String(c.source_date).slice(0, 10) : null,
+        citation_text: c.citation_text ? String(c.citation_text).slice(0, 2000) : null,
+        relevance_score: typeof c.relevance_score === 'number' ? c.relevance_score : 50,
+        created_at: new Date().toISOString()
+      };
+    });
+    if (citationRows.length > 0) {
+      try {
+        var insC = await supabase.from('methodology_citations').insert(citationRows);
+        if (insC.error) log(log_prefix + ' citations insert error: ' + (insC.error.message||'').slice(0,200));
+      } catch (cie) {
+        log(log_prefix + ' citations insert exception: ' + (cie.message||'').slice(0,200));
+      }
+    }
+  }
+
+  // sync brief to knowledge_chunks for retrieval compatibility
+  try {
+    await supabase.from('knowledge_chunks').delete()
+      .eq('document_class', 'methodology_brief')
+      .like('filename', 'methodology-' + vertical + '-' + workAreaSlug + '%');
+    var CHUNK_SIZE = 2500;
+    var chunks = [];
+    for (var ci = 0; ci < finalText.length; ci += CHUNK_SIZE) {
+      chunks.push({
+        id: 'mb_' + briefId + '_' + Math.floor(ci / CHUNK_SIZE),
+        document_class: 'methodology_brief',
+        filename: 'methodology-' + vertical + '-' + workAreaSlug + '.md',
+        vertical: vertical,
+        chunk_index: Math.floor(ci / CHUNK_SIZE),
+        content: finalText.slice(ci, ci + CHUNK_SIZE),
+        created_at: new Date().toISOString()
+      });
+    }
+    if (chunks.length > 0) {
+      var insK = await supabase.from('knowledge_chunks').insert(chunks);
+      if (insK.error) log(log_prefix + ' KB chunks insert error: ' + (insK.error.message||'').slice(0,200));
+    }
+  } catch (kce) {
+    log(log_prefix + ' KB chunk sync exception: ' + (kce.message||'').slice(0,200));
+  }
+
+  // ═══ 5. MEMORY TRAIL ═══
+  try {
+    await supabase.from('organism_memory').insert({
+      id: 'mem_methbrief_' + briefId.slice(0,100) + '_' + Date.now(),
+      agent: 'methodology_researcher',
+      observation: 'METHODOLOGY BRIEF ' + briefStatus.toUpperCase() + ': ' + vertical + ' — ' + workArea +
+        '. Words=' + wordCount + ', distinct citations=' + distinctInlineCount +
+        ', quality=' + qualityScore + ', cost=$' + runCost.toFixed(2) + ', wall=' + wallTime + 's.' +
+        (hardFails.length ? ' HardFails: ' + hardFails.join(',') : '') +
+        (canonViolations.length ? ' CanonViolations: ' + canonViolations.join(',') : ''),
+      memory_type: 'analysis',
+      created_at: new Date().toISOString()
+    });
+  } catch (_me) { /* non-fatal */ }
+
+  log(log_prefix + ' DONE: status=' + briefStatus + ', words=' + wordCount + ', cost=$' + runCost.toFixed(2) + ', wall=' + wallTime + 's');
+
+  return {
+    brief_id: briefId,
+    vertical: vertical,
+    work_area: workArea,
+    status: briefStatus,
+    word_count: wordCount,
+    citation_count: citationsUsed.length,
+    distinct_inline_citations: distinctInlineCount,
+    quality_score: qualityScore,
+    hard_fails: hardFails,
+    canon_violations: canonViolations,
+    cost_usd: Number(runCost.toFixed(4)),
+    wall_time_seconds: wallTime
   };
 }
 
