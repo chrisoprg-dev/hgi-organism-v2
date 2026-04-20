@@ -3795,7 +3795,11 @@ if (url.startsWith('/api/methodology-generate') && req.method === 'POST') {
     res.end(JSON.stringify({ started: true, vertical: mgVertical, work_area: mgWorkArea, note: 'Methodology brief running async (~4-6 min). Poll GET /api/methodology-briefs?vertical=X&work_area=Y to see result.' }));
     setImmediate(async function(){
       try {
-        var mgRes = await agentMethodologyResearcher({ vertical: mgVertical, work_area: mgWorkArea, title: mgParams.title, force: !!mgParams.force }, {});
+        // S124: pipe optional softCap/hardCap from body to agent opts
+        var mgOpts = {};
+        if (typeof mgParams.softCap === 'number') mgOpts.softCap = mgParams.softCap;
+        if (typeof mgParams.hardCap === 'number') mgOpts.hardCap = mgParams.hardCap;
+        var mgRes = await agentMethodologyResearcher({ vertical: mgVertical, work_area: mgWorkArea, title: mgParams.title, force: !!mgParams.force }, mgOpts);
         log('METHODOLOGY-GENERATE (async) done: ' + JSON.stringify({ status: mgRes && mgRes.status, words: mgRes && mgRes.word_count, cost: mgRes && mgRes.cost_usd }));
       } catch(_aee) {
         log('METHODOLOGY-GENERATE (async) error: ' + (_aee.message||'').slice(0,200));
@@ -3830,7 +3834,13 @@ if (url.startsWith('/api/methodology-batch') && req.method === 'POST') {
         if (!b.vertical || !b.work_area) continue;
         try {
           log('METHODOLOGY-BATCH ' + (bi+1) + '/' + mbCount + ': ' + b.vertical + ' / ' + b.work_area);
-          var bRes = await agentMethodologyResearcher({ vertical: b.vertical, work_area: b.work_area, title: b.title, force: !!mbParams.force }, {});
+          // S124: per-brief softCap/hardCap overrides batch-level; batch-level overrides default
+          var bOpts = {};
+          if (typeof mbParams.softCap === 'number') bOpts.softCap = mbParams.softCap;
+          if (typeof mbParams.hardCap === 'number') bOpts.hardCap = mbParams.hardCap;
+          if (typeof b.softCap === 'number') bOpts.softCap = b.softCap;
+          if (typeof b.hardCap === 'number') bOpts.hardCap = b.hardCap;
+          var bRes = await agentMethodologyResearcher({ vertical: b.vertical, work_area: b.work_area, title: b.title, force: !!mbParams.force }, bOpts);
           bResults.push({ idx: bi+1, vertical: b.vertical, work_area: b.work_area, status: bRes && bRes.status, words: bRes && bRes.word_count, cost: bRes && bRes.cost_usd });
         } catch (_be) {
           log('METHODOLOGY-BATCH ' + (bi+1) + ' error: ' + (_be.message||'').slice(0,200));
@@ -7262,26 +7272,26 @@ async function agentMethodologyResearcher(params, opts) {
   }
 
   // sync brief to knowledge_chunks for retrieval compatibility
+  // S124 fix: column is chunk_text (not content); no created_at column exists; populate document_id with briefId for queryability
   try {
-    await supabase.from('knowledge_chunks').delete()
-      .eq('document_class', 'methodology_brief')
-      .like('filename', 'methodology-' + vertical + '-' + workAreaSlug + '%');
+    await supabase.from('knowledge_chunks').delete().eq('document_id', briefId);
     var CHUNK_SIZE = 2500;
     var chunks = [];
     for (var ci = 0; ci < finalText.length; ci += CHUNK_SIZE) {
       chunks.push({
         id: 'mb_' + briefId + '_' + Math.floor(ci / CHUNK_SIZE),
+        document_id: briefId,
         document_class: 'methodology_brief',
         filename: 'methodology-' + vertical + '-' + workAreaSlug + '.md',
         vertical: vertical,
         chunk_index: Math.floor(ci / CHUNK_SIZE),
-        content: finalText.slice(ci, ci + CHUNK_SIZE),
-        created_at: new Date().toISOString()
+        chunk_text: finalText.slice(ci, ci + CHUNK_SIZE)
       });
     }
     if (chunks.length > 0) {
       var insK = await supabase.from('knowledge_chunks').insert(chunks);
       if (insK.error) log(log_prefix + ' KB chunks insert error: ' + (insK.error.message||'').slice(0,200));
+      else log(log_prefix + ' KB chunks synced: ' + chunks.length + ' chunks');
     }
   } catch (kce) {
     log(log_prefix + ' KB chunk sync exception: ' + (kce.message||'').slice(0,200));
