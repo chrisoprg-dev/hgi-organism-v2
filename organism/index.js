@@ -1751,20 +1751,30 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         // future proposal. If any CRITICAL canon violation is found, proposal_review
         // summary is prefixed with [CANON FAIL] and rtReport.overall_status is
         // force-flipped to FAIL so the downstream approval UI can gate on it.
+        // S125 client-exception: when opp.agency contains an exclusion token,
+        // the token will legitimately appear throughout (client address, submitted-to,
+        // re: line, etc.) — suppress the EXCLUSION_X_PP check for that token only.
         try {
           var _cs = [];
+          var _oppAgencyNorm = (opp.agency || '').toLowerCase();
           var _canonChecks = [
-            { re: /\b(?:19[23]0|1931|1932)\b/g, label: 'FOUNDING_YEAR_DRIFT', severity: 'CRITICAL', note: 'Founding year must be 1929. Any other 19xx year near founding is a canon violation.' },
-            { re: /\b9[3456]\s*[-\s]?\s*year(?:s)?\b/gi, label: 'AGE_DRIFT', severity: 'CRITICAL', note: 'Firm age must compute from 1929. 93/94/95/96-year phrasing is a canon violation (current is 97-year).' },
-            { re: /\bPBGC\b/g, label: 'EXCLUSION_PBGC', severity: 'CRITICAL', note: 'PBGC must not appear as HGI past performance.' },
-            { re: /\b(?:TPCIGA|LIGA)\b/g, label: 'EXCLUSION_LIGA_TPCIGA', severity: 'CRITICAL', note: 'LIGA/TPCIGA must not appear as HGI past performance.' },
-            { re: /Orleans Parish School Board|\bOPSB\b/gi, label: 'EXCLUSION_OPSB_PP', severity: 'CRITICAL', note: 'OPSB must not appear as HGI past performance. (OK as client name only.)' },
-            { re: /\bGeoffrey\b|\bBrien\b/g, label: 'EXCLUSION_GEOFFREY_BRIEN', severity: 'CRITICAL', note: 'Geoffrey Brien no longer works at HGI.' },
-            { re: /\bTangipahoa\b/gi, label: 'GEOGRAPHIC_DRIFT', severity: 'CRITICAL', note: 'Terrebonne (not Tangipahoa) is HGI past performance.' },
-            { re: /\[(?!TO BE ASSIGNED)(?:ACTION\s*REQUIRED|Correction|CORRECTION|TBD|TBC|To be determined|TO BE DETERMINED|Insert|INSERT|Placeholder|PLACEHOLDER|Pending|PENDING)[^\[\]]{0,300}\]/g, label: 'VISIBLE_BRACKET_PLACEHOLDER', severity: 'CRITICAL', note: 'Submission-ready output must not contain visible bracketed placeholders except [TO BE ASSIGNED].' }
+            { re: /\b(?:19[23]0|1931|1932)\b/g, label: 'FOUNDING_YEAR_DRIFT', severity: 'CRITICAL', note: 'Founding year must be 1929. Any other 19xx year near founding is a canon violation.', clientException: null },
+            { re: /\b9[3456]\s*[-\s]?\s*year(?:s)?\b/gi, label: 'AGE_DRIFT', severity: 'CRITICAL', note: 'Firm age must compute from 1929. 93/94/95/96-year phrasing is a canon violation (current is 97-year).', clientException: null },
+            { re: /\bPBGC\b/g, label: 'EXCLUSION_PBGC', severity: 'CRITICAL', note: 'PBGC must not appear as HGI past performance.', clientException: 'pbgc' },
+            { re: /\bTPCIGA\b/g, label: 'EXCLUSION_TPCIGA', severity: 'CRITICAL', note: 'TPCIGA must not appear as HGI past performance.', clientException: 'tpciga' },
+            { re: /\bLIGA\b/g, label: 'EXCLUSION_LIGA', severity: 'CRITICAL', note: 'LIGA must not appear as HGI past performance.', clientException: 'liga' },
+            { re: /Orleans Parish School Board|\bOPSB\b/gi, label: 'EXCLUSION_OPSB_PP', severity: 'CRITICAL', note: 'OPSB must not appear as HGI past performance. (OK as client name only.)', clientException: 'orleans parish school board' },
+            { re: /\bGeoffrey\b|\bBrien\b/g, label: 'EXCLUSION_GEOFFREY_BRIEN', severity: 'CRITICAL', note: 'Geoffrey Brien no longer works at HGI.', clientException: null },
+            { re: /\bTangipahoa\b/gi, label: 'GEOGRAPHIC_DRIFT', severity: 'CRITICAL', note: 'Terrebonne (not Tangipahoa) is HGI past performance.', clientException: 'tangipahoa' },
+            { re: /\[(?!TO BE ASSIGNED)(?:ACTION\s*REQUIRED|Correction|CORRECTION|TBD|TBC|To be determined|TO BE DETERMINED|Insert|INSERT|Placeholder|PLACEHOLDER|Pending|PENDING)[^\[\]]{0,300}\]/g, label: 'VISIBLE_BRACKET_PLACEHOLDER', severity: 'CRITICAL', note: 'Submission-ready output must not contain visible bracketed placeholders except [TO BE ASSIGNED].', clientException: null }
           ];
           for (var _ci = 0; _ci < _canonChecks.length; _ci++) {
             var _ck = _canonChecks[_ci];
+            // Client-exception: if the RFP client name itself contains this token, skip the exclusion-PP check for this opp
+            if (_ck.clientException && _oppAgencyNorm.indexOf(_ck.clientException) >= 0) {
+              log('CANON SWEEP: skipping ' + _ck.label + ' on this opp (client agency "' + (opp.agency||'').slice(0,60) + '" contains exclusion token legitimately)');
+              continue;
+            }
             var _m = proposalText.match(_ck.re) || [];
             if (_m.length > 0) {
               _cs.push({ severity: _ck.severity, label: _ck.label, count: _m.length, samples: _m.slice(0, 3), note: _ck.note });
@@ -1825,6 +1835,121 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         });
 
         log('RED TEAM: ' + summary);
+
+        // S125 AUTO-REGEN-ONCE GATE — if CRITICAL/DISQUALIFYING findings or canon
+        // failure, regenerate the proposal once with defects as corrective context.
+        // Prevents runaway loops by checking the retry flag passed in the request body
+        // and by checking for a recent proposal_auto_regen memory for this opp.
+        // Applies universally — every future proposal across every vertical gets this
+        // feedback loop without operator intervention.
+        try {
+          var _isRetryCall = false;
+          try { _isRetryCall = !!JSON.parse(body || '{}').retry; } catch(e) {}
+          var _needsRegen = (_canonCritCount > 0) ||
+                            (critCount > 0) ||
+                            (rtReport && rtReport.overall_status === 'FAIL');
+          if (_needsRegen && !_isRetryCall) {
+            // Second-layer loop guard: check for recent auto-regen memory (within 30 min)
+            var _loopGuardCutoff = new Date(Date.now() - 30*60*1000).toISOString();
+            var _recentRegen = await supabase.from('organism_memory')
+              .select('id,created_at')
+              .eq('opportunity_id', ppId)
+              .eq('agent', 'proposal_auto_regen')
+              .gte('created_at', _loopGuardCutoff)
+              .limit(1);
+            if ((_recentRegen.data || []).length > 0) {
+              log('AUTO-REGEN: skipped — recent auto-regen exists for ' + ppId + ' within last 30 min');
+            } else {
+              log('AUTO-REGEN: triggered — ' + _canonCritCount + ' canon critical + ' + critCount + ' red-team critical findings, regenerating once');
+              try {
+                // Build compact corrective prompt. Reuse the same senior_writer system prompt
+                // via another model call; pass the old proposal + findings + RFP excerpt.
+                var _rtFindingsList = [];
+                if (rtReport && rtReport.findings) {
+                  rtReport.findings.filter(function(f){ return f.severity==='DISQUALIFYING'||f.severity==='CRITICAL'; })
+                    .slice(0, 20).forEach(function(f) {
+                      _rtFindingsList.push('- [' + (f.category||'') + '] ' + (f.issue||'') + ' (' + (f.section||'') + '): ' + (f.fix||'') + (f.replacement_text ? '\n    Replacement: ' + f.replacement_text.slice(0,400) : ''));
+                    });
+                }
+                var _canonFindingsList = _cs.filter(function(c){ return c.severity==='CRITICAL'; }).map(function(c) {
+                  return '- ' + c.label + ' (' + c.count + ' occurrences): ' + c.note + ' | Samples: ' + JSON.stringify(c.samples);
+                });
+                var _correctivePrompt = 'You previously generated a government proposal. Automated red-team and canon review identified CRITICAL defects. Fix every one and re-emit the COMPLETE proposal text. Emit ONLY the corrected proposal — no preamble, no commentary, no bracketed meta-commentary, no explanation of changes.\n\n' +
+                  '## CRITICAL RED-TEAM FINDINGS TO FIX\n' + (_rtFindingsList.join('\n') || '(none)') + '\n\n' +
+                  '## CRITICAL CANON VIOLATIONS TO FIX\n' + (_canonFindingsList.join('\n') || '(none)') + '\n\n' +
+                  '## RFP REQUIREMENTS (for grounding)\n' + ((opp.rfp_text || opp.scope_analysis || '').slice(0, 8000)) + '\n\n' +
+                  '## PREVIOUS PROPOSAL (revise this to fix every defect above)\n' + proposalText;
+                var _retryResp = await anthropic.messages.create({
+                  model: 'claude-opus-4-6',
+                  max_tokens: 32000,
+                  system: 'You are a senior government proposal writer at HGI Global (Hammerman & Gainer LLC), founded 1929, 97-year-old, 100% minority-owned. Fix every CRITICAL defect identified below. Emit ONLY the corrected full proposal text. Do NOT emit bracketed meta-commentary ([ACTION REQUIRED], [Correction], [TBD], etc.) — the ONLY permitted bracket is [TO BE ASSIGNED] for Key Personnel. Never write 1931, 1930, 95 years, 96 years — use 1929 and 97-year exactly. Geoffrey Brien is never mentioned. OPSB/LIGA/TPCIGA/PBGC are never listed as HGI past performance (only as client names where applicable). Differentiate explicitly against any competitors tagged [PRIMARY — TAGGED TO THIS OPPORTUNITY] — never frame them as partners.',
+                  messages: [{ role: 'user', content: _correctivePrompt }]
+                });
+                trackCost('proposal_auto_regen', 'claude-opus-4-6', _retryResp.usage);
+                var _retryText = (_retryResp.content || []).filter(function(b){return b.type==='text';}).map(function(b){return b.text;}).join('');
+                if (_retryText && _retryText.length >= Math.max(2000, Math.floor(proposalText.length * 0.5))) {
+                  // Re-run post-processing bracket killer on the retry output
+                  _retryText = _retryText.replace(/\[(?:ACTION\s*REQUIRED|Correction|CORRECTION|Note|NOTE|TBD|TBC|To be determined|TO BE DETERMINED|To be completed|TO BE COMPLETED|Insert|INSERT|Confirm|CONFIRM|Verify|VERIFY|Placeholder|PLACEHOLDER|Pending|PENDING)(?:[:\-\s][^\[\]]{0,400})?\]/g, '');
+                  _retryText = _retryText.replace(/\n{3,}/g, '\n\n');
+                  // Re-run canon sweep on retry output to record delta (no further auto-regen)
+                  var _retryCs = [];
+                  for (var _rci = 0; _rci < _canonChecks.length; _rci++) {
+                    var _rck = _canonChecks[_rci];
+                    if (_rck.clientException && _oppAgencyNorm.indexOf(_rck.clientException) >= 0) continue;
+                    var _rm = _retryText.match(_rck.re) || [];
+                    if (_rm.length > 0) _retryCs.push({ label: _rck.label, count: _rm.length, samples: _rm.slice(0,3) });
+                  }
+                  var _retryCanonCrit = _retryCs.length;
+                  var _regenStatus = (_retryCanonCrit === 0) ? 'CLEAN' : 'PARTIAL';
+                  // Overwrite proposal_content with retry
+                  await supabase.from('opportunities').update({
+                    proposal_content: _retryText,
+                    last_updated: new Date().toISOString()
+                  }).eq('id', ppId);
+                  // Log the regen attempt with delta
+                  await supabase.from('organism_memory').insert({
+                    id: 'ar-' + ppId.slice(0,20) + '-' + Date.now(),
+                    agent: 'proposal_auto_regen',
+                    opportunity_id: ppId,
+                    observation: 'AUTO-REGEN ' + _regenStatus + ' for ' + (opp.title||'').slice(0,60) +
+                      ' | Pre-regen canon critical: ' + _canonCritCount + ' | Post-regen canon critical: ' + _retryCanonCrit +
+                      ' | Pre-regen red-team critical: ' + critCount +
+                      ' | Pre-regen chars: ' + proposalText.length + ' | Post-regen chars: ' + _retryText.length +
+                      ' | Defects fixed: ' + Math.max(0, _canonCritCount - _retryCanonCrit) +
+                      ' | Residual canon violations: ' + (_retryCs.map(function(x){return x.label+'x'+x.count;}).join(', ') || 'none'),
+                    memory_type: 'analysis',
+                    created_at: new Date().toISOString()
+                  });
+                  log('AUTO-REGEN: ' + _regenStatus + ' — canon ' + _canonCritCount + '→' + _retryCanonCrit + ', chars ' + proposalText.length + '→' + _retryText.length);
+                  proposalText = _retryText;
+                  // Update proposal_review to note the regen happened
+                  await supabase.from('opportunities').update({
+                    proposal_review: '[AUTO-REGEN ' + _regenStatus + '] ' + reviewStorage + '\n\n=== AUTO-REGEN DELTA ===\nPre-regen canon critical: ' + _canonCritCount + '\nPost-regen canon critical: ' + _retryCanonCrit + '\nResidual: ' + (_retryCs.map(function(x){return x.label+'x'+x.count;}).join(', ') || 'none'),
+                    last_updated: new Date().toISOString()
+                  }).eq('id', ppId);
+                } else {
+                  log('AUTO-REGEN: retry output too short (' + (_retryText||'').length + ' chars), keeping original');
+                  await supabase.from('organism_memory').insert({
+                    id: 'ar-fail-' + ppId.slice(0,20) + '-' + Date.now(),
+                    agent: 'proposal_auto_regen',
+                    opportunity_id: ppId,
+                    observation: 'AUTO-REGEN FAILED (retry output too short: ' + (_retryText||'').length + ' chars vs threshold ' + Math.max(2000, Math.floor(proposalText.length * 0.5)) + '). Original proposal retained with defects flagged for manual review.',
+                    memory_type: 'analysis',
+                    created_at: new Date().toISOString()
+                  });
+                }
+              } catch(_regenErr) {
+                log('AUTO-REGEN ERROR: ' + (_regenErr.message||'').slice(0,300));
+              }
+            }
+          } else if (_needsRegen && _isRetryCall) {
+            log('AUTO-REGEN: skipped — this IS the retry call (retry flag set)');
+          } else {
+            log('AUTO-REGEN: not needed — no critical findings, proposal passes gate');
+          }
+        } catch(_gateErr) {
+          log('AUTO-REGEN GATE ERROR (non-fatal): ' + (_gateErr.message||'').slice(0,200));
+        }
       } catch(rtErr) {
         log('RED TEAM ERROR: ' + rtErr.message);
       }
