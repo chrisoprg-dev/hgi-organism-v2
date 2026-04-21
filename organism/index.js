@@ -1601,6 +1601,23 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       var arAfter = (proposalText.match(/ACTION REQUIRED/gi) || []).length;
       log('PROPOSAL ENGINE: Post-processing reduced ACTION REQUIRED from ' + arBefore + ' to ' + arAfter);
 
+      // S125 UNIVERSAL BRACKET KILLER — strip any bracketed meta-commentary that slipped
+      // through the specific regex table above. Applies to every future proposal forever.
+      // Permitted: [TO BE ASSIGNED] for Key Personnel positions (on-policy).
+      // Stripped: [ACTION REQUIRED: ...], [Correction: ...], [TBD], [Note: ...],
+      //           [verify ...], [placeholder ...], [TO BE DETERMINED], [To be determined],
+      //           [To be completed ...], [Insert ...], [Confirm ...] residuals, etc.
+      var bkBefore = proposalText.length;
+      var _permit = /\[TO BE ASSIGNED(?:\s*[-—]\s*SUBCONSULTANT)?\]/gi;
+      var _permitHits = (proposalText.match(_permit) || []).length;
+      proposalText = proposalText.replace(/\[(?:ACTION\s*REQUIRED|Correction|CORRECTION|Note|NOTE|TBD|TBC|To be determined|TO BE DETERMINED|To be completed|TO BE COMPLETED|Insert|INSERT|Confirm|CONFIRM|Verify|VERIFY|Placeholder|PLACEHOLDER|Pending|PENDING)(?:[:\-\s][^\[\]]{0,400})?\]/g, '');
+      // Also kill stray bracketless ACTION REQUIRED residuals that slipped the table
+      proposalText = proposalText.replace(/ACTION REQUIRED(?:\s+SUMMARY)?\s*\(?[^\n\r]{0,300}?\)?\s*:?\s*\n?/gi, '');
+      // Collapse any double-newline trails left by bracket removal
+      proposalText = proposalText.replace(/\n{3,}/g, '\n\n');
+      var bkAfter = (proposalText.match(/\[(?:ACTION\s*REQUIRED|Correction|CORRECTION|Note|NOTE|TBD|TBC|To be determined|TO BE DETERMINED|To be completed|TO BE COMPLETED|Insert|INSERT|Confirm|CONFIRM|Verify|VERIFY|Placeholder|PLACEHOLDER|Pending|PENDING)/gi) || []).length;
+      log('PROPOSAL ENGINE: Universal bracket killer — preserved ' + _permitHits + ' [TO BE ASSIGNED] markers, removed other brackets, ' + bkAfter + ' residuals remain, char delta ' + (proposalText.length - bkBefore));
+
       // 6. Store the proposal in dedicated column (NOT capture_action — that's the organism's internal analysis)
       await supabase.from('opportunities').update({
         proposal_content: proposalText,
@@ -1727,6 +1744,59 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         var reviewStorage = rtReport ?
           summary + '\n\n' + JSON.stringify(rtReport, null, 2) :
           summary + '\n\n' + reviewResp;
+
+        // S125 DETERMINISTIC CANON SWEEP — runs independent of red team model,
+        // catches identity drift / exclusion tokens / visible brackets / production
+        // hygiene failures that the model-based review can miss. Universal to every
+        // future proposal. If any CRITICAL canon violation is found, proposal_review
+        // summary is prefixed with [CANON FAIL] and rtReport.overall_status is
+        // force-flipped to FAIL so the downstream approval UI can gate on it.
+        try {
+          var _cs = [];
+          var _canonChecks = [
+            { re: /\b(?:19[23]0|1931|1932)\b/g, label: 'FOUNDING_YEAR_DRIFT', severity: 'CRITICAL', note: 'Founding year must be 1929. Any other 19xx year near founding is a canon violation.' },
+            { re: /\b9[3456]\s*[-\s]?\s*year(?:s)?\b/gi, label: 'AGE_DRIFT', severity: 'CRITICAL', note: 'Firm age must compute from 1929. 93/94/95/96-year phrasing is a canon violation (current is 97-year).' },
+            { re: /\bPBGC\b/g, label: 'EXCLUSION_PBGC', severity: 'CRITICAL', note: 'PBGC must not appear as HGI past performance.' },
+            { re: /\b(?:TPCIGA|LIGA)\b/g, label: 'EXCLUSION_LIGA_TPCIGA', severity: 'CRITICAL', note: 'LIGA/TPCIGA must not appear as HGI past performance.' },
+            { re: /Orleans Parish School Board|\bOPSB\b/gi, label: 'EXCLUSION_OPSB_PP', severity: 'CRITICAL', note: 'OPSB must not appear as HGI past performance. (OK as client name only.)' },
+            { re: /\bGeoffrey\b|\bBrien\b/g, label: 'EXCLUSION_GEOFFREY_BRIEN', severity: 'CRITICAL', note: 'Geoffrey Brien no longer works at HGI.' },
+            { re: /\bTangipahoa\b/gi, label: 'GEOGRAPHIC_DRIFT', severity: 'CRITICAL', note: 'Terrebonne (not Tangipahoa) is HGI past performance.' },
+            { re: /\[(?!TO BE ASSIGNED)(?:ACTION\s*REQUIRED|Correction|CORRECTION|TBD|TBC|To be determined|TO BE DETERMINED|Insert|INSERT|Placeholder|PLACEHOLDER|Pending|PENDING)[^\[\]]{0,300}\]/g, label: 'VISIBLE_BRACKET_PLACEHOLDER', severity: 'CRITICAL', note: 'Submission-ready output must not contain visible bracketed placeholders except [TO BE ASSIGNED].' }
+          ];
+          for (var _ci = 0; _ci < _canonChecks.length; _ci++) {
+            var _ck = _canonChecks[_ci];
+            var _m = proposalText.match(_ck.re) || [];
+            if (_m.length > 0) {
+              _cs.push({ severity: _ck.severity, label: _ck.label, count: _m.length, samples: _m.slice(0, 3), note: _ck.note });
+            }
+          }
+          var _canonCritCount = _cs.filter(function(x){ return x.severity === 'CRITICAL'; }).length;
+          if (_cs.length > 0) {
+            log('CANON SWEEP: ' + _cs.length + ' violation class(es) found, ' + _canonCritCount + ' CRITICAL: ' + _cs.map(function(x){return x.label + 'x' + x.count}).join(', '));
+            var canonBlock = '\n\n=== DETERMINISTIC CANON SWEEP (S125) ===\n' +
+              _cs.map(function(v){ return '[' + v.severity + '] ' + v.label + ' (' + v.count + ' occurrence' + (v.count>1?'s':'') + '): samples=' + JSON.stringify(v.samples) + '\n  Fix: ' + v.note; }).join('\n') + '\n';
+            if (_canonCritCount > 0) {
+              reviewStorage = '[CANON FAIL] ' + reviewStorage + canonBlock;
+              // Force-flip overall_status in the structured JSON if parseable
+              if (rtReport) {
+                rtReport.overall_status = 'FAIL';
+                rtReport.canon_sweep = _cs;
+                rtReport.canon_fail = true;
+                reviewStorage = '[CANON FAIL] ' + summary + ' | canon_violations=' + _canonCritCount + '\n\n' + JSON.stringify(rtReport, null, 2) + canonBlock;
+              }
+            } else {
+              reviewStorage = reviewStorage + canonBlock;
+              if (rtReport) {
+                rtReport.canon_sweep = _cs;
+                reviewStorage = summary + '\n\n' + JSON.stringify(rtReport, null, 2) + canonBlock;
+              }
+            }
+          } else {
+            log('CANON SWEEP: clean — zero identity/exclusion/bracket violations');
+          }
+        } catch(_csErr) {
+          log('CANON SWEEP ERROR (non-fatal): ' + _csErr.message);
+        }
 
         await supabase.from('opportunities').update({
           proposal_review: reviewStorage,
