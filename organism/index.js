@@ -5337,6 +5337,72 @@ if (url === '/api/extract-rfp-reqs' && req.method === 'POST') {
   return;
 }
 
+// === REFETCH RFP CORPUS — /api/refetch-rfp-corpus (S126) ===
+// Addendum-aware re-fetch of source page. Unlike autoRetrieveRFPs which gates on
+// rfp_document_retrieved=false and caps at 3 PDFs, this re-pulls the FULL document
+// set (cap 25) regardless of prior retrieval, writes a structured documents[] ledger
+// + addendum_coverage[], rebuilds rfp_text with explicit doc separators, then re-runs
+// extractRFPRequirements on the new corpus. Use whenever an opp moves to `pursuing`
+// or before any proposal regen. Body: {id: "opp-id"}. Returns diff vs prior documents[].
+// Origin bug: SJPG (S125) — Addendum #1 specifying District 5 Senior Center never
+// reached the system; orchestrator generated a generic "find a project" proposal.
+if (url === '/api/refetch-rfp-corpus' && req.method === 'POST') {
+  var rfBody = '';
+  for await (const chunk of req) rfBody += chunk;
+  var rfId = '';
+  try { rfId = JSON.parse(rfBody || '{}').id || ''; } catch(e) {}
+  if (!rfId) { res.writeHead(400); res.end(JSON.stringify({error:'id required'})); return; }
+  try {
+    var rfOpp = await supabase.from('opportunities')
+      .select('id,title,agency,source_url,rfp_text,documents,rfp_document_url,addendum_coverage')
+      .eq('id', rfId).single();
+    if (!rfOpp.data) { res.writeHead(404); res.end(JSON.stringify({error:'opp not found'})); return; }
+    var rfResult = await refetchRFPCorpus(rfOpp.data);
+    if (!rfResult.ok) {
+      res.writeHead(500, {'Content-Type':'application/json'});
+      res.end(JSON.stringify(rfResult));
+      return;
+    }
+    var rfUpdate = {
+      documents: rfResult.documents,
+      rfp_text: rfResult.rfp_text,
+      addendum_coverage: rfResult.addendum_coverage,
+      documents_fetched: true,
+      rfp_document_retrieved: rfResult.rfp_text_chars > 2000,
+      last_updated: new Date().toISOString()
+    };
+    if (rfResult.rfp_document_url) rfUpdate.rfp_document_url = rfResult.rfp_document_url;
+    await supabase.from('opportunities').update(rfUpdate).eq('id', rfId);
+    var rfReqs = null;
+    if (rfResult.rfp_text && rfResult.rfp_text.length >= 500) {
+      rfReqs = await extractRFPRequirements(rfResult.rfp_text.slice(0, 180000), rfOpp.data);
+      if (rfReqs) {
+        await supabase.from('opportunities').update({ rfp_requirements: rfReqs, last_updated: new Date().toISOString() }).eq('id', rfId);
+      }
+    }
+    res.writeHead(200, {'Content-Type':'application/json'});
+    res.end(JSON.stringify({
+      ok: true,
+      opp_id: rfId,
+      opp_title: (rfOpp.data.title||'').slice(0,120),
+      documents_count: rfResult.documents_count,
+      parsed_count: rfResult.parsed_count,
+      addendum_count: rfResult.addendum_coverage.length,
+      rfp_text_chars: rfResult.rfp_text_chars,
+      diff: rfResult.diff,
+      addendum_coverage: rfResult.addendum_coverage,
+      documents: rfResult.documents.map(function(d) { return { url: d.url, filename: d.filename, kind: d.kind, status: d.status, char_count: d.char_count }; }),
+      requirements_extracted: !!rfReqs,
+      requirements_count: rfReqs ? (rfReqs.requirements||[]).length : 0
+    }));
+  } catch(e) {
+    log('REFETCH-RFP-CORPUS ERROR: ' + e.message);
+    res.writeHead(500, {'Content-Type':'application/json'});
+    res.end(JSON.stringify({error: e.message}));
+  }
+  return;
+}
+
 // === BACKFILL FACT-CHECK — /api/backfill-fact-check (S118) ===
 // Runs the S107 Haiku fact-checker retroactively over scope_analyses that predate
 // the live fact-checker. Does NOT modify scope_analysis content. Stores verdicts to
@@ -9768,6 +9834,172 @@ async function autoRetrieveRFPs() {
   return results;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// detectDocKind + refetchRFPCorpus — S126 addendum-aware ingestion
+// Closes the SJPG-class scope-discovery gap: re-fetches source page on demand,
+// removes 3-PDF cap (raised to 25), writes structured documents[] + addendum_coverage[].
+// Reuses cbLogin() for CentralAuctionHouse auth.
+// ─────────────────────────────────────────────────────────────────────────────
+function detectDocKind(filename, label) {
+  var t = ((filename || '') + ' ' + (label || '')).toLowerCase();
+  if (/addend|amend\b|addn\b/.test(t)) return 'addendum';
+  if (/q\s*&\s*a|q-and-a|qna|questions.{0,10}answers|answers.{0,10}questions/.test(t)) return 'q&a';
+  if (/rfp|rfq|sow|scope|solicitation|specifications?/.test(t)) return 'solicitation';
+  if (/attach|exhibit|appendix|form\b|schedule/.test(t)) return 'attachment';
+  return 'unknown';
+}
+
+async function refetchRFPCorpus(opp) {
+  if (!opp || !opp.source_url) return { ok: false, error: 'no source_url' };
+  var srcUrl = opp.source_url;
+  if (!srcUrl.startsWith('http')) return { ok: false, error: 'invalid source_url' };
+  var isCB = srcUrl.includes('centralauctionhouse.com') || srcUrl.includes('centralbidding.com');
+  log('REFETCH-RFP: ' + (opp.title||'').slice(0,50) + ' [' + (isCB ? 'CB' : 'std') + ']');
+
+  var fetchHeaders = { 'User-Agent': 'Mozilla/5.0 (compatible; HGI-Organism/2.0)' };
+  if (isCB) {
+    var cbCookie = await cbLogin();
+    if (cbCookie) fetchHeaders['Cookie'] = cbCookie;
+  }
+
+  var resp;
+  try {
+    resp = await fetch(srcUrl, { headers: fetchHeaders, redirect: 'follow', signal: AbortSignal.timeout(30000) });
+  } catch(fe) { return { ok: false, error: 'source fetch: ' + (fe.message||'').slice(0,100) }; }
+  if (!resp.ok) return { ok: false, error: 'source HTTP ' + resp.status };
+
+  var ct = resp.headers.get('content-type') || '';
+  var html = '';
+  var pageText = '';
+  if (ct.includes('html') || ct === '' || ct.includes('text/plain')) {
+    html = await resp.text();
+    pageText = html
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#\d+;/g, '')
+      .replace(/\s+/g, ' ').trim();
+  } else if (ct.includes('pdf') && pdfParse) {
+    try {
+      var srcBuf = Buffer.from(await resp.arrayBuffer());
+      var srcParsed = await pdfParse(srcBuf);
+      pageText = srcParsed.text || '';
+    } catch(pe) { pageText = ''; }
+  }
+
+  var docLinks = [];
+  var labelMap = {};
+  if (html) {
+    var pdfRx = /href=["']([^"']*\.pdf[^"']*)/gi;
+    var m;
+    while ((m = pdfRx.exec(html)) !== null) {
+      var pdfUrl = m[1];
+      try { pdfUrl = new URL(pdfUrl, srcUrl).href; } catch(e) { continue; }
+      if (docLinks.indexOf(pdfUrl) < 0) docLinks.push(pdfUrl);
+    }
+    var attRx = /href=["']((?:https?:\/\/[^"']*)?\/Attachment\/[a-f0-9]+)/gi;
+    while ((m = attRx.exec(html)) !== null) {
+      var attUrl = m[1];
+      try { attUrl = new URL(attUrl, srcUrl).href; } catch(e) { continue; }
+      if (docLinks.indexOf(attUrl) < 0) docLinks.push(attUrl);
+    }
+    var anchorRx = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    var am;
+    while ((am = anchorRx.exec(html)) !== null) {
+      var aHref = am[1];
+      try { aHref = new URL(aHref, srcUrl).href; } catch(e) { continue; }
+      var aText = am[2].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
+      if (aText && !labelMap[aHref]) labelMap[aHref] = aText;
+    }
+  }
+
+  if (docLinks.length > 25) {
+    log('REFETCH-RFP: capping ' + docLinks.length + ' links at 25');
+    docLinks = docLinks.slice(0, 25);
+  }
+
+  var documents = [];
+  var assembledText = pageText ? ('=== SOURCE PAGE ===\n' + pageText) : '';
+  var rfpDocUrl = null;
+
+  for (var di = 0; di < docLinks.length; di++) {
+    var dUrl = docLinks[di];
+    var dLabel = labelMap[dUrl] || '';
+    var dFilename = (dUrl.split('/').pop() || '').slice(0, 100);
+    var dKind = detectDocKind(dFilename, dLabel);
+    var docEntry = {
+      url: dUrl,
+      filename: dFilename,
+      label: dLabel.slice(0, 200),
+      kind: dKind,
+      char_count: 0,
+      fetched_at: new Date().toISOString(),
+      status: 'pending'
+    };
+    try {
+      var dHeaders = { 'User-Agent': 'Mozilla/5.0 (compatible; HGI-Organism/2.0)' };
+      if (isCB && fetchHeaders['Cookie']) dHeaders['Cookie'] = fetchHeaders['Cookie'];
+      var dResp = await fetch(dUrl, { headers: dHeaders, redirect: 'follow', signal: AbortSignal.timeout(30000) });
+      var dCt = dResp.headers.get('content-type') || '';
+      if (dResp.ok && (dCt.includes('pdf') || dUrl.endsWith('.pdf') || dUrl.includes('/Attachment/'))) {
+        var dBuf = Buffer.from(await dResp.arrayBuffer());
+        if (dBuf.length > 1000 && (dBuf[0] === 0x25 || dCt.includes('pdf')) && pdfParse) {
+          try {
+            var dParsed = await pdfParse(dBuf);
+            if (dParsed.text && dParsed.text.length > 100) {
+              docEntry.char_count = dParsed.text.length;
+              docEntry.status = 'parsed';
+              assembledText += '\n\n=== DOCUMENT ' + (di + 1) + ': ' + dKind.toUpperCase() + ' \u2014 ' + dFilename + (dLabel ? ' (' + dLabel.slice(0,80) + ')' : '') + ' ===\n' + dParsed.text;
+              if (!rfpDocUrl) rfpDocUrl = dUrl;
+            } else {
+              docEntry.status = 'empty_parse';
+            }
+          } catch(parseErr) {
+            docEntry.status = 'parse_error:' + (parseErr.message||'').slice(0,50);
+          }
+        } else {
+          docEntry.status = 'not_pdf';
+        }
+      } else {
+        docEntry.status = 'http_' + dResp.status;
+      }
+    } catch(de) {
+      docEntry.status = 'fetch_error:' + (de.message||'').slice(0, 60);
+    }
+    documents.push(docEntry);
+  }
+
+  var existingDocs = Array.isArray(opp.documents) ? opp.documents : [];
+  var existingUrls = existingDocs.map(function(d) { return d && d.url; }).filter(Boolean);
+  var newUrls = documents.map(function(d) { return d.url; });
+  var addedDocs = documents.filter(function(d) { return existingUrls.indexOf(d.url) < 0; });
+  var removedDocs = existingDocs.filter(function(d) { return d && d.url && newUrls.indexOf(d.url) < 0; });
+  var unchangedDocs = documents.filter(function(d) { return existingUrls.indexOf(d.url) >= 0; });
+
+  var addendumCoverage = documents
+    .filter(function(d) { return d.kind === 'addendum' && d.status === 'parsed'; })
+    .map(function(d) { return { url: d.url, filename: d.filename, label: d.label, fetched_at: d.fetched_at, char_count: d.char_count }; });
+
+  log('REFETCH-RFP: ' + documents.length + ' docs, ' + documents.filter(function(d){return d.status==='parsed';}).length + ' parsed, ' + addendumCoverage.length + ' addenda, ' + assembledText.length + ' chars assembled');
+
+  return {
+    ok: true,
+    opp_id: opp.id,
+    source_url: srcUrl,
+    documents: documents,
+    documents_count: documents.length,
+    parsed_count: documents.filter(function(d) { return d.status === 'parsed'; }).length,
+    addendum_coverage: addendumCoverage,
+    rfp_text: assembledText.slice(0, 200000),
+    rfp_text_chars: assembledText.length,
+    rfp_document_url: rfpDocUrl,
+    diff: {
+      added: addedDocs.map(function(d) { return { url: d.url, filename: d.filename, kind: d.kind }; }),
+      removed: removedDocs.map(function(d) { return { url: d.url, filename: d.filename, kind: d.kind }; }),
+      unchanged_count: unchangedDocs.length
+    }
+  };
+}
 
 
 // ============================================================
