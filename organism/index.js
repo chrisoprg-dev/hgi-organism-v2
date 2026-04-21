@@ -1064,7 +1064,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       var ciText = '';
       if (ciRelevant.length > 0) {
         ciText = ciRelevant.map(function(c) {
-          var _tag = (c.opportunity_id === ppId) ? ' [PRIMARY — TAGGED TO THIS OPPORTUNITY]' : '';
+          var _tag = (c.opportunity_id === ppId) ? ' [most relevant — confirmed in this market]' : '';
           return '### ' + (c.competitor_name||'Unknown') + _tag +
             '\nHQ: ' + (c.hq_location||'') + ' | Size: ' + (c.company_size||'') + ' | Threat: ' + (c.threat_level||'') +
             '\nStrengths: ' + (c.strengths||'') +
@@ -1375,11 +1375,11 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
               '   Claim: ' + d.claim + '\n' +
               '   Evidence anchor: ' + d.evidence_anchor_type + (d.evidence_anchor_id ? ' (' + d.evidence_anchor_id + ')' : '') + '\n' +
               (d.evidence_quote ? '   Evidence quote: "' + d.evidence_quote + '"\n' : '') +
-              (d.competitor_gap ? '   Competitor gap: ' + d.competitor_gap : '');
+              (d.competitor_gap ? '   Market gap HGI fills (internal note — never name or reference any other firm in proposal output): ' + d.competitor_gap : '');
           }).join('\n\n');
           log('L4 DISCRIMINATORS: injected ' + _discRows.length + ' into prompt');
         } else {
-          discriminatorsText = '(no discriminators generated — senior writer must infer competitive differentiation from scope + past performance + competitive intelligence)';
+          discriminatorsText = '(no discriminators generated — senior writer should ground claims in scope + past performance only; never reference or compare against other firms in proposal output)';
         }
       } catch(_discErr) {
         log('L4 DISCRIMINATORS fetch error: ' + (_discErr.message||'').slice(0,200));
@@ -1567,7 +1567,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       var stream = await anthropic.messages.stream({
         model: 'claude-opus-4-6',
         max_tokens: 128000,
-        system: 'You are a senior government proposal writer at HGI Global (Hammerman & Gainer LLC), a 97-year-old Louisiana-based firm. You produce submission-ready documents that WIN — not average drafts. Every word earns points with evaluators. You match the exact format each solicitation requires (questionnaire forms filled field-by-field, narrative proposals with specified sections, exhibits completed). You are specific, factual, direct, and persuasive. You use only confirmed company data. You write like the firm President would write — authoritative, zero filler, zero hedging. CRITICAL: Geoffrey Brien no longer works at HGI. Never include him. CRITICAL: Do NOT auto-assign HGI leadership (CEO, VP, CAO, etc.) to project roles. All positions are OPEN — describe role requirements and qualifications needed, not pre-filled names. Use [TO BE ASSIGNED] for Key Personnel unless explicitly instructed otherwise. CRITICAL PAST PERFORMANCE RULES (S116): (1) The user message contains a "## TOP-RELEVANT PAST PERFORMANCE FOR THIS RFP" section with 3 pre-selected PPs ranked for this specific RFP. Feature those 3 prominently in Past Performance sections. (2) HARD EXCLUSIONS — never list any of these as HGI past performance without explicit President confirmation: PBGC, Orleans Parish School Board (OPSB), LIGA, TPCIGA. If the RFP client IS one of these (e.g. OPSB itself), reference them as the client/agency — never as HGI past performance. (3) No current FEMA Public Assistance contract may be claimed. (4) Use only values exactly as stated in the TOP-RELEVANT PAST PERFORMANCE section — do not alter dollar amounts, dates, scope, or metrics. CRITICAL VOICE RULES (S117): (A) EVIDENCE STRUCTURE — lead every substantive paragraph with the outcome, then supply the evidence that proves it, then describe the methodology. Never lead with methodology. (B) PROHIBITED PHRASES — never use: "we believe", "we feel", "in our opinion", "we are pleased to", "we would be happy to", "rest assured", "leverage synergies", "best-in-class", "cutting-edge", "world-class", "innovative solutions", "paradigm shift", "next-generation", "turn-key solution", "robust framework". These are hedge-words and consulting jargon. Replace with concrete claims backed by cited evidence. (C) SPECIFICITY DISCIPLINE — always cite: specific dollar amounts (use HGI_PP values exactly), specific program names with dates, specific regulatory sections (e.g. "2 CFR 200.318"), specific quantified scale ("185,000+ applications"). Never write "substantial experience", "significant scale", "many applications", or "applicable federal regulations". (D) SIGNATURE POSTURE — the voice is the firm President writing directly. Use signature phrases naturally when relevant: "zero misappropriation", "Louisiana-rooted", "continuously since 1929", "fiduciary stewardship", "100% minority-owned", "audit-readiness", "documented outcome". Never manufacture these phrases where they do not belong. CRITICAL COMPETITIVE DIFFERENTIATION (S125): The user message contains a "## COMPETITIVE INTELLIGENCE DATABASE" section. Competitor entries flagged "[PRIMARY — TAGGED TO THIS OPPORTUNITY]" are the firms actually bidding against HGI on THIS solicitation. You must: (1) NEVER frame a tagged primary competitor as a partner, subcontractor, teaming option, or neutral third party. If the RFP references an organization that is tagged as a primary competitor, describe HGI\'s independent capability to do the work — do not treat that organization as a collaborator. (2) Write at least two paragraphs — one in Technical Approach/Capacity and one in Background/Past Performance — that differentiate HGI from named primary competitors. Name the specific capability gap, scale gap, compliance-record gap, geographic gap, or institutional-knowledge gap that HGI closes. (3) When a competitor\'s "Weaknesses" field lists specific deficiencies (prior findings, turnover, limited scale, out-of-state HQ, single-state footprint, recent formation, etc.), convert each into an evaluator-scorable HGI strength without naming the competitor ("Unlike single-state consultancies…", "Unlike recently-formed LLCs without audit history…"). (4) Never write generic differentiation ("HGI is the clear choice", "HGI stands apart", "HGI is uniquely qualified"). Every differentiation claim must tie to a named capability and a documented HGI data point. CRITICAL IDENTITY FACTS (S125): HGI Global was founded in 1929. The firm is in its 97th year of continuous operation. NEVER write "1931", "1930", or any founding year other than 1929. NEVER write "95 years" or "95-year" — the firm is 97 years old. NEVER write "96 years" unless explicitly instructed. If age is mentioned, compute from 1929 or use the exact phrase "97-year-old" / "continuously since 1929". Never hedge identity facts with "approximately", "nearly", or "over". CRITICAL PRODUCTION HYGIENE (S125): Your output must be submission-ready. NEVER emit visible bracketed placeholders of the form "[ACTION REQUIRED: ...]", "[Correction: ...]", "[TO BE DETERMINED]", "[TBD]", "[placeholder]", or similar meta-commentary visible to the evaluator. The ONLY bracketed element permitted in final output is "[TO BE ASSIGNED]" for Key Personnel positions per the rule above. If you would otherwise have written an action-required or correction bracket, resolve it silently: write the correct text or omit the element entirely.',
+        system: 'You are a senior government proposal writer at HGI Global (Hammerman & Gainer LLC), a 97-year-old Louisiana-based firm. You produce submission-ready documents that WIN — not average drafts. Every word earns points with evaluators. You match the exact format each solicitation requires (questionnaire forms filled field-by-field, narrative proposals with specified sections, exhibits completed). You are specific, factual, direct, and persuasive. You use only confirmed company data. You write like the firm President would write — authoritative, zero filler, zero hedging. CRITICAL: Geoffrey Brien no longer works at HGI. Never include him. CRITICAL: Do NOT auto-assign HGI leadership (CEO, VP, CAO, etc.) to project roles. All positions are OPEN — describe role requirements and qualifications needed, not pre-filled names. Use [TO BE ASSIGNED] for Key Personnel unless explicitly instructed otherwise. CRITICAL PAST PERFORMANCE RULES (S116): (1) The user message contains a "## TOP-RELEVANT PAST PERFORMANCE FOR THIS RFP" section with 3 pre-selected PPs ranked for this specific RFP. Feature those 3 prominently in Past Performance sections. (2) HARD EXCLUSIONS — never list any of these as HGI past performance without explicit President confirmation: PBGC, Orleans Parish School Board (OPSB), LIGA, TPCIGA. If the RFP client IS one of these (e.g. OPSB itself), reference them as the client/agency — never as HGI past performance. (3) No current FEMA Public Assistance contract may be claimed. (4) Use only values exactly as stated in the TOP-RELEVANT PAST PERFORMANCE section — do not alter dollar amounts, dates, scope, or metrics. CRITICAL VOICE RULES (S117): (A) EVIDENCE STRUCTURE — lead every substantive paragraph with the outcome, then supply the evidence that proves it, then describe the methodology. Never lead with methodology. (B) PROHIBITED PHRASES — never use: "we believe", "we feel", "in our opinion", "we are pleased to", "we would be happy to", "rest assured", "leverage synergies", "best-in-class", "cutting-edge", "world-class", "innovative solutions", "paradigm shift", "next-generation", "turn-key solution", "robust framework". These are hedge-words and consulting jargon. Replace with concrete claims backed by cited evidence. (C) SPECIFICITY DISCIPLINE — always cite: specific dollar amounts (use HGI_PP values exactly), specific program names with dates, specific regulatory sections (e.g. "2 CFR 200.318"), specific quantified scale ("185,000+ applications"). Never write "substantial experience", "significant scale", "many applications", or "applicable federal regulations". (D) SIGNATURE POSTURE — the voice is the firm President writing directly. Use signature phrases naturally when relevant: "zero misappropriation", "Louisiana-rooted", "continuously since 1929", "fiduciary stewardship", "100% minority-owned", "audit-readiness", "documented outcome". Never manufacture these phrases where they do not belong. CRITICAL COMPETITIVE INTELLIGENCE USE (S125): The user message contains a \"## COMPETITIVE INTELLIGENCE DATABASE\" section listing other firms in this market. This data is INTERNAL INTELLIGENCE for your strategic use only. You must: (1) NEVER name any competitor in proposal output. NEVER reference, allude to, or acknowledge that other bidders exist. The proposal reads as if HGI is the only firm in the room. (2) NEVER write comparative language of any kind in the proposal: no \"unlike other firms\", \"unlike single-state consultancies\", \"competitors lack\", \"we are the only\", \"we stand apart\", \"while others\", \"compared to\", \"whereas other firms\", or similar. The proposal is about HGI — it is not a comparison document. (3) NEVER frame an organization tagged as a competitor as a partner, subcontractor, or teaming option. If the RFP references such an organization in a regulatory or contextual capacity (e.g., a regional planning commission whose plans must be cited for consistency), reference the organization\\\'s document or role narrowly without describing them as a collaborator. (4) Use the competitive intelligence to DECIDE what HGI emphasizes — if competitors are smaller, lead with HGI\\\'s scale; if competitors are out-of-state, lead with HGI\\\'s Louisiana footprint; if competitors lack federal compliance depth, lead with HGI\\\'s zero-finding record across $14B in federal program administration. The intelligence shapes WHICH HGI strengths get foregrounded. The proposal text itself never references competitors directly or comparatively. CRITICAL IDENTITY FACTS (S125): HGI Global was founded in 1929. The firm is in its 97th year of continuous operation. NEVER write "1931", "1930", or any founding year other than 1929. NEVER write "95 years" or "95-year" — the firm is 97 years old. NEVER write "96 years" unless explicitly instructed. If age is mentioned, compute from 1929 or use the exact phrase "97-year-old" / "continuously since 1929". Never hedge identity facts with "approximately", "nearly", or "over". CRITICAL PRODUCTION HYGIENE (S125): Your output must be submission-ready. NEVER emit visible bracketed placeholders of the form "[ACTION REQUIRED: ...]", "[Correction: ...]", "[TO BE DETERMINED]", "[TBD]", "[placeholder]", or similar meta-commentary visible to the evaluator. The ONLY bracketed element permitted in final output is "[TO BE ASSIGNED]" for Key Personnel positions per the rule above. If you would otherwise have written an action-required or correction bracket, resolve it silently: write the correct text or omit the element entirely.',
         messages: [{role:'user', content: proposalPrompt}]
       });
       var finalMessage = await stream.finalMessage();
@@ -1766,7 +1766,13 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
             { re: /Orleans Parish School Board|\bOPSB\b/gi, label: 'EXCLUSION_OPSB_PP', severity: 'CRITICAL', note: 'OPSB must not appear as HGI past performance. (OK as client name only.)', clientException: 'orleans parish school board' },
             { re: /\bGeoffrey\b|\bBrien\b/g, label: 'EXCLUSION_GEOFFREY_BRIEN', severity: 'CRITICAL', note: 'Geoffrey Brien no longer works at HGI.', clientException: null },
             { re: /\bTangipahoa\b/gi, label: 'GEOGRAPHIC_DRIFT', severity: 'CRITICAL', note: 'Terrebonne (not Tangipahoa) is HGI past performance.', clientException: 'tangipahoa' },
-            { re: /\[(?!TO BE ASSIGNED)(?:ACTION\s*REQUIRED|Correction|CORRECTION|TBD|TBC|To be determined|TO BE DETERMINED|Insert|INSERT|Placeholder|PLACEHOLDER|Pending|PENDING)[^\[\]]{0,300}\]/g, label: 'VISIBLE_BRACKET_PLACEHOLDER', severity: 'CRITICAL', note: 'Submission-ready output must not contain visible bracketed placeholders except [TO BE ASSIGNED].', clientException: null }
+            { re: /\[(?!TO BE ASSIGNED)(?:ACTION\s*REQUIRED|Correction|CORRECTION|TBD|TBC|To be determined|TO BE DETERMINED|Insert|INSERT|Placeholder|PLACEHOLDER|Pending|PENDING)[^\[\]]{0,300}\]/g, label: 'VISIBLE_BRACKET_PLACEHOLDER', severity: 'CRITICAL', note: 'Submission-ready output must not contain visible bracketed placeholders except [TO BE ASSIGNED].', clientException: null },
+            { re: /\bcompetitor(?:s|s')?\b/gi, label: 'COMPETITOR_REFERENCE', severity: 'CRITICAL', note: 'Proposal must not reference, name, or acknowledge competitors. The proposal reads as if HGI is the only firm in the room.', clientException: null },
+            { re: /\bunlike\s+(?:other|single-state|recently-formed|national|regional|engineering-first|construction-first|larger|smaller|multi-parish|out-of-state|big[ -]?4)\b/gi, label: 'COMPARATIVE_LANGUAGE', severity: 'CRITICAL', note: 'Comparative language ("unlike X firms", "unlike multi-parish organizations", etc.) names or implies competitors. The proposal must read as HGI-only without comparison.', clientException: null },
+            { re: /\b(?:while|whereas)\s+other(?:s|\s+firms?)\b/gi, label: 'COMPARATIVE_LANGUAGE_2', severity: 'CRITICAL', note: 'Comparative language ("while other firms", "whereas others") names or implies competitors. Remove and reframe as HGI-only.', clientException: null },
+            { re: /\bno\s+(?:other|competing|competitor)\s+(?:firm|competitor|provider|consultant)/gi, label: 'COMPARATIVE_LANGUAGE_3', severity: 'CRITICAL', note: 'Phrases like "no other firm", "no competing firm" implicitly reference competitors. Reframe as HGI capability without comparison.', clientException: null },
+            { re: /\bwe\s+are\s+the\s+only\b/gi, label: 'COMPARATIVE_LANGUAGE_4', severity: 'CRITICAL', note: 'The phrase "we are the only" implies the rest of the field. Reframe as HGI capability without superlative comparison.', clientException: null },
+            { re: /\b(?:compared\s+to|vs\.?\s+|versus)\s+(?:other|competing|competitor)/gi, label: 'COMPARATIVE_LANGUAGE_5', severity: 'CRITICAL', note: 'Direct comparison phrasing references competitors. Remove.', clientException: null }
           ];
           for (var _ci = 0; _ci < _canonChecks.length; _ci++) {
             var _ck = _canonChecks[_ci];
@@ -1780,6 +1786,52 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
               _cs.push({ severity: _ck.severity, label: _ck.label, count: _m.length, samples: _m.slice(0, 3), note: _ck.note });
             }
           }
+
+          // S125 DYNAMIC COMPETITOR-NAME CHECK — fetch competitor names from CI DB
+          // (same scope as the prompt-injection used by produce-proposal) and check
+          // if ANY name from the intelligence database appears in the proposal output.
+          // This is the final safety net: even if the model ignores every prompt rule,
+          // a CI-tagged competitor name in the output is a CRITICAL canon failure that
+          // blocks the proposal until manually approved.
+          try {
+            var _ciNamesRes = await supabase.from('competitive_intelligence')
+              .select('competitor_name,opportunity_id,agency,vertical')
+              .or('opportunity_id.eq.' + ppId + ',agency.ilike.%' + (opp.agency||'').slice(0,30) + '%,vertical.ilike.%' + ((opp.vertical||'').toLowerCase()) + '%')
+              .limit(50);
+            var _ciNames = (_ciNamesRes.data || []).map(function(r){ return (r.competitor_name||'').trim(); }).filter(function(n){ return n && n.length >= 4; });
+            // Dedup
+            var _seen = {};
+            _ciNames = _ciNames.filter(function(n){ var k = n.toLowerCase(); if (_seen[k]) return false; _seen[k] = 1; return true; });
+            // Allow client-name skip (RFP client may legitimately appear)
+            var _clientLower = (opp.agency||'').toLowerCase();
+            var _hits = [];
+            for (var _ni = 0; _ni < _ciNames.length; _ni++) {
+              var _name = _ciNames[_ni];
+              if (_clientLower.indexOf(_name.toLowerCase()) >= 0) continue; // client-exception
+              // Escape regex special chars in competitor name
+              var _esc = _name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              var _nameRe = new RegExp('\\b' + _esc + '\\b', 'gi');
+              var _nameMatches = proposalText.match(_nameRe) || [];
+              if (_nameMatches.length > 0) {
+                _hits.push({ name: _name, count: _nameMatches.length });
+              }
+            }
+            if (_hits.length > 0) {
+              _cs.push({
+                severity: 'CRITICAL',
+                label: 'COMPETITOR_NAME_IN_PROPOSAL',
+                count: _hits.reduce(function(s,h){return s+h.count;}, 0),
+                samples: _hits.slice(0, 5).map(function(h){return h.name + ' x' + h.count;}),
+                note: 'Proposal contains the literal name(s) of competitor(s) tracked in the competitive_intelligence database. Competitors must NEVER appear in proposal output. Names: ' + _hits.map(function(h){return h.name;}).join(', ')
+              });
+              log('CANON SWEEP: COMPETITOR_NAME_IN_PROPOSAL — ' + _hits.length + ' name(s) leaked: ' + _hits.map(function(h){return h.name+'x'+h.count;}).join(', '));
+            } else {
+              log('CANON SWEEP: dynamic competitor-name check — clean (' + _ciNames.length + ' names in scope, 0 in proposal)');
+            }
+          } catch(_dynErr) {
+            log('CANON SWEEP dynamic check error (non-fatal): ' + (_dynErr.message||'').slice(0,200));
+          }
+
           var _canonCritCount = _cs.filter(function(x){ return x.severity === 'CRITICAL'; }).length;
           if (_cs.length > 0) {
             log('CANON SWEEP: ' + _cs.length + ' violation class(es) found, ' + _canonCritCount + ' CRITICAL: ' + _cs.map(function(x){return x.label + 'x' + x.count}).join(', '));
@@ -1882,7 +1934,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
                 var _retryStream = await anthropic.messages.stream({
                   model: 'claude-opus-4-6',
                   max_tokens: 32000,
-                  system: 'You are a senior government proposal writer at HGI Global (Hammerman & Gainer LLC), founded 1929, 97-year-old, 100% minority-owned. Fix every CRITICAL defect identified below. Emit ONLY the corrected full proposal text. Do NOT emit bracketed meta-commentary ([ACTION REQUIRED], [Correction], [TBD], etc.) — the ONLY permitted bracket is [TO BE ASSIGNED] for Key Personnel. Never write 1931, 1930, 95 years, 96 years — use 1929 and 97-year exactly. Geoffrey Brien is never mentioned. OPSB/LIGA/TPCIGA/PBGC are never listed as HGI past performance (only as client names where applicable). Differentiate explicitly against any competitors tagged [PRIMARY — TAGGED TO THIS OPPORTUNITY] — never frame them as partners.',
+                  system: 'You are a senior government proposal writer at HGI Global (Hammerman & Gainer LLC), founded 1929, 97-year-old, 100% minority-owned. Fix every CRITICAL defect identified below. Emit ONLY the corrected full proposal text. Do NOT emit bracketed meta-commentary ([ACTION REQUIRED], [Correction], [TBD], etc.) — the ONLY permitted bracket is [TO BE ASSIGNED] for Key Personnel. Never write 1931, 1930, 95 years, 96 years — use 1929 and 97-year exactly. Geoffrey Brien is never mentioned. OPSB/LIGA/TPCIGA/PBGC are never listed as HGI past performance (only as client names where applicable). NEVER name, reference, allude to, or acknowledge any competitor in proposal output. NEVER write comparative language ("unlike", "competitors lack", "while others", "compared to", etc.). The proposal reads as if HGI is the only firm in the room. Use any competitive intelligence to decide which HGI strengths to emphasize, never to call out other firms.',
                   messages: [{ role: 'user', content: _correctivePrompt }]
                 });
                 var _retryFinal = await _retryStream.finalMessage();
@@ -6699,13 +6751,13 @@ async function agentDiscriminatorSynthesizer(opp, opts) {
     '\n\nCOMPETITIVE INTELLIGENCE (from research on this opp):\n' + (compBlock || '(no comp intel rows)') +
     '\n\nFACT-CHECK FINDINGS (scope verification):\n' + (factBlock || '(no fact-check rows)') +
     '\n\nRELEVANT AGENT MEMORIES:\n' + (memBlock || '(no memory rows)') +
-    '\n\nTASK: Produce 3-5 discriminators for this specific opportunity. Each discriminator must have:' +
-    '\n- title: short claim (5-10 words), outcome-forward' +
-    '\n- claim: 1-2 sentence substantive claim stating what HGI delivers that competitors do not' +
+    '\n\nTASK: Produce 3-5 HGI strength claims for this specific opportunity. Each claim must have:' +
+    '\n- title: short claim (5-10 words), outcome-forward, focused on HGI capability (never reference any other firm)' +
+    '\n- claim: 1-2 sentence substantive HGI claim — what HGI delivers, with specific evidence. NEVER name, reference, allude to, or compare against any other firm. The claim must read as if HGI is the only firm in the market.' +
     '\n- evidence_anchor_type: one of [hgi_pp, competitive_intel, fact_check, org_memory]' +
     '\n- evidence_anchor_id: the exact ID from the bracketed reference (e.g. for [HGI_PP_0] use "HGI_PP_0"; for [COMP_INTEL_abc-123] use "abc-123")' +
-    '\n- evidence_quote: the exact phrase from the evidence source that backs this discriminator (<=200 chars)' +
-    '\n- competitor_gap: what competitors in this space typically LACK (gap characteristic, not competitor name)' +
+    '\n- evidence_quote: the exact phrase from the evidence source that backs this claim (<=200 chars). NEVER quote a competitor name; if the source contains one, paraphrase the substance without the name.' +
+    '\n- competitor_gap: INTERNAL STRATEGIC NOTE ONLY (never appears in proposal output) — describe a gap CHARACTERISTIC in this market that HGI fills (e.g. "small/recently-formed firms typically lack federal compliance scale"). NEVER name any competitor. Phrase as a market gap, not a callout.' +
     '\n\nReturn ONLY a JSON array of 3-5 objects. Example format:' +
     '\n[{"title":"...","claim":"...","evidence_anchor_type":"hgi_pp","evidence_anchor_id":"HGI_PP_0","evidence_quote":"...","competitor_gap":"..."}]';
 
@@ -7586,7 +7638,7 @@ async function runSingleRefinementPass(opp, proposalText, reviewText) {
   } catch(_ciL7e) { /* non-fatal */ }
   var ciOppText = ciOpp.length > 0 ?
     ciOpp.map(function(c){
-      return '### ' + c.competitor_name + ' [PRIMARY — TAGGED TO THIS OPPORTUNITY]' +
+      return '### ' + c.competitor_name + ' [most relevant — confirmed in this market]' +
         '\n  HQ: ' + (c.hq_location||'') + ' | Threat: ' + (c.threat_level||'') +
         '\n  Strengths: ' + (c.strengths||'').slice(0,300) +
         '\n  Weaknesses: ' + (c.weaknesses||'').slice(0,300) +
@@ -7610,7 +7662,7 @@ async function runSingleRefinementPass(opp, proposalText, reviewText) {
       return '## DISCRIMINATOR ' + d.discriminator_num + ': ' + d.title +
         '\n  Claim: ' + (d.claim||'').slice(0,400) +
         '\n  Evidence: ' + (d.evidence_quote||'').slice(0,300) +
-        '\n  Competitor gap: ' + (d.competitor_gap||'').slice(0,300);
+        '\n  Market gap HGI fills (internal note — never name or reference any other firm in proposal output): ' + (d.competitor_gap||'').slice(0,300);
     }).join('\n\n') : '(no discriminators generated for this opp)';
 
   var researchResults = await Promise.allSettled([
@@ -7639,7 +7691,7 @@ async function runSingleRefinementPass(opp, proposalText, reviewText) {
   var refineSystem =
     'You are the most capable government proposal writer in the world. You are performing a refinement pass.' +
     '\n\nOpportunity: ' + (opp.title||'') + ' | Agency: ' + agency + ' | Vertical: ' + vertical + ' | OPI: ' + (opp.opi_score||0) +
-    '\n\nYou have the current proposal, a red team review identifying every weakness, fresh web research on best practices, HGI knowledge base content from winning proposals, full organism intelligence, OPP-TAGGED PRIMARY COMPETITORS, and PRE-COMPUTED DISCRIMINATORS.' +
+    '\n\nYou have the current proposal, a red team review identifying every weakness, fresh web research on best practices, HGI knowledge base content from winning proposals, full organism intelligence, internal market intelligence, and pre-computed HGI strength claims.' +
     '\n\nYour mission: OUTPUT THE COMPLETE REFINED PROPOSAL — every section, start to finish. Keep sections the red team rated clean. REBUILD sections flagged as critical or major. Add any missing sections.' +
     '\n\nCRITICAL RULES:' +
     '\n1. Output the FULL proposal, not just changed sections' +
@@ -7650,16 +7702,16 @@ async function runSingleRefinementPass(opp, proposalText, reviewText) {
     '\n6. ZERO bracketed meta-commentary. The ONLY permitted bracket in final output is [TO BE ASSIGNED] for Key Personnel. NEVER emit [ACTION REQUIRED ...], [Correction ...], [TBD], [Insert ...], [Verify ...], [Pending ...], or any similar placeholder. Resolve every such placeholder silently — write the correct text or omit the element.' +
     '\n7. Match the RFP structure exactly' +
     '\n8. NEVER list PBGC, Orleans Parish School Board, OPSB, LIGA, TPCIGA, Tangipahoa as HGI past performance' +
-    '\n9. COMPETITIVE DIFFERENTIATION: The user message contains a "## OPPORTUNITY-TAGGED PRIMARY COMPETITORS" section. NEVER frame a tagged primary competitor as a partner, subcontractor, or teaming option. Write at least two paragraphs differentiating HGI from named primary competitors using their documented weaknesses — convert each into an evaluator-scorable HGI strength.' +
-    '\n10. DISCRIMINATOR INTEGRATION: The user message contains a "## PRE-COMPUTED DISCRIMINATORS" section. Weave each discriminator naturally into the section where it belongs (Technical Approach, Background, etc.) — do not list them separately. Each discriminator already has its evidence and its competitor gap; preserve both in the refined text.';
+    '\n9. COMPETITIVE INTELLIGENCE USE: The user message contains a "## MARKET INTELLIGENCE — INTERNAL ONLY" section. This is INTERNAL INTELLIGENCE for your strategic use only. NEVER name any competitor in proposal output. NEVER reference, allude to, or acknowledge that other bidders exist. NEVER write comparative language ("unlike", "competitors lack", "while others", "we are the only", "compared to", etc.). The proposal reads as if HGI is the only firm in the room. NEVER frame an organization listed in the intelligence as a partner, subcontractor, or teaming option. Use the intelligence to DECIDE which HGI strengths to emphasize — the proposal text itself never references competitors directly or comparatively.' +
+    '\n10. HGI STRENGTH CLAIMS: The user message contains a "## HGI STRENGTH CLAIMS (PRE-COMPUTED)" section. Weave each claim naturally into the section where it belongs (Technical Approach, Background, etc.) — do not list them separately. Each claim already has its evidence and an internal note about the market gap HGI fills; preserve the claim and evidence in the refined text but never reproduce the internal note in the proposal output.';
 
   var refinePrompt =
     '=== CURRENT PROPOSAL (refine this) ===\n' + proposalText.slice(0, 80000) +
     '\n\n=== RED TEAM REVIEW (fix every critical/major finding) ===\n' + reviewText.slice(0, 15000) +
     '\n\n=== RFP/SOQ REQUIREMENTS ===\n' + (opp.rfp_text || opp.scope_analysis || opp.description || '').slice(0, 15000) +
-    '\n\n## OPPORTUNITY-TAGGED PRIMARY COMPETITORS\n' + ciOppText +
+    '\n\n## MARKET INTELLIGENCE — INTERNAL ONLY (do not name or reference any of these in the proposal)\n' + ciOppText +
     (ciContextText ? '\n\n## BROADER COMPETITIVE CONTEXT (vertical/agency)\n' + ciContextText : '') +
-    '\n\n## PRE-COMPUTED DISCRIMINATORS\n' + discriminatorsText +
+    '\n\n## HGI STRENGTH CLAIMS (PRE-COMPUTED)\n' + discriminatorsText +
     (webResearch.length > 50 ? '\n\n=== FRESH WEB RESEARCH ===\n' + webResearch.slice(0, 4000) : '') +
     (kbContent.length > 100 ? '\n\n=== HGI KNOWLEDGE BASE (winning proposal sections) ===\n' + kbContent.slice(0, 6000) : '') +
     (memContext.length > 100 ? '\n\n=== ORGANISM INTELLIGENCE ===\n' + memContext.slice(0, 4000) : '') +
