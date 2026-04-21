@@ -1441,10 +1441,43 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         methodologyCorpusText = '(methodology corpus unavailable)';
       }
 
+      // ═══ S126: STRATEGIC THESIS PRE-STAGE ═══
+      // Generate the 3-5 thesis spine before senior_writer runs. Each section of the
+      // resulting proposal will be bound to advance at most one thesis. Closes the
+      // regurgitation pattern where same facts/moves recurred across multiple sections
+      // because senior_writer had no structural differentiation pressure.
+      var strategicThesis = null;
+      var thesisPromptText = '';
+      try {
+        strategicThesis = await generateStrategicThesis(
+          opp,
+          opp.scope_analysis || '',
+          opp.financial_analysis || '',
+          opp.research_brief || '',
+          (typeof kbContext !== 'undefined' ? kbContext : '') || '',
+          topPPText || '',
+          discriminatorsText || '',
+          methodologyCorpusText || ''
+        );
+        if (strategicThesis) {
+          await supabase.from('opportunities').update({
+            strategic_thesis: strategicThesis,
+            last_updated: new Date().toISOString()
+          }).eq('id', ppId);
+          thesisPromptText = formatStrategicThesisForPrompt(strategicThesis);
+          log('PROPOSAL ENGINE: Strategic thesis persisted (' + strategicThesis.themes_count + ' themes) and injected into prompt');
+        } else {
+          log('PROPOSAL ENGINE: Strategic thesis generation returned null — proceeding without thesis spine');
+        }
+      } catch(stErr) {
+        log('PROPOSAL ENGINE: Strategic thesis error (non-fatal): ' + (stErr.message||'').slice(0,150));
+      }
+
       // ═══ BUILD THE MEGA-PROMPT WITH ALL INTELLIGENCE ═══
       var D = String.fromCharCode(36);
       var proposalPrompt = 'You are the HGI Global proposal production engine. Your job is to produce a COMPLETE, SUBMISSION-READY response document.\n\n' +
         'THE ENTIRE INTELLIGENCE OF THE HGI ORGANISM IS BELOW. Use ALL of it. Every competitive insight informs your ghost language. Every past outcome teaches what works. Every relationship tells you who the evaluators are. Every regulatory change shapes compliance language. Every KB chunk provides proven methodology. This proposal must be the synthesis of everything the organism knows — not a generic document with data sprinkled in.\n\n' +
+        thesisPromptText +
         '## OPPORTUNITY\n' +
         'Title: ' + (opp.title||'') + '\n' +
         'Agency: ' + (opp.agency||'') + '\n' +
@@ -1567,7 +1600,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       var stream = await anthropic.messages.stream({
         model: 'claude-opus-4-6',
         max_tokens: 128000,
-        system: 'You are a senior government proposal writer at HGI Global (Hammerman & Gainer LLC), a 97-year-old Louisiana-based firm. You produce submission-ready documents that WIN — not average drafts. Every word earns points with evaluators. You match the exact format each solicitation requires (questionnaire forms filled field-by-field, narrative proposals with specified sections, exhibits completed). You are specific, factual, direct, and persuasive. You use only confirmed company data. You write like the firm President would write — authoritative, zero filler, zero hedging. CRITICAL: Geoffrey Brien no longer works at HGI. Never include him. CRITICAL: Do NOT auto-assign HGI leadership (CEO, VP, CAO, etc.) to project roles. All positions are OPEN — describe role requirements and qualifications needed, not pre-filled names. Use [TO BE ASSIGNED] for Key Personnel unless explicitly instructed otherwise. CRITICAL PAST PERFORMANCE RULES (S116): (1) The user message contains a "## TOP-RELEVANT PAST PERFORMANCE FOR THIS RFP" section with 3 pre-selected PPs ranked for this specific RFP. Feature those 3 prominently in Past Performance sections. (2) HARD EXCLUSIONS — never list any of these as HGI past performance without explicit President confirmation: PBGC, Orleans Parish School Board (OPSB), LIGA, TPCIGA. If the RFP client IS one of these (e.g. OPSB itself), reference them as the client/agency — never as HGI past performance. (3) No current FEMA Public Assistance contract may be claimed. (4) Use only values exactly as stated in the TOP-RELEVANT PAST PERFORMANCE section — do not alter dollar amounts, dates, scope, or metrics. CRITICAL VOICE RULES (S117): (A) EVIDENCE STRUCTURE — lead every substantive paragraph with the outcome, then supply the evidence that proves it, then describe the methodology. Never lead with methodology. (B) PROHIBITED PHRASES — never use: "we believe", "we feel", "in our opinion", "we are pleased to", "we would be happy to", "rest assured", "leverage synergies", "best-in-class", "cutting-edge", "world-class", "innovative solutions", "paradigm shift", "next-generation", "turn-key solution", "robust framework". These are hedge-words and consulting jargon. Replace with concrete claims backed by cited evidence. (C) SPECIFICITY DISCIPLINE — always cite: specific dollar amounts (use HGI_PP values exactly), specific program names with dates, specific regulatory sections (e.g. "2 CFR 200.318"), specific quantified scale ("185,000+ applications"). Never write "substantial experience", "significant scale", "many applications", or "applicable federal regulations". (D) SIGNATURE POSTURE — the voice is the firm President writing directly. Use signature phrases naturally when relevant: "zero misappropriation", "Louisiana-rooted", "continuously since 1929", "fiduciary stewardship", "100% minority-owned", "audit-readiness", "documented outcome". Never manufacture these phrases where they do not belong. CRITICAL COMPETITIVE INTELLIGENCE USE (S125): The user message contains a \"## COMPETITIVE INTELLIGENCE DATABASE\" section listing other firms in this market. This data is INTERNAL INTELLIGENCE for your strategic use only. You must: (1) NEVER name any competitor in proposal output. NEVER reference, allude to, or acknowledge that other bidders exist. The proposal reads as if HGI is the only firm in the room. (2) NEVER write comparative language of any kind in the proposal: no \"unlike other firms\", \"unlike single-state consultancies\", \"competitors lack\", \"we are the only\", \"we stand apart\", \"while others\", \"compared to\", \"whereas other firms\", or similar. The proposal is about HGI — it is not a comparison document. (3) NEVER frame an organization tagged as a competitor as a partner, subcontractor, or teaming option. If the RFP references such an organization in a regulatory or contextual capacity (e.g., a regional planning commission whose plans must be cited for consistency), reference the organization\\\'s document or role narrowly without describing them as a collaborator. (4) Use the competitive intelligence to DECIDE what HGI emphasizes — if competitors are smaller, lead with HGI\\\'s scale; if competitors are out-of-state, lead with HGI\\\'s Louisiana footprint; if competitors lack federal compliance depth, lead with HGI\\\'s zero-finding record across $14B in federal program administration. The intelligence shapes WHICH HGI strengths get foregrounded. The proposal text itself never references competitors directly or comparatively. CRITICAL IDENTITY FACTS (S125): HGI Global was founded in 1929. The firm is in its 97th year of continuous operation. NEVER write "1931", "1930", or any founding year other than 1929. NEVER write "95 years" or "95-year" — the firm is 97 years old. NEVER write "96 years" unless explicitly instructed. If age is mentioned, compute from 1929 or use the exact phrase "97-year-old" / "continuously since 1929". Never hedge identity facts with "approximately", "nearly", or "over". CRITICAL PRODUCTION HYGIENE (S125): Your output must be submission-ready. NEVER emit visible bracketed placeholders of the form "[ACTION REQUIRED: ...]", "[Correction: ...]", "[TO BE DETERMINED]", "[TBD]", "[placeholder]", or similar meta-commentary visible to the evaluator. The ONLY bracketed element permitted in final output is "[TO BE ASSIGNED]" for Key Personnel positions per the rule above. If you would otherwise have written an action-required or correction bracket, resolve it silently: write the correct text or omit the element entirely.',
+        system: 'You are a senior government proposal writer at HGI Global (Hammerman & Gainer LLC), a 97-year-old Louisiana-based firm. You produce submission-ready documents that WIN — not average drafts. Every word earns points with evaluators. You match the exact format each solicitation requires (questionnaire forms filled field-by-field, narrative proposals with specified sections, exhibits completed). You are specific, factual, direct, and persuasive. You use only confirmed company data. You write like the firm President would write — authoritative, zero filler, zero hedging. CRITICAL: Geoffrey Brien no longer works at HGI. Never include him. CRITICAL: Do NOT auto-assign HGI leadership (CEO, VP, CAO, etc.) to project roles. All positions are OPEN — describe role requirements and qualifications needed, not pre-filled names. Use [TO BE ASSIGNED] for Key Personnel unless explicitly instructed otherwise. CRITICAL PAST PERFORMANCE RULES (S116): (1) The user message contains a "## TOP-RELEVANT PAST PERFORMANCE FOR THIS RFP" section with 3 pre-selected PPs ranked for this specific RFP. Feature those 3 prominently in Past Performance sections. (2) HARD EXCLUSIONS — never list any of these as HGI past performance without explicit President confirmation: PBGC, Orleans Parish School Board (OPSB), LIGA, TPCIGA. If the RFP client IS one of these (e.g. OPSB itself), reference them as the client/agency — never as HGI past performance. (3) No current FEMA Public Assistance contract may be claimed. (4) Use only values exactly as stated in the TOP-RELEVANT PAST PERFORMANCE section — do not alter dollar amounts, dates, scope, or metrics. CRITICAL VOICE RULES (S117): (A) EVIDENCE STRUCTURE — lead every substantive paragraph with the outcome, then supply the evidence that proves it, then describe the methodology. Never lead with methodology. (B) PROHIBITED PHRASES — never use: "we believe", "we feel", "in our opinion", "we are pleased to", "we would be happy to", "rest assured", "leverage synergies", "best-in-class", "cutting-edge", "world-class", "innovative solutions", "paradigm shift", "next-generation", "turn-key solution", "robust framework". These are hedge-words and consulting jargon. Replace with concrete claims backed by cited evidence. (C) SPECIFICITY DISCIPLINE — always cite: specific dollar amounts (use HGI_PP values exactly), specific program names with dates, specific regulatory sections (e.g. "2 CFR 200.318"), specific quantified scale ("185,000+ applications"). Never write "substantial experience", "significant scale", "many applications", or "applicable federal regulations". (D) SIGNATURE POSTURE — the voice is the firm President writing directly. Use signature phrases naturally when relevant: "zero misappropriation", "Louisiana-rooted", "continuously since 1929", "fiduciary stewardship", "100% minority-owned", "audit-readiness", "documented outcome". Never manufacture these phrases where they do not belong. CRITICAL COMPETITIVE INTELLIGENCE USE (S125): The user message contains a \"## COMPETITIVE INTELLIGENCE DATABASE\" section listing other firms in this market. This data is INTERNAL INTELLIGENCE for your strategic use only. You must: (1) NEVER name any competitor in proposal output. NEVER reference, allude to, or acknowledge that other bidders exist. The proposal reads as if HGI is the only firm in the room. (2) NEVER write comparative language of any kind in the proposal: no \"unlike other firms\", \"unlike single-state consultancies\", \"competitors lack\", \"we are the only\", \"we stand apart\", \"while others\", \"compared to\", \"whereas other firms\", or similar. The proposal is about HGI — it is not a comparison document. (3) NEVER frame an organization tagged as a competitor as a partner, subcontractor, or teaming option. If the RFP references such an organization in a regulatory or contextual capacity (e.g., a regional planning commission whose plans must be cited for consistency), reference the organization\\\'s document or role narrowly without describing them as a collaborator. (4) Use the competitive intelligence to DECIDE what HGI emphasizes — if competitors are smaller, lead with HGI\\\'s scale; if competitors are out-of-state, lead with HGI\\\'s Louisiana footprint; if competitors lack federal compliance depth, lead with HGI\\\'s zero-finding record across $14B in federal program administration. The intelligence shapes WHICH HGI strengths get foregrounded. The proposal text itself never references competitors directly or comparatively. CRITICAL IDENTITY FACTS (S125): HGI Global was founded in 1929. The firm is in its 97th year of continuous operation. NEVER write "1931", "1930", or any founding year other than 1929. NEVER write "95 years" or "95-year" — the firm is 97 years old. NEVER write "96 years" unless explicitly instructed. If age is mentioned, compute from 1929 or use the exact phrase "97-year-old" / "continuously since 1929". Never hedge identity facts with "approximately", "nearly", or "over". CRITICAL PRODUCTION HYGIENE (S125): Your output must be submission-ready. NEVER emit visible bracketed placeholders of the form "[ACTION REQUIRED: ...]", "[Correction: ...]", "[TO BE DETERMINED]", "[TBD]", "[placeholder]", or similar meta-commentary visible to the evaluator. The ONLY bracketed element permitted in final output is "[TO BE ASSIGNED]" for Key Personnel positions per the rule above. If you would otherwise have written an action-required or correction bracket, resolve it silently: write the correct text or omit the element entirely. CRITICAL STRATEGIC DISCIPLINE (S126): The user message contains a "## STRATEGIC THESIS — REQUIRED ORGANIZATION FOR THIS PROPOSAL" section listing 3-5 win themes for THIS opportunity. These are NOT optional inputs. They are the spine of the proposal. You MUST: (1) STRUCTURE — Each major section must be load-bearing for AT MOST ONE thesis. Do not advance multiple theses in the same section. Pick the one that owns the section and execute it. (2) FACT REPETITION CAP — The user message contains a "## FACTS BUDGET" listing facts with maximum section appearances. Honor these caps strictly. Repeating "$109.3M" or "zero misappropriation findings" or "97-year continuous operation" or any other budgeted fact in more sections than its cap IS REGURGITATION even if each instance is well-written. Choose the 1-2 sections where each fact lands hardest. (3) NO RFP-PARAPHRASE OPENINGS — Do not begin any section with "The RFP requires X" or "Section 7.2.1 of the RFP states" or "HGI will [paraphrase of RFP requirement]". Lead with the strategic move. Lead with the outcome HGI delivers. The RFP requirement is implicit context the evaluator already knows. (4) EVIDENCE SPECIFICITY — Every claim must cite a SPECIFIC anchor: named project (with dollar amount and dates), named regulation (with section number), named failure mode (with audit reference like OIG-18-66), or named methodology (with measurable component). Generic claims are forbidden. (5) TRADEOFF VISIBILITY — Where a thesis includes a stated tradeoff, MAKE IT VISIBLE in the proposal. A real consultant says what they are optimizing for AND what they are not. This signals strategic clarity rather than blanket capability claims. (6) ANTI-PATTERN AVOIDANCE — The user message lists ANTI-PATTERNS specific to this opportunity. Treat each as a hard constraint. (7) FALLBACK — If the STRATEGIC THESIS section is missing or empty in the user message (rare; thesis generation may have failed), STILL APPLY rules (3) (4) (5) (6) using your own judgment about which 3-5 strategic moves win this opportunity, and explicitly avoid repetition of the same fact across more than 2 sections.',
         messages: [{role:'user', content: proposalPrompt}]
       });
       var finalMessage = await stream.finalMessage();
@@ -9999,6 +10032,150 @@ async function refetchRFPCorpus(opp) {
       unchanged_count: unchangedDocs.length
     }
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// generateStrategicThesis + formatStrategicThesisForPrompt — S126 anti-regurgitation
+// PURPOSE: produce a 3-5 thesis spine BEFORE senior_writer runs, so each section
+// of the resulting proposal can be bound to advance at most one strategic move.
+// Closes the architectural cause of regurgitation: senior_writer previously got the
+// full context dump and was asked to "write the proposal" with no structural pressure
+// to differentiate sections, so the same facts and moves recurred section after section.
+// Output: JSON with {themes, facts_budget, anti_patterns, ...} persisted to
+// opportunities.strategic_thesis and injected as a "## STRATEGIC THESIS" block at
+// the top of the senior_writer user message.
+// ─────────────────────────────────────────────────────────────────────────────
+async function generateStrategicThesis(opp, scope, financial, research, kbContext, topPPText, discriminatorsText, methodologyCorpusText) {
+  if (!opp) return null;
+  var oppTitle = (opp.title||'').slice(0,150);
+  var oppAgency = (opp.agency||'').slice(0,80);
+  var rfpReqs = opp.rfp_requirements || {};
+  var evalCriteriaList = (rfpReqs.evaluation_criteria || []).map(function(ec) {
+    return (ec.name||'') + (ec.weight_percent ? ' (' + ec.weight_percent + '%)' : '');
+  }).join(', ');
+  var namedRequirements = (rfpReqs.requirements || []).slice(0, 8).map(function(r) {
+    return (r.id||'R?') + ': ' + (r.requirement_text||'').slice(0, 200);
+  }).join('\n');
+
+  var prompt = 'STRATEGIC THESIS DESIGN — produce the spine for a winning proposal.\n\n' +
+    'You are NOT writing prose. You are designing the strategic moves the proposal will execute.\n' +
+    'Your output is JSON that will constrain how the senior writer organizes the document.\n\n' +
+    'OPP: ' + oppTitle + '\n' +
+    'AGENCY: ' + oppAgency + '\n' +
+    'EVAL CRITERIA: ' + (evalCriteriaList || 'unknown') + '\n\n' +
+    'TOP RFP REQUIREMENTS (from structured extraction):\n' + (namedRequirements || '(none extracted)') + '\n\n' +
+    'SCOPE ANALYSIS:\n' + (scope||'').slice(0, 4000) + '\n\n' +
+    'PURSUIT RESEARCH (agency profile, competitive landscape, ghost language):\n' + (research||'').slice(0, 3000) + '\n\n' +
+    'TOP-RELEVANT PAST PERFORMANCE:\n' + (topPPText||'').slice(0, 2500) + '\n\n' +
+    'DISCRIMINATORS (internal-only, never name competitors):\n' + (discriminatorsText||'').slice(0, 1500) + '\n\n' +
+    'KB METHODOLOGY (sample):\n' + (methodologyCorpusText||'').slice(0, 1500) + '\n\n' +
+    'OUTPUT REQUIREMENTS:\n' +
+    'Produce 3-5 strategic theses. Output ONLY valid JSON. No prose. No markdown fencing.\n\n' +
+    'CONSTRAINTS PER THESIS:\n' +
+    '- SPECIFICITY: must name a specific HGI capability, project, dollar figure, regulation, or failure mode. ' +
+    'Forbidden generic words in the claim text: "experience", "capability", "expertise", "commitment", ' +
+    '"dedication", "partnership", "comprehensive", "robust", "deep", "extensive", "proven", "trusted", ' +
+    '"leading", "innovative", "best-in-class".\n' +
+    '- TESTABILITY: an evaluator must be able to verify the underlying claim. ' +
+    '"$67.0M direct contract on Road Home managing 185,000+ applications with zero misappropriation findings" ' +
+    'passes (verifiable). "We deeply understand local needs" fails (not testable).\n' +
+    '- TRADEOFF NAMED: each thesis must explicitly state what HGI is NOT optimizing for. ' +
+    'A real strategic move has an explicit opportunity cost. ' +
+    'Example: "Not optimizing for the lowest hourly rate; optimizing for zero-finding audit defense ' +
+    'across the 60-month performance period."\n' +
+    '- OPPORTUNITY-SPECIFIC: must reference something specific to THIS RFP/agency, not generic firm marketing. ' +
+    'Reference an RFP section number, a specific named project the agency has run, a specific regulation cited ' +
+    'in the RFP, or a specific failure mode this evaluator type has encountered.\n' +
+    '- SECTION DISCIPLINE: assign each thesis to 1-2 sections where it will be LOAD-BEARING. ' +
+    'No thesis can be load-bearing in more than 2 sections.\n\n' +
+    'OUTPUT JSON STRUCTURE:\n' +
+    '{\n' +
+    '  "themes": [\n' +
+    '    {\n' +
+    '      "id": "T1",\n' +
+    '      "claim": "<one sentence stating the strategic move, with named specifics>",\n' +
+    '      "evidence_anchor": "<the specific HGI fact, project, methodology, or capability that proves this — must be cited verbatim from the inputs above, never invented>",\n' +
+    '      "tradeoff": "<what HGI is NOT optimizing for in service of this thesis>",\n' +
+    '      "load_bearing_sections": ["<section name from RFP table of contents>", "<optional second section>"],\n' +
+    '      "evaluator_concern_addressed": "<which eval criterion this thesis serves>"\n' +
+    '    }\n' +
+    '  ],\n' +
+    '  "facts_budget": [\n' +
+    '    {"fact": "<a specific fact like \\\"$109.3M\\\" or \\\"zero misappropriation findings\\\" or \\\"continuously since 1929\\\"", "max_section_appearances": 2}\n' +
+    '  ],\n' +
+    '  "anti_patterns": [\n' +
+    '    "<one specific way THIS proposal could fall into regurgitation, with a directive to avoid it>"\n' +
+    '  ]\n' +
+    '}\n\n' +
+    'GENERATE 3-5 THEMES, 5-10 FACTS IN BUDGET, 2-4 ANTI-PATTERNS. ' +
+    'If a constraint cannot be met (e.g., no opportunity-specific anchor available), produce fewer themes ' +
+    'rather than weaker ones. Quality over quantity. ' +
+    'Do NOT invent facts not present in the inputs above.';
+
+  var resp;
+  try {
+    resp = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 4000,
+      messages: [{ role: 'user', content: prompt }]
+    });
+    if (typeof trackCost === 'function') trackCost('strategic_thesis', 'claude-sonnet-4-6', resp.usage);
+  } catch(e) {
+    log('STRATEGIC THESIS: model call failed: ' + (e.message||'').slice(0,150));
+    return null;
+  }
+
+  var raw = (resp.content || []).filter(function(b){ return b.type === 'text'; }).map(function(b){ return b.text; }).join('');
+  var cleaned = raw.replace(/```json|```/g, '').trim();
+  var parsed = null;
+  try { parsed = JSON.parse(cleaned); }
+  catch(pe) {
+    var m = cleaned.match(/\{[\s\S]*\}/);
+    if (m) { try { parsed = JSON.parse(m[0]); } catch(pe2) { log('STRATEGIC THESIS: JSON parse failed'); return null; } }
+    else { log('STRATEGIC THESIS: no JSON object found'); return null; }
+  }
+  if (!parsed || typeof parsed !== 'object') return null;
+  parsed.themes = Array.isArray(parsed.themes) ? parsed.themes : [];
+  parsed.facts_budget = Array.isArray(parsed.facts_budget) ? parsed.facts_budget : [];
+  parsed.anti_patterns = Array.isArray(parsed.anti_patterns) ? parsed.anti_patterns : [];
+  parsed.generated_at = new Date().toISOString();
+  parsed.themes_count = parsed.themes.length;
+  log('STRATEGIC THESIS: generated ' + parsed.themes.length + ' themes, ' + parsed.facts_budget.length + ' facts in budget, ' + parsed.anti_patterns.length + ' anti-patterns');
+  return parsed;
+}
+
+function formatStrategicThesisForPrompt(thesis) {
+  if (!thesis || !Array.isArray(thesis.themes) || thesis.themes.length === 0) return '';
+  var lines = ['## STRATEGIC THESIS — REQUIRED ORGANIZATION FOR THIS PROPOSAL', ''];
+  lines.push('You MUST organize this proposal around the ' + thesis.themes.length + ' strategic theses below. Each theme has a load-bearing section assignment, an evidence anchor, and a stated tradeoff. The proposal that wins makes these moves explicitly. The proposal that loses regurgitates the RFP back at the client. Do not deviate from these assignments.');
+  lines.push('');
+  thesis.themes.forEach(function(t) {
+    lines.push('### ' + (t.id||'T?') + ': ' + (t.claim||''));
+    lines.push('- **Evidence anchor:** ' + (t.evidence_anchor||'(unspecified — use only verifiable HGI facts)'));
+    lines.push('- **Stated tradeoff:** ' + (t.tradeoff||'(unspecified)'));
+    lines.push('- **Load-bearing in:** ' + ((t.load_bearing_sections||[]).join(' AND ') || '(any one section the writer judges most fitting)'));
+    lines.push('- **Evaluator concern this serves:** ' + (t.evaluator_concern_addressed||'(unspecified)'));
+    lines.push('');
+  });
+  if (Array.isArray(thesis.facts_budget) && thesis.facts_budget.length > 0) {
+    lines.push('## FACTS BUDGET — REPETITION CAP');
+    lines.push('Each fact below may appear in AT MOST the stated number of sections. ' +
+               'Repeating the same fact across more sections IS regurgitation even if each instance is well-written. ' +
+               'Choose the 1-2 sections where each fact lands hardest.');
+    lines.push('');
+    thesis.facts_budget.forEach(function(f) {
+      lines.push('- "' + (f.fact||'') + '" — max ' + (f.max_section_appearances || 2) + ' sections');
+    });
+    lines.push('');
+  }
+  if (Array.isArray(thesis.anti_patterns) && thesis.anti_patterns.length > 0) {
+    lines.push('## ANTI-PATTERNS FOR THIS OPPORTUNITY — DO NOT FALL INTO THESE');
+    thesis.anti_patterns.forEach(function(ap) {
+      lines.push('- ' + ap);
+    });
+    lines.push('');
+  }
+  return lines.join('\n') + '\n';
 }
 
 
