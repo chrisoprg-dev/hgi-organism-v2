@@ -1879,14 +1879,15 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
                   '## CRITICAL CANON VIOLATIONS TO FIX\n' + (_canonFindingsList.join('\n') || '(none)') + '\n\n' +
                   '## RFP REQUIREMENTS (for grounding)\n' + ((opp.rfp_text || opp.scope_analysis || '').slice(0, 8000)) + '\n\n' +
                   '## PREVIOUS PROPOSAL (revise this to fix every defect above)\n' + proposalText;
-                var _retryResp = await anthropic.messages.create({
+                var _retryStream = await anthropic.messages.stream({
                   model: 'claude-opus-4-6',
                   max_tokens: 32000,
                   system: 'You are a senior government proposal writer at HGI Global (Hammerman & Gainer LLC), founded 1929, 97-year-old, 100% minority-owned. Fix every CRITICAL defect identified below. Emit ONLY the corrected full proposal text. Do NOT emit bracketed meta-commentary ([ACTION REQUIRED], [Correction], [TBD], etc.) — the ONLY permitted bracket is [TO BE ASSIGNED] for Key Personnel. Never write 1931, 1930, 95 years, 96 years — use 1929 and 97-year exactly. Geoffrey Brien is never mentioned. OPSB/LIGA/TPCIGA/PBGC are never listed as HGI past performance (only as client names where applicable). Differentiate explicitly against any competitors tagged [PRIMARY — TAGGED TO THIS OPPORTUNITY] — never frame them as partners.',
                   messages: [{ role: 'user', content: _correctivePrompt }]
                 });
-                trackCost('proposal_auto_regen', 'claude-opus-4-6', _retryResp.usage);
-                var _retryText = (_retryResp.content || []).filter(function(b){return b.type==='text';}).map(function(b){return b.text;}).join('');
+                var _retryFinal = await _retryStream.finalMessage();
+                trackCost('proposal_auto_regen', 'claude-opus-4-6', _retryFinal.usage);
+                var _retryText = (_retryFinal.content || []).filter(function(b){return b.type==='text';}).map(function(b){return b.text;}).join('');
                 if (_retryText && _retryText.length >= Math.max(2000, Math.floor(proposalText.length * 0.5))) {
                   // Re-run post-processing bracket killer on the retry output
                   _retryText = _retryText.replace(/\[(?:ACTION\s*REQUIRED|Correction|CORRECTION|Note|NOTE|TBD|TBC|To be determined|TO BE DETERMINED|To be completed|TO BE COMPLETED|Insert|INSERT|Confirm|CONFIRM|Verify|VERIFY|Placeholder|PLACEHOLDER|Pending|PENDING)(?:[:\-\s][^\[\]]{0,400})?\]/g, '');
