@@ -7570,6 +7570,49 @@ async function runSingleRefinementPass(opp, proposalText, reviewText) {
   var oppState = (opp.state || 'Louisiana').trim();
   var scopeSnippet = (opp.scope_analysis || '').replace(/[^a-zA-Z0-9 .,\-]/g, ' ').slice(0, 150).trim();
 
+  // S125 Push 6: pull opp-tagged competitive intelligence and discriminators
+  // into L7 refinement. Without this, L7 rewrites without competitive context
+  // and undoes the differentiation work the main pipeline did.
+  var ciOpp = [];
+  var ciContext = [];
+  try {
+    var _ciAll = await supabase.from('competitive_intelligence')
+      .select('competitor_name,strengths,weaknesses,strategic_notes,threat_level,hq_location,opportunity_id,agency,vertical')
+      .or('opportunity_id.eq.' + opp.id + ',agency.ilike.%' + (agency||'').slice(0,30) + '%,vertical.ilike.%' + vertical.toLowerCase() + '%')
+      .limit(30);
+    var _ciRows = (_ciAll.data || []);
+    ciOpp = _ciRows.filter(function(c){ return c.opportunity_id === opp.id; });
+    ciContext = _ciRows.filter(function(c){ return c.opportunity_id !== opp.id; }).slice(0, 8);
+  } catch(_ciL7e) { /* non-fatal */ }
+  var ciOppText = ciOpp.length > 0 ?
+    ciOpp.map(function(c){
+      return '### ' + c.competitor_name + ' [PRIMARY — TAGGED TO THIS OPPORTUNITY]' +
+        '\n  HQ: ' + (c.hq_location||'') + ' | Threat: ' + (c.threat_level||'') +
+        '\n  Strengths: ' + (c.strengths||'').slice(0,300) +
+        '\n  Weaknesses: ' + (c.weaknesses||'').slice(0,300) +
+        '\n  Strategy notes: ' + (c.strategic_notes||'').slice(0,300);
+    }).join('\n\n') : '(no opportunity-tagged competitors known)';
+  var ciContextText = ciContext.length > 0 ?
+    ciContext.map(function(c){
+      return '- ' + c.competitor_name + ' (' + (c.threat_level||'unknown') + '): ' + (c.weaknesses||'').slice(0,150);
+    }).join('\n') : '';
+
+  var discriminators = [];
+  try {
+    var _dRes = await supabase.from('opportunity_discriminators')
+      .select('title,claim,evidence_quote,competitor_gap,discriminator_num')
+      .eq('opportunity_id', opp.id)
+      .order('discriminator_num', { ascending: true });
+    discriminators = _dRes.data || [];
+  } catch(_dL7e) { /* non-fatal */ }
+  var discriminatorsText = discriminators.length > 0 ?
+    discriminators.map(function(d){
+      return '## DISCRIMINATOR ' + d.discriminator_num + ': ' + d.title +
+        '\n  Claim: ' + (d.claim||'').slice(0,400) +
+        '\n  Evidence: ' + (d.evidence_quote||'').slice(0,300) +
+        '\n  Competitor gap: ' + (d.competitor_gap||'').slice(0,300);
+    }).join('\n\n') : '(no discriminators generated for this opp)';
+
   var researchResults = await Promise.allSettled([
     multiSearch([
       { q: scopeSnippet.slice(0,100) + ' ' + vertical + ' methodology best practices 2025 2026', label: 'Best practices' },
@@ -7596,26 +7639,31 @@ async function runSingleRefinementPass(opp, proposalText, reviewText) {
   var refineSystem =
     'You are the most capable government proposal writer in the world. You are performing a refinement pass.' +
     '\n\nOpportunity: ' + (opp.title||'') + ' | Agency: ' + agency + ' | Vertical: ' + vertical + ' | OPI: ' + (opp.opi_score||0) +
-    '\n\nYou have the current proposal, a red team review identifying every weakness, fresh web research on best practices, HGI knowledge base content from winning proposals, and full organism intelligence.' +
+    '\n\nYou have the current proposal, a red team review identifying every weakness, fresh web research on best practices, HGI knowledge base content from winning proposals, full organism intelligence, OPP-TAGGED PRIMARY COMPETITORS, and PRE-COMPUTED DISCRIMINATORS.' +
     '\n\nYour mission: OUTPUT THE COMPLETE REFINED PROPOSAL — every section, start to finish. Keep sections the red team rated clean. REBUILD sections flagged as critical or major. Add any missing sections.' +
     '\n\nCRITICAL RULES:' +
     '\n1. Output the FULL proposal, not just changed sections' +
     '\n2. Every claim must have specific evidence (dates, amounts, project names)' +
     '\n3. No Geoffrey Brien. All positions [TO BE ASSIGNED] except Christopher J. Oney on cover letter' +
-    '\n4. Founded 1929, ~50 employees, Kenner HQ Suite 510, UEI DL4SJEVKZ6H4' +
+    '\n4. Founded 1929, 97-year-old firm, ~50 employees, Kenner HQ Suite 510, UEI DL4SJEVKZ6H4. NEVER write 1931, 1930, 95-year, 96-year — use 1929 / 97-year exactly.' +
     '\n5. Use web research for current methodology. Use KB for HGI proof points' +
-    '\n6. Minimize [ACTION REQUIRED] — only for wet signatures, real resumes, final rate approvals' +
+    '\n6. ZERO bracketed meta-commentary. The ONLY permitted bracket in final output is [TO BE ASSIGNED] for Key Personnel. NEVER emit [ACTION REQUIRED ...], [Correction ...], [TBD], [Insert ...], [Verify ...], [Pending ...], or any similar placeholder. Resolve every such placeholder silently — write the correct text or omit the element.' +
     '\n7. Match the RFP structure exactly' +
-    '\n8. NEVER list PBGC, Orleans Parish School Board, OPSB, LIGA, TPCIGA as HGI past performance';
+    '\n8. NEVER list PBGC, Orleans Parish School Board, OPSB, LIGA, TPCIGA, Tangipahoa as HGI past performance' +
+    '\n9. COMPETITIVE DIFFERENTIATION: The user message contains a "## OPPORTUNITY-TAGGED PRIMARY COMPETITORS" section. NEVER frame a tagged primary competitor as a partner, subcontractor, or teaming option. Write at least two paragraphs differentiating HGI from named primary competitors using their documented weaknesses — convert each into an evaluator-scorable HGI strength.' +
+    '\n10. DISCRIMINATOR INTEGRATION: The user message contains a "## PRE-COMPUTED DISCRIMINATORS" section. Weave each discriminator naturally into the section where it belongs (Technical Approach, Background, etc.) — do not list them separately. Each discriminator already has its evidence and its competitor gap; preserve both in the refined text.';
 
   var refinePrompt =
     '=== CURRENT PROPOSAL (refine this) ===\n' + proposalText.slice(0, 80000) +
     '\n\n=== RED TEAM REVIEW (fix every critical/major finding) ===\n' + reviewText.slice(0, 15000) +
     '\n\n=== RFP/SOQ REQUIREMENTS ===\n' + (opp.rfp_text || opp.scope_analysis || opp.description || '').slice(0, 15000) +
+    '\n\n## OPPORTUNITY-TAGGED PRIMARY COMPETITORS\n' + ciOppText +
+    (ciContextText ? '\n\n## BROADER COMPETITIVE CONTEXT (vertical/agency)\n' + ciContextText : '') +
+    '\n\n## PRE-COMPUTED DISCRIMINATORS\n' + discriminatorsText +
     (webResearch.length > 50 ? '\n\n=== FRESH WEB RESEARCH ===\n' + webResearch.slice(0, 4000) : '') +
     (kbContent.length > 100 ? '\n\n=== HGI KNOWLEDGE BASE (winning proposal sections) ===\n' + kbContent.slice(0, 6000) : '') +
     (memContext.length > 100 ? '\n\n=== ORGANISM INTELLIGENCE ===\n' + memContext.slice(0, 4000) : '') +
-    '\n\n=== TASK ===\nRead the red team review. For every CRITICAL and MAJOR finding, fix it using the research and KB. Output the COMPLETE REFINED PROPOSAL — all sections, start to finish.';
+    '\n\n=== TASK ===\nRead the red team review. For every CRITICAL and MAJOR finding, fix it using the research, KB, primary-competitor intel, and discriminators. Output the COMPLETE REFINED PROPOSAL — all sections, start to finish. Apply Rules 6 (zero brackets), 9 (competitive differentiation), and 10 (discriminator integration) without exception.';
 
   var opusResp = await anthropic.messages.create({
     model: 'claude-opus-4-6',
@@ -7634,6 +7682,13 @@ async function runSingleRefinementPass(opp, proposalText, reviewText) {
   refinedText = refinedText.replace(/\[ACTION REQUIRED[^\]]*(?:professional regulation|DPR|Confirm.*(?:applicable|applicability))[^\]]*\]/gi, 'No Louisiana Department of Professional Regulation license is required for disaster recovery consulting, program management, claims administration, construction management oversight, or grant management services.');
   refinedText = refinedText.replace(/\[ACTION REQUIRED[^\]]*(?:SAM|UEI|registration.*print)[^\]]*\]/gi, 'HGI Global is registered in SAM.gov with active status. UEI: DL4SJEVKZ6H4.');
   refinedText = refinedText.replace(/\[ACTION REQUIRED[^\]]*(?:org.*chart|organizational)[^\]]*\]/gi, 'See Organizational Chart (Appendix A).');
+
+  // S125 UNIVERSAL BRACKET KILLER applied to L7 output — strip residual placeholders
+  // that the L7 system prompt rule 6 ("Minimize [ACTION REQUIRED]") allows through.
+  // Same regex as the main pipeline. Permitted: [TO BE ASSIGNED] for Key Personnel.
+  refinedText = refinedText.replace(/\[(?:ACTION\s*REQUIRED|Correction|CORRECTION|Note|NOTE|TBD|TBC|To be determined|TO BE DETERMINED|To be completed|TO BE COMPLETED|Insert|INSERT|Confirm|CONFIRM|Verify|VERIFY|Placeholder|PLACEHOLDER|Pending|PENDING)(?:[:\-\s][^\[\]]{0,400})?\]/g, '');
+  refinedText = refinedText.replace(/ACTION REQUIRED(?:\s+SUMMARY)?\s*\(?[^\n\r]{0,300}?\)?\s*:?\s*\n?/gi, '');
+  refinedText = refinedText.replace(/\n{3,}/g, '\n\n');
 
   var arCount = (refinedText.match(/ACTION REQUIRED/gi) || []).length;
   return { refinedText: refinedText, arCount: arCount, kbChunks: kbChunks.length, webChars: webResearch.length };
