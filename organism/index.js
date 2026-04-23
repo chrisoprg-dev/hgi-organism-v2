@@ -8838,31 +8838,16 @@ function preHaikuCacheCheck(candidate, cacheHit, todayIso) {
     };
   }
 
-  // Case B: cache has a known supersession and the sentence lacks an as-of-date before it.
-  if (cacheHit.superseded_date) {
-    var supDate = new Date(cacheHit.superseded_date + 'T00:00:00Z');
-    var today = new Date(todayIso + 'T00:00:00Z');
-    if (!isNaN(supDate.getTime()) && supDate < today) {
-      var sentence = candidate.sentence || '';
-      // Extract year mentions; if any year predates supersession, the proposal
-      // may be making a deliberate historical reference — bail out to Haiku for judgment.
-      var yearMatches = sentence.match(/\b(19|20)\d{2}\b/g) || [];
-      var hasPriorYear = false;
-      for (var y = 0; y < yearMatches.length; y++) {
-        if (parseInt(yearMatches[y], 10) < supDate.getFullYear()) { hasPriorYear = true; break; }
-      }
-      if (!hasPriorYear) {
-        return {
-          status: 'stale',
-          correction_text: null,
-          web_search_snippet: 'CACHED: superseded_by=' + (cacheHit.superseded_by||'unknown') + ' effective ' + cacheHit.superseded_date,
-          cost_usd: 0,
-          identity_facts: null,
-          pre_haiku: true
-        };
-      }
-    }
-  }
+  // Case B (REMOVED per S132 iteration): Cache used to auto-flag stale when
+  // superseded_date was present. That treated a partial supersession (e.g.,
+  // FP-206-23-001's discount-rate provision was revoked April 2025 but other
+  // provisions like the $1M streamlined-narrative threshold remained in effect)
+  // as if the entire policy were void, producing a false positive on the still-
+  // valid provision. Per the thin-cache charter, cache holds identity facts
+  // (including supersession facts) but does not make per-opportunity judgments.
+  // Supersession facts are injected into the Haiku prompt as grounding via
+  // verifyOneCitationStructured's cacheBlock; the contextual stale/verified
+  // judgment stays fresh per sentence.
 
   return null;
 }
