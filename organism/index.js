@@ -1517,11 +1517,53 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         log('PROPOSAL ENGINE: Strategic thesis error (non-fatal): ' + (stErr.message||'').slice(0,150));
       }
 
+      // ═══ S126 push 6: L6 TECHNICAL APPROACH SPECIALIST ═══
+      // Pre-generate the Technical Approach section in a dedicated specialist pass
+      // BEFORE the L7 Opus mega-call. The L7 call will then receive this as canonical
+      // section text and integrate it (with light polish) rather than regenerating
+      // the highest-weight section from scratch. Closes the C2 (SME depth) gap on
+      // Technical Approach specifically; L6 push 2+ will add specialists for other sections.
+      var techApproachSection = null;
+      var techApproachPromptText = '';
+      try {
+        techApproachSection = await generateTechnicalApproachSection(
+          opp,
+          complianceBlueprint,
+          methodologyCorpusText || '',
+          discriminatorsText || '',
+          competitorBriefsText || '',
+          strategicThesis,
+          {}
+        );
+        if (techApproachSection && techApproachSection.section_text) {
+          await supabase.from('opportunities').update({
+            section_technical_approach: techApproachSection,
+            last_updated: new Date().toISOString()
+          }).eq('id', ppId);
+          var taFloors = techApproachSection.floors_met_count || 0;
+          var taStatus = techApproachSection.status || 'unknown';
+          log('PROPOSAL ENGINE: L6 Technical Approach specialist persisted (' + (techApproachSection.word_count||0) + ' words, ' + taFloors + '/5 C2 floors met, status=' + taStatus + ')');
+
+          techApproachPromptText =
+            '## PRE-GENERATED TECHNICAL APPROACH SECTION (L6 specialist output — USE AS CANONICAL TEXT)\n' +
+            'This Technical Approach section was produced by a dedicated L6 specialist pass with full access to the L3 methodology corpus, L4 discriminators, L5 competitor intelligence, and the strategic thesis. It has been validated against the C2 SME-depth criteria and meets ' + taFloors + ' of 5 floors (regulatory citations: ' + (techApproachSection.regulatory_citations_count||0) + ', named systems: ' + (techApproachSection.named_systems_count||0) + ', methodology statements: ' + (techApproachSection.methodology_statements_count||0) + ', failure modes: ' + (techApproachSection.failure_modes_count||0) + ', quantified benchmarks: ' + (techApproachSection.quantified_benchmarks_count||0) + ').\n\n' +
+            'INSTRUCTION: Use this section text VERBATIM (with light formatting integration only) as the Technical Approach section of the proposal. Do NOT regenerate, expand, or paraphrase. Do NOT add subsections that would dilute the specialist\'s structure. If page-limit constraints force shortening, trim methodology detail evenly across subsections rather than removing entire subsections. Place the section under whatever Tab/Section number the RFP designates for technical approach (e.g. Tab 4, Section 7.2, etc.).\n\n' +
+            '=== BEGIN PRE-GENERATED TECHNICAL APPROACH ===\n' +
+            techApproachSection.section_text +
+            '\n=== END PRE-GENERATED TECHNICAL APPROACH ===\n\n';
+        } else {
+          log('PROPOSAL ENGINE: L6 Technical Approach specialist returned null/short — falling back to mega-prompt generation');
+        }
+      } catch (l6Err) {
+        log('PROPOSAL ENGINE: L6 Technical Approach error (non-fatal, falling back): ' + (l6Err.message||'').slice(0,200));
+      }
+
       // ═══ BUILD THE MEGA-PROMPT WITH ALL INTELLIGENCE ═══
       var D = String.fromCharCode(36);
       var proposalPrompt = 'You are the HGI Global proposal production engine. Your job is to produce a COMPLETE, SUBMISSION-READY response document.\n\n' +
         'THE ENTIRE INTELLIGENCE OF THE HGI ORGANISM IS BELOW. Use ALL of it. Every competitive insight informs your ghost language. Every past outcome teaches what works. Every relationship tells you who the evaluators are. Every regulatory change shapes compliance language. Every KB chunk provides proven methodology. This proposal must be the synthesis of everything the organism knows — not a generic document with data sprinkled in.\n\n' +
         thesisPromptText +
+        techApproachPromptText +
         '## OPPORTUNITY\n' +
         'Title: ' + (opp.title||'') + '\n' +
         'Agency: ' + (opp.agency||'') + '\n' +
@@ -8244,6 +8286,250 @@ async function agentCompetitorBriefResearcher(params, opts) {
     hard_fails: hardFails,
     cost_usd: Number(runCost.toFixed(4)),
     wall_time_seconds: wallTime
+  };
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// generateTechnicalApproachSection — S126 push 6 — L6 SECTION SPECIALIST #1
+// PURPOSE: produce a SME-depth Technical Approach section in a dedicated pass
+// BEFORE the L7 Opus mega-call, so the highest-weight section (typically 20-45
+// of total points) gets specialist treatment instead of generalist treatment.
+// CONSUMES: L2 RFP blueprint, L3 methodology corpus, L4 discriminators, L5
+// competitor briefs, S126 strategic thesis, opp scope/research.
+// PRODUCES: structured JSON with section_text + per-section quality metrics.
+// VALIDATES: regulatory-citation count, named-systems count, methodology-statement
+// count per the C2 acceptance criteria (>=15 reg cites, >=8 named systems,
+// >=12 methodology statements, >=6 risk-awareness statements, >=10 quantified
+// benchmarks per 3000 words).
+// ─────────────────────────────────────────────────────────────────────────────
+async function generateTechnicalApproachSection(opp, blueprint, methodologyCorpus, discriminators, competitorBriefs, thesis, opts) {
+  opts = opts || {};
+  var oppId = opp.id;
+  var log_prefix = 'L6-TECH[' + (oppId||'').slice(0, 30) + ']';
+  var runStart = Date.now();
+  var runCost = 0;
+
+  function addCost(model, usage) {
+    if (!usage) return;
+    var p = PRICING[model] || PRICING['claude-haiku-4-5-20251001'];
+    runCost += (usage.input_tokens || 0) * p.in_per_tok + (usage.output_tokens || 0) * p.out_per_tok;
+  }
+
+  var oppTitle = (opp.title||'').slice(0, 200);
+  var oppAgency = (opp.agency||'').slice(0, 100);
+  var vertical = (opp.vertical||'').toLowerCase().replace(/\s+/g,'_');
+
+  var techSection = null;
+  var techSectionWeight = null;
+  if (blueprint && Array.isArray(blueprint.sections_required)) {
+    blueprint.sections_required.forEach(function(s){
+      if (!techSection) {
+        var t = ((s.title||'') + ' ' + (s.section_number||'')).toLowerCase();
+        if (/technical\s*approach|approach.*scope|methodology|scope\s*of\s*work\s*response|how\s*you\s*will/.test(t)) {
+          techSection = s;
+        }
+      }
+    });
+  }
+  if (blueprint && Array.isArray(blueprint.evaluation_criteria)) {
+    blueprint.evaluation_criteria.forEach(function(ec){
+      if (!techSectionWeight) {
+        var n = (ec.name||'').toLowerCase();
+        if (/technical|approach|methodology|scope/.test(n) && ec.weight_percent) {
+          techSectionWeight = ec.weight_percent;
+        }
+      }
+    });
+  }
+
+  var techSectionTitle = (techSection && techSection.title) || 'Technical Approach';
+  var techSectionNumber = (techSection && techSection.section_number) || null;
+  var techPageLimit = (techSection && techSection.page_limit) || null;
+  var techRequirements = (techSection && techSection.requirements) || (techSection && techSection.scope_items) || [];
+  if (!Array.isArray(techRequirements)) techRequirements = [];
+  var techRequirementsText = techRequirements.slice(0, 25).map(function(r,i){
+    return (i+1) + '. ' + String(typeof r === 'string' ? r : (r.requirement_text||r.text||JSON.stringify(r))).slice(0, 400);
+  }).join('\n');
+
+  var thesisSpine = '';
+  if (thesis && Array.isArray(thesis.themes) && thesis.themes.length > 0) {
+    thesisSpine = thesis.themes.map(function(t){
+      var lb = Array.isArray(t.load_bearing_sections) ? t.load_bearing_sections.join(', ') : '';
+      return (t.id||'T?') + ': ' + (t.claim||'') + (lb ? ' [load-bearing: ' + lb + ']' : '');
+    }).join('\n');
+  }
+
+  log(log_prefix + ' START: section="' + techSectionTitle + '" weight=' + techSectionWeight + 'pts page_limit=' + techPageLimit + ' reqs=' + techRequirements.length);
+
+  var system =
+    'You are a senior Technical Approach specialist at HGI Global with 20 years of hands-on execution experience in the named vertical. You have personally executed this scope of work across dozens of engagements. You write Technical Approach sections that government evaluators in this vertical immediately recognize as coming from a senior practitioner — not from a generalist proposal writer.\n\n' +
+    'YOU WRITE ONE SECTION ONLY: the Technical Approach. This is not a full proposal. It is a focused, deeply specific operational treatment of HOW HGI will execute the scope of work. The L7 senior writer downstream will integrate your section into the full proposal.\n\n' +
+    'YOUR SECTION MUST DELIVER (per 3,000 words of content):\n' +
+    '- At least 15 specific regulatory citations (exact CFR/Public-Law/policy references with section numbers)\n' +
+    '- At least 8 named operational systems or platforms (FEMA Grants Portal, EMMIE, DRGR, IDIS, PMS/ASAP, etc. — never generic "project management software")\n' +
+    '- At least 12 methodology statements with week-level operational detail\n' +
+    '- At least 6 risk-awareness statements citing specific failure modes (OIG findings with report numbers, GAO decisions with case numbers, deobligation triggers, audit failures)\n' +
+    '- At least 10 quantified benchmarks (thresholds, targets, caps, timelines with sources)\n' +
+    'These are floors, not targets. Write to the depth a senior evaluator expects.\n\n' +
+    'STRUCTURAL REQUIREMENTS:\n' +
+    '- Lead each subsection with the strategic move HGI makes, not with a paraphrase of the RFP scope item\n' +
+    '- Cluster RFP scope items into strategic-move groups (do NOT enumerate scope items 1, 2, 3 in RFP order)\n' +
+    '- Each strategic-move subsection must be load-bearing for at most ONE thesis from the strategic spine you receive\n' +
+    '- When the strategic thesis specifies a tradeoff, surface it explicitly in the proposal text ("HGI is not optimizing for X; HGI is optimizing for Y")\n' +
+    '- Use named methodology from the methodology corpus you receive — do NOT invent methodology\n' +
+    '- Use specific past performance from HGI_PP — never generic capability claims\n' +
+    '- Cite competitor weaknesses from the L5 competitor briefs ONLY as ghost-language strategic emphasis (NEVER name competitors in proposal text)\n\n' +
+    'HARD RULES (NON-NEGOTIABLE):\n' +
+    '- Founded 1929. 97-year. Never write 1931, 95-year, 96-year.\n' +
+    '- Geoffrey Brien is no longer with HGI — never mention.\n' +
+    '- HARD EXCLUSIONS — never list as HGI past performance: PBGC, Orleans Parish School Board, OPSB, LIGA, TPCIGA. (Reference only as the client/agency if the RFP IS that client.)\n' +
+    '- Terrebonne Parish School District (TPSD) — never write Tangipahoa.\n' +
+    '- Never name competitors in proposal text.\n' +
+    '- Never use prohibited voice phrases: "we believe", "we feel", "leverage synergies", "best-in-class", "cutting-edge", "world-class", "innovative solutions", "paradigm shift", "next-generation", "turn-key solution", "robust framework".\n' +
+    '- Never emit visible bracketed placeholders. The only permitted bracket is [TO BE ASSIGNED] for Key Personnel.\n\n' +
+    'OUTPUT FORMAT — return ONLY valid JSON. No preamble. No markdown fences.\n' +
+    '{\n' +
+    '  "section_text": "Full Technical Approach section text in markdown. Use ## subsection headers. Target length: scaled to RFP weight (typically 4,000-8,000 words).",\n' +
+    '  "evidence_anchors": [\n' +
+    '    {"type": "regulatory_citation", "text": "2 CFR 200.318(d)", "section_used": "subsection name"},\n' +
+    '    {"type": "named_system", "text": "FEMA Grants Portal", "section_used": "..."},\n' +
+    '    {"type": "methodology_statement", "text": "Week 1: ...", "section_used": "..."},\n' +
+    '    {"type": "failure_mode", "text": "OIG-18-66 found that...", "section_used": "..."},\n' +
+    '    {"type": "quantified_benchmark", "text": "60-month performance period", "section_used": "..."},\n' +
+    '    {"type": "past_performance_anchor", "text": "Road Home $67.0M / 185,000+ applications", "section_used": "..."}\n' +
+    '  ],\n' +
+    '  "thesis_alignment": [\n' +
+    '    {"thesis_id": "T1", "advanced_in_subsection": "subsection name", "tradeoff_surfaced": true|false}\n' +
+    '  ],\n' +
+    '  "compliance_coverage": [\n' +
+    '    {"requirement_text": "...", "addressed_in_subsection": "..."}\n' +
+    '  ]\n' +
+    '}';
+
+  var userMessage =
+    'OPPORTUNITY: ' + oppTitle + '\n' +
+    'AGENCY: ' + oppAgency + '\n' +
+    'VERTICAL: ' + vertical + '\n' +
+    'SECTION TO PRODUCE: ' + techSectionTitle + (techSectionNumber ? ' (' + techSectionNumber + ')' : '') + '\n' +
+    'EVALUATION WEIGHT: ' + (techSectionWeight ? techSectionWeight + ' points' : 'unspecified') + '\n' +
+    'PAGE LIMIT: ' + (techPageLimit ? techPageLimit + ' pages' : 'unspecified') + '\n\n' +
+    '### RFP REQUIREMENTS FOR THIS SECTION\n' +
+    (techRequirementsText || '(no structured requirements extracted - write to general scope of work)') + '\n\n' +
+    '### STRATEGIC THESIS SPINE (advance one thesis per subsection; surface stated tradeoffs)\n' +
+    (thesisSpine || '(no thesis available - apply own judgment on 3-5 strategic moves)') + '\n\n' +
+    '### SCOPE OF WORK (raw)\n' +
+    String(opp.scope_analysis || '').slice(0, 8000) + '\n\n' +
+    '### METHODOLOGY CORPUS (L3 - use this as your authoritative source for HOW the work is executed)\n' +
+    String(methodologyCorpus || '(no methodology corpus available)').slice(0, 28000) + '\n\n' +
+    '### DISCRIMINATORS (L4 - weave throughout; cite evidence anchors)\n' +
+    String(discriminators || '(no discriminators)').slice(0, 4000) + '\n\n' +
+    '### COMPETITOR INTELLIGENCE (L5 - INTERNAL ONLY; never name competitors in proposal text)\n' +
+    String(competitorBriefs || '(no competitor briefs)').slice(0, 12000) + '\n\n' +
+    'Produce the Technical Approach section now per the system-prompt specification. Return ONLY the JSON object.';
+
+  log(log_prefix + ' calling Opus 4.6 with 8K thinking, 24K max output');
+
+  var resp;
+  try {
+    resp = await anthropic.messages.create({
+      model: 'claude-opus-4-6',
+      max_tokens: 24000,
+      thinking: { type: 'enabled', budget_tokens: 8000 },
+      system: system,
+      messages: [{ role: 'user', content: userMessage }]
+    });
+    trackCost('l6_technical_approach', 'claude-opus-4-6', resp.usage);
+    addCost('claude-opus-4-6', resp.usage);
+  } catch (sErr) {
+    log(log_prefix + ' Opus call failed: ' + (sErr.message||'').slice(0,200));
+    return { status: 'failed', error: 'opus_call_failed', detail: (sErr.message||'').slice(0,200), cost_usd: Number(runCost.toFixed(4)) };
+  }
+
+  var raw = (resp.content || []).filter(function(b){return b.type==='text';}).map(function(b){return b.text;}).join('');
+  var cleaned = raw.replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
+  var fb = cleaned.indexOf('{'), lb = cleaned.lastIndexOf('}');
+  if (fb >= 0 && lb > fb) cleaned = cleaned.slice(fb, lb+1);
+
+  var parsed = null;
+  try { parsed = JSON.parse(cleaned); } catch (pe) {
+    log(log_prefix + ' JSON parse failed: ' + (pe.message||'').slice(0,150));
+    return { status: 'failed', error: 'json_parse_failed', cost_usd: Number(runCost.toFixed(4)) };
+  }
+  if (!parsed || typeof parsed.section_text !== 'string' || parsed.section_text.length < 1000) {
+    return { status: 'failed', error: 'missing_or_short_section_text', cost_usd: Number(runCost.toFixed(4)) };
+  }
+
+  var sectionText = parsed.section_text;
+  var evidenceAnchors = Array.isArray(parsed.evidence_anchors) ? parsed.evidence_anchors : [];
+  var thesisAlignment = Array.isArray(parsed.thesis_alignment) ? parsed.thesis_alignment : [];
+  var complianceCoverage = Array.isArray(parsed.compliance_coverage) ? parsed.compliance_coverage : [];
+
+  var wordCount = (sectionText.match(/\b\w+\b/g) || []).length;
+  var per3kFactor = wordCount / 3000;
+
+  var counts = { regulatory_citation: 0, named_system: 0, methodology_statement: 0, failure_mode: 0, quantified_benchmark: 0, past_performance_anchor: 0 };
+  evidenceAnchors.forEach(function(a){
+    if (a && a.type && counts.hasOwnProperty(a.type)) counts[a.type]++;
+  });
+
+  var floors = {
+    regulatory_citation: Math.ceil(15 * per3kFactor),
+    named_system: Math.ceil(8 * per3kFactor),
+    methodology_statement: Math.ceil(12 * per3kFactor),
+    failure_mode: Math.ceil(6 * per3kFactor),
+    quantified_benchmark: Math.ceil(10 * per3kFactor)
+  };
+
+  var floorsMet = {
+    regulatory_citation: counts.regulatory_citation >= floors.regulatory_citation,
+    named_system: counts.named_system >= floors.named_system,
+    methodology_statement: counts.methodology_statement >= floors.methodology_statement,
+    failure_mode: counts.failure_mode >= floors.failure_mode,
+    quantified_benchmark: counts.quantified_benchmark >= floors.quantified_benchmark
+  };
+
+  var floorsMetCount = Object.keys(floorsMet).filter(function(k){return floorsMet[k];}).length;
+  var qualityScore = Math.round((floorsMetCount / 5) * 100);
+
+  var canonViolations = [];
+  if (/\b1931\b/.test(sectionText) || /\b1930\b/.test(sectionText)) canonViolations.push('wrong_founding_year');
+  if (/\b95.year\b/i.test(sectionText) || /\b96.year\b/i.test(sectionText)) canonViolations.push('wrong_age');
+  if (/geoffrey\s+brien/i.test(sectionText)) canonViolations.push('geoffrey_brien');
+  if (/\btangipahoa\b/i.test(sectionText)) canonViolations.push('tangipahoa');
+
+  var sectionStatus = (canonViolations.length === 0 && floorsMetCount >= 4) ? 'published' : 'flagged';
+  var wallTime = Math.floor((Date.now() - runStart) / 1000);
+
+  log(log_prefix + ' DONE: status=' + sectionStatus + ', words=' + wordCount + ', floors=' + floorsMetCount + '/5, anchors={reg:' + counts.regulatory_citation + ', sys:' + counts.named_system + ', meth:' + counts.methodology_statement + ', fail:' + counts.failure_mode + ', bench:' + counts.quantified_benchmark + '}, cost=$' + runCost.toFixed(2) + ', wall=' + wallTime + 's');
+
+  return {
+    status: sectionStatus,
+    section_text: sectionText,
+    word_count: wordCount,
+    regulatory_citations_count: counts.regulatory_citation,
+    named_systems_count: counts.named_system,
+    methodology_statements_count: counts.methodology_statement,
+    failure_modes_count: counts.failure_mode,
+    quantified_benchmarks_count: counts.quantified_benchmark,
+    past_performance_anchors_count: counts.past_performance_anchor,
+    floors_met: floorsMet,
+    floors_met_count: floorsMetCount,
+    floors_required: floors,
+    quality_score: qualityScore,
+    canon_violations: canonViolations,
+    evidence_anchors: evidenceAnchors,
+    thesis_alignment: thesisAlignment,
+    compliance_coverage: complianceCoverage,
+    section_title: techSectionTitle,
+    section_number: techSectionNumber,
+    section_weight_pts: techSectionWeight,
+    page_limit: techPageLimit,
+    cost_usd: Number(runCost.toFixed(4)),
+    wall_time_seconds: wallTime,
+    model: 'claude-opus-4-6',
+    version: 's126_v1',
+    generated_at: new Date().toISOString()
   };
 }
 
