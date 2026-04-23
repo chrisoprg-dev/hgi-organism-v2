@@ -8430,15 +8430,21 @@ async function generateTechnicalApproachSection(opp, blueprint, methodologyCorpu
 
   log(log_prefix + ' calling Opus 4.6 with 8K thinking, 24K max output');
 
+  // S130 FIX: switch from .create to streaming. Without streaming the SDK raises a
+  // client-side pre-flight refusal ("Streaming is strongly recommended for operations
+  // that may take longer than 10 minutes") because max_tokens 24000 + thinking 8000
+  // exceeds the SDK's projected-duration threshold. Streaming removes the block.
+  // Mirrors the pattern used by proposal_engine_opus (L1687) and proposal_auto_regen (L2054).
   var resp;
   try {
-    resp = await anthropic.messages.create({
+    var _l6Stream = await anthropic.messages.stream({
       model: 'claude-opus-4-6',
       max_tokens: 24000,
       thinking: { type: 'enabled', budget_tokens: 8000 },
       system: system,
       messages: [{ role: 'user', content: userMessage }]
     });
+    resp = await _l6Stream.finalMessage();
     trackCost('l6_technical_approach', 'claude-opus-4-6', resp.usage);
     addCost('claude-opus-4-6', resp.usage);
   } catch (sErr) {
