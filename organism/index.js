@@ -8893,12 +8893,16 @@ async function verifyOneCitationStructured(c, cacheHit) {
     "TODAY'S DATE: " + today + '\n' +
     cacheBlock + '\n' +
     'STEP 1: Search the web for the citation ID (e.g., "' + c.citation + '") to find the actual report, rule, policy, or law. Confirm identity facts against web results.\n' +
-    'STEP 2: Classify based on what web_search returned AND the proposal\'s specific claim:\n' +
-    '- "verified": the report/rule exists AND the subject matches how the proposal uses it AND any cited figure is consistent with the source.\n' +
-    '- "wrong_subject": the report/rule exists but is about a different topic than the proposal claims.\n' +
-    '- "stale": the cited figure/rate/policy was correct at an earlier date but has since been superseded as of today.\n' +
-    '- "figure_mismatch": the report/rule exists with the right subject, but the specific dollar/rate/threshold cited does not match the actual source.\n' +
-    '- "not_found": the citation ID does not appear in any verifiable source.\n\n' +
+    'STEP 1b (REQUIRED if citation_type is FEMA_POLICY, FEMA_DOC, FR, or CFR): Perform ADDITIONAL web_search queries to detect supersession/revocation:\n' +
+    '  - Query: "' + c.citation + '" revoked OR superseded OR replaced\n' +
+    '  - Query: "' + c.citation + '" current status ' + (today.slice(0,4)) + '\n' +
+    'The first search in STEP 1 typically returns the announcement/issuance page. Supersessions and revocations often live under separate pages (OMB memos, subsequent Federal Register notices, policy updates). Do NOT skip STEP 1b for rate/policy/rule citations — a stale-but-still-findable citation will return misleading results from STEP 1 alone. OIG and GAO reports are immutable audit findings and do NOT require STEP 1b.\n' +
+    'STEP 2: Classify based on what ALL web_search passes returned AND the proposal\'s specific claim. Apply these definitions strictly:\n' +
+    '- "verified": (a) the cited report/rule/policy exists, (b) its subject matches how the proposal uses it, AND (c) any specific figure the proposal cites is CONTAINED IN the cited source. A point-in-time audit finding is VERIFIED even if the real-world state has since changed. Example: OIG-15-146-D documenting $812M in unobligated HMGP as of 2015 remains "verified" when cited faithfully, even if FEMA has since reduced that balance — the proposal is faithful to the source.\n' +
+    '- "wrong_subject": the report/rule exists but is about a different topic than the proposal claims. Example: proposal cites GAO-16-797 as documenting "procurement deficiencies" but GAO-16-797 is actually about federal disaster spending totals.\n' +
+    '- "stale": RESERVED for rates, thresholds, deadlines, or regulatory provisions that have been officially superseded/revoked/replaced, where the proposal presents the old figure as currently in effect without a pre-supersession as-of-date. Example: proposal says "current FEMA BCA discount rate is 3.1%" citing FP-206-23-001, but OMB revoked that in April 2025. Does NOT apply to point-in-time audit findings — those stay verified when cited faithfully.\n' +
+    '- "figure_mismatch": the cited source exists AND has the right subject, but DOES NOT CONTAIN the cited figure (or contains a materially different one). Example: proposal cites OIG-19-54 as finding $100M when the actual OIG-19-54 finding is $50.4M. DISTINGUISH FROM STALE: if the source DOES contain the cited figure but the real world has since changed, that is either verified (audit findings) or stale (rates/policies), not figure_mismatch.\n' +
+    '- "not_found": the citation ID does not appear in any verifiable primary source.\n\n' +
     'STEP 3: If not "verified", attempt correction_text — a single sentence suitable as a drop-in replacement for the surrounding sentence, using only verified facts. If you cannot provide a high-confidence correction, return null.\n\n' +
     'STEP 4: Return identity facts about this citation for caching (from web_search results — these are pure facts about the citation itself, not about how the proposal uses it):\n' +
     '- canonical_title: the actual title of the report/rule/policy/law\n' +
