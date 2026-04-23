@@ -8335,9 +8335,12 @@ async function generateTechnicalApproachSection(opp, blueprint, methodologyCorpu
   if (blueprint && Array.isArray(blueprint.evaluation_criteria)) {
     blueprint.evaluation_criteria.forEach(function(ec){
       if (!techSectionWeight) {
-        var n = (ec.name||'').toLowerCase();
-        if (/technical|approach|methodology|scope/.test(n) && ec.weight_percent) {
-          techSectionWeight = ec.weight_percent;
+        // S130: L2 parser emits ec.criterion + ec.max_points (per L1200 spec).
+        // Also tolerate legacy ec.name + ec.weight_percent in case other parsers feed this path.
+        var n = ((ec.criterion || ec.name) || '').toLowerCase();
+        var pts = ec.max_points || ec.weight_percent;
+        if (/technical|approach|methodology|scope/.test(n) && pts) {
+          techSectionWeight = pts;
         }
       }
     });
@@ -8346,11 +8349,28 @@ async function generateTechnicalApproachSection(opp, blueprint, methodologyCorpu
   var techSectionTitle = (techSection && techSection.title) || 'Technical Approach';
   var techSectionNumber = (techSection && techSection.section_number) || null;
   var techPageLimit = (techSection && techSection.page_limit) || null;
-  var techRequirements = (techSection && techSection.requirements) || (techSection && techSection.scope_items) || [];
-  if (!Array.isArray(techRequirements)) techRequirements = [];
-  var techRequirementsText = techRequirements.slice(0, 25).map(function(r,i){
-    return (i+1) + '. ' + String(typeof r === 'string' ? r : (r.requirement_text||r.text||JSON.stringify(r))).slice(0, 400);
-  }).join('\n');
+  // S130: requirements field arrives as STRING from L2 parser (per L1200 spec: "what must be
+  // included — every sub-requirement listed"). Previous code coerced non-array to [], dropping
+  // the whole payload. Also: L2 emits the 30+ scope_items at TOP LEVEL, not per-section — fold
+  // them into L6 context too so the specialist writes to specific RFP deliverables.
+  var techReqsRaw = (techSection && techSection.requirements) || (techSection && techSection.scope_items) || null;
+  var topLevelScope = (blueprint && Array.isArray(blueprint.scope_items)) ? blueprint.scope_items : [];
+  var reqsParts = [];
+  if (typeof techReqsRaw === 'string' && techReqsRaw.trim().length > 0) {
+    reqsParts.push('Section-level requirements: ' + techReqsRaw.trim());
+  } else if (Array.isArray(techReqsRaw) && techReqsRaw.length > 0) {
+    reqsParts.push('Section-level requirements:\n' + techReqsRaw.slice(0,25).map(function(r,i){
+      return (i+1) + '. ' + String(typeof r === 'string' ? r : (r.requirement_text||r.text||JSON.stringify(r))).slice(0,400);
+    }).join('\n'));
+  }
+  if (topLevelScope.length > 0) {
+    reqsParts.push('Scope items to address (from RFP scope of work):\n' + topLevelScope.slice(0,30).map(function(s,i){
+      return (i+1) + '. ' + String(s).slice(0,300);
+    }).join('\n'));
+  }
+  var techRequirementsText = reqsParts.join('\n\n');
+  var techRequirementsCount = (typeof techReqsRaw === 'string' ? (techReqsRaw.trim().length > 0 ? 1 : 0) :
+                               (Array.isArray(techReqsRaw) ? techReqsRaw.length : 0)) + topLevelScope.length;
 
   var thesisSpine = '';
   if (thesis && Array.isArray(thesis.themes) && thesis.themes.length > 0) {
@@ -8360,7 +8380,7 @@ async function generateTechnicalApproachSection(opp, blueprint, methodologyCorpu
     }).join('\n');
   }
 
-  log(log_prefix + ' START: section="' + techSectionTitle + '" weight=' + techSectionWeight + 'pts page_limit=' + techPageLimit + ' reqs=' + techRequirements.length);
+  log(log_prefix + ' START: section="' + techSectionTitle + '" weight=' + techSectionWeight + 'pts page_limit=' + techPageLimit + ' reqs=' + techRequirementsCount);
 
   var system =
     'You are a senior Technical Approach specialist at HGI Global with 20 years of hands-on execution experience in the named vertical. You have personally executed this scope of work across dozens of engagements. You write Technical Approach sections that government evaluators in this vertical immediately recognize as coming from a senior practitioner — not from a generalist proposal writer.\n\n' +
