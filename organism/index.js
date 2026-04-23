@@ -1441,6 +1441,50 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         methodologyCorpusText = '(methodology corpus unavailable)';
       }
 
+      // ═══ S126 push 5: L5 COMPETITOR BRIEFS RETRIEVE ═══
+      // Pull competitor briefs whose primary_verticals overlap this opp's vertical.
+      // Inject as ## COMPETITOR DEEP DIVES block in mega-prompt for L4 discriminators
+      // and L7 senior writer to use as INTERNAL strategic context (NEVER cited in
+      // proposal text per S125 rules — competitive intelligence stays internal).
+      var competitorBriefsText = '';
+      try {
+        var _cbVertical = _mbVertical; // reuse the normalized vertical from L3 retrieve above
+        var _cbResp = await supabase.from('competitor_briefs')
+          .select('id,competitor_name,primary_verticals,brief_text,word_count,citation_count,quality_score,last_researched')
+          .contains('primary_verticals', [_cbVertical])
+          .eq('status', 'published')
+          .order('quality_score', { ascending: false })
+          .limit(8);
+        var _cbRows = _cbResp.data || [];
+        if (_cbRows.length > 0) {
+          var _cbTotalChars = 0;
+          var _cbMAX = 25000; // cap to prevent prompt bloat (we already have L3 ~30K + intel blocks)
+          var _cbParts = [];
+          for (var _cbi = 0; _cbi < _cbRows.length; _cbi++) {
+            var _cb = _cbRows[_cbi];
+            var _cbHdr = '### Competitor: ' + (_cb.competitor_name || '(unnamed)') +
+              '  (quality ' + (_cb.quality_score||0) + ' | ' + (_cb.word_count||0) + ' words | ' + (_cb.citation_count||0) + ' citations)';
+            var _cbBody = String(_cb.brief_text || '');
+            var _cbBlock = _cbHdr + '\n\n' + _cbBody;
+            if (_cbTotalChars + _cbBlock.length > _cbMAX) {
+              var _cbRemaining = _cbMAX - _cbTotalChars;
+              if (_cbRemaining > 2000) _cbParts.push(_cbHdr + '\n\n' + _cbBody.slice(0, _cbRemaining));
+              break;
+            }
+            _cbParts.push(_cbBlock);
+            _cbTotalChars += _cbBlock.length;
+          }
+          competitorBriefsText = _cbParts.join('\n\n---\n\n');
+          log('L5 COMPETITOR BRIEFS: injected ' + _cbRows.length + ' briefs (' + _cbTotalChars + ' chars) for vertical=' + _cbVertical);
+        } else {
+          competitorBriefsText = '(no competitor briefs available for vertical=' + _cbVertical + ' — fall back to competitive_intelligence table records)';
+          log('L5 COMPETITOR BRIEFS: no published briefs for vertical=' + _cbVertical);
+        }
+      } catch (_l5e) {
+        log('L5 COMPETITOR BRIEFS fetch error: ' + (_l5e.message||'').slice(0,200));
+        competitorBriefsText = '(competitor brief corpus unavailable)';
+      }
+
       // ═══ S126: STRATEGIC THESIS PRE-STAGE ═══
       // Generate the 3-5 thesis spine before senior_writer runs. Each section of the
       // resulting proposal will be bound to advance at most one thesis. Closes the
@@ -1503,6 +1547,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         '## STAFFING PLAN\n' + (opp.staffing_plan || 'Not yet produced') + '\n\n' +
         '## PURSUIT RESEARCH FINDINGS (Layer B: opportunity-specific deep research on THIS agency, THIS moment, THIS competitive field)\nThese are factual findings from live web research on this specific pursuit. Use them as source material for concrete claims in Technical Approach, Past Performance context, Win Themes, and any section requiring specific knowledge of the agency, decision makers, competitors, regulatory context, or funding environment. Every finding has a source URL — cite specific facts with confidence. Do NOT repeat findings verbatim; weave them into substantive writing.\n\n' + (pursuitResearchText || 'No pursuit research available') + '\n\n' +
         '## METHODOLOGY CORPUS (Layer A: durable SME-depth methodology for this vertical, grounded in primary-source citations — regulations, GAO decisions, OIG reports, industry publications)\nThese are pre-produced methodology briefs covering how experienced teams actually execute work in this vertical. Each brief has inline [N] citations to authoritative sources. Use these briefs as DEEP METHODOLOGY SOURCE for Technical Approach, Operational Plan, Quality Control, Risk Management, and any section that describes HOW HGI will perform the work. Preserve the level of specificity (named systems, week-level sequences, quantified benchmarks, documented failure modes). Do NOT copy briefs verbatim — weave the substance into the proposal voice. Do NOT repeat the same citation bracket numbers — the brief [N] markers are internal to each brief; if you pull a fact, paraphrase and attribute.\n\n' + (methodologyCorpusText || 'No methodology briefs available for this vertical') + '\n\n' +
+        '## COMPETITOR DEEP DIVES (L5: structured intelligence on recurring competitors in this vertical) — INTERNAL ONLY, NEVER REFERENCED IN PROPOSAL TEXT\nThese briefs describe specific competitors HGI faces in this vertical: their corporate profile, methodology patterns, recent wins, recent losses, pricing patterns, known weaknesses, teaming history. Each brief is grounded in cited public sources (USAspending records, GAO protests, trade press, IG reports, corporate filings). Use this intelligence to: (1) sharpen discriminators by identifying the specific gap characteristics each competitor has, (2) inform ghost language without ever naming competitors in proposal text, (3) decide which HGI strengths to foreground based on which competitors are most likely to bid. STRICT RULE: never name, reference, allude to, or compare against any of these competitors in the proposal output. Use this as STRATEGIC CONTEXT only — the proposal reads as if HGI is the only firm in the room.\n\n' + (competitorBriefsText || 'No competitor briefs available for this vertical') + '\n\n' +
         '## AGENT INTELLIGENCE — DIRECT FINDINGS ON THIS OPPORTUNITY\n' + (intelSummary || 'No agent memories yet') + '\n\n' +
         '## CROSS-OPPORTUNITY INTELLIGENCE — PATTERNS FROM OTHER PURSUITS\n' + (crossIntel || 'No cross-opp patterns found') + '\n\n' +
         '## COMPETITIVE INTELLIGENCE DATABASE\n' + (ciText || 'No competitor data yet') + '\n\n' +
@@ -4210,6 +4255,153 @@ if (url.startsWith('/api/methodology-retrieve')) {
   return;
 }
 
+
+
+// === L5 COMPETITOR BRIEFS — /api/competitor-brief-generate, batch, list, retrieve (S126 push 5) ===
+// Mirrors L3 methodology endpoints. Replaces unstructured text-dump from prior agentCompetitorDeepDive.
+
+// POST /api/competitor-brief-generate — single competitor async
+if (url.startsWith('/api/competitor-brief-generate') && req.method === 'POST') {
+  var cgBody = '';
+  req.on('data', function(ch){ cgBody += ch; });
+  req.on('end', async function(){
+    var cgParams = {};
+    try { cgParams = JSON.parse(cgBody || '{}'); } catch(_) {}
+    var cgName = cgParams.competitor_name;
+    var cgVerticals = cgParams.primary_verticals;
+    if (!cgName || !Array.isArray(cgVerticals) || cgVerticals.length === 0) {
+      res.writeHead(400, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+      res.end(JSON.stringify({ error: 'competitor_name and primary_verticals[] required' }));
+      return;
+    }
+    log('COMPETITOR-BRIEF-GENERATE POST: ' + cgName);
+    res.writeHead(200, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+    res.end(JSON.stringify({ started: true, competitor_name: cgName, note: 'Competitor brief running async (~5-8 min). Poll GET /api/competitor-briefs to see result.' }));
+    setImmediate(async function(){
+      try {
+        var cgOpts = {};
+        if (typeof cgParams.softCap === 'number') cgOpts.softCap = cgParams.softCap;
+        if (typeof cgParams.hardCap === 'number') cgOpts.hardCap = cgParams.hardCap;
+        var cgRes = await agentCompetitorBriefResearcher({
+          competitor_name: cgName,
+          primary_verticals: cgVerticals,
+          geographic_focus: cgParams.geographic_focus,
+          force: !!cgParams.force
+        }, cgOpts);
+        log('COMPETITOR-BRIEF-GENERATE done: ' + JSON.stringify(cgRes).slice(0, 300));
+      } catch (_ee) {
+        log('COMPETITOR-BRIEF-GENERATE exception: ' + (_ee.message||'').slice(0,200));
+      }
+    });
+  });
+  return;
+}
+
+// POST /api/competitor-brief-batch — serial async batch
+if (url.startsWith('/api/competitor-brief-batch') && req.method === 'POST') {
+  var cbBody = '';
+  req.on('data', function(ch){ cbBody += ch; });
+  req.on('end', async function(){
+    var cbParams = {};
+    try { cbParams = JSON.parse(cbBody || '{}'); } catch(_) {}
+    var cbBriefs = Array.isArray(cbParams.briefs) ? cbParams.briefs : [];
+    if (cbBriefs.length === 0) {
+      res.writeHead(400, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+      res.end(JSON.stringify({ error: 'briefs array required: [{competitor_name, primary_verticals[], geographic_focus[]?}, ...]' }));
+      return;
+    }
+    var cbCount = cbBriefs.length;
+    log('COMPETITOR-BRIEF-BATCH POST: starting serial batch of ' + cbCount + ' briefs');
+    res.writeHead(200, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+    res.end(JSON.stringify({ started: true, count: cbCount, note: 'Serial batch running async (~' + Math.ceil(cbCount * 6) + '-' + Math.ceil(cbCount * 9) + ' min total). Poll GET /api/competitor-briefs.' }));
+    setImmediate(async function(){
+      var bResults = [];
+      var batchStart = Date.now();
+      for (var bi = 0; bi < cbBriefs.length; bi++) {
+        var b = cbBriefs[bi] || {};
+        if (!b.competitor_name || !Array.isArray(b.primary_verticals)) continue;
+        try {
+          log('COMPETITOR-BRIEF-BATCH ' + (bi+1) + '/' + cbCount + ': ' + b.competitor_name);
+          var bOpts = {};
+          if (typeof cbParams.softCap === 'number') bOpts.softCap = cbParams.softCap;
+          if (typeof cbParams.hardCap === 'number') bOpts.hardCap = cbParams.hardCap;
+          if (typeof b.softCap === 'number') bOpts.softCap = b.softCap;
+          if (typeof b.hardCap === 'number') bOpts.hardCap = b.hardCap;
+          var bRes = await agentCompetitorBriefResearcher({
+            competitor_name: b.competitor_name,
+            primary_verticals: b.primary_verticals,
+            geographic_focus: b.geographic_focus,
+            force: !!cbParams.force
+          }, bOpts);
+          bResults.push({ idx: bi+1, competitor_name: b.competitor_name, status: bRes && bRes.status, words: bRes && bRes.word_count, cost: bRes && bRes.cost_usd });
+        } catch (_be) {
+          log('COMPETITOR-BRIEF-BATCH ' + (bi+1) + ' error: ' + (_be.message||'').slice(0,200));
+          bResults.push({ idx: bi+1, competitor_name: b.competitor_name, status: 'exception', error: (_be.message||'').slice(0,200) });
+        }
+      }
+      var batchWall = Math.floor((Date.now() - batchStart)/1000);
+      var batchCost = bResults.reduce(function(s,r){return s + (r.cost||0);}, 0);
+      log('COMPETITOR-BRIEF-BATCH done: ' + bResults.length + ' attempted, ' + bResults.filter(function(r){return r.status==='published';}).length + ' published, ' + batchWall + 's, $' + batchCost.toFixed(2));
+    });
+  });
+  return;
+}
+
+// GET /api/competitor-briefs — list briefs, filter by vertical or competitor optional
+if (url.startsWith('/api/competitor-briefs')) {
+  var cqRaw = req.url || '';
+  var cqQS = cqRaw.indexOf('?') >= 0 ? cqRaw.split('?')[1] : '';
+  var cqParams = {};
+  cqQS.split('&').forEach(function(p){ var kv = p.split('='); if(kv[0]) cqParams[decodeURIComponent(kv[0])] = decodeURIComponent(kv[1]||''); });
+  try {
+    var cqQuery = supabase.from('competitor_briefs').select('id,competitor_name,competitor_slug,primary_verticals,geographic_focus,word_count,citation_count,quality_score,status,last_researched,generation_cost_usd,generation_wall_time_seconds,created_at,updated_at').order('updated_at', { ascending: false });
+    if (cqParams.competitor_slug) cqQuery = cqQuery.eq('competitor_slug', cqParams.competitor_slug);
+    if (cqParams.status) cqQuery = cqQuery.eq('status', cqParams.status);
+    if (cqParams.vertical) cqQuery = cqQuery.contains('primary_verticals', [cqParams.vertical]);
+    var cqResp = await cqQuery.limit(200);
+    res.writeHead(200, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+    res.end(JSON.stringify({
+      count: (cqResp.data||[]).length,
+      briefs: cqResp.data || []
+    }));
+  } catch (cqe) {
+    res.writeHead(500, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+    res.end(JSON.stringify({ error: cqe.message }));
+  }
+  return;
+}
+
+// GET /api/competitor-brief-retrieve — fetch full brief text + citations
+if (url.startsWith('/api/competitor-brief-retrieve')) {
+  var crRaw = req.url || '';
+  var crQS = crRaw.indexOf('?') >= 0 ? crRaw.split('?')[1] : '';
+  var crParams = {};
+  crQS.split('&').forEach(function(p){ var kv = p.split('='); if(kv[0]) crParams[decodeURIComponent(kv[0])] = decodeURIComponent(kv[1]||''); });
+  var crSlug = crParams.competitor_slug;
+  if (!crSlug) {
+    res.writeHead(400, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+    res.end(JSON.stringify({ error: 'competitor_slug required' }));
+    return;
+  }
+  try {
+    var crBrief = await supabase.from('competitor_briefs').select('*').eq('competitor_slug', crSlug).eq('status', 'published').limit(1).single();
+    if (!crBrief.data) {
+      res.writeHead(404, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+      res.end(JSON.stringify({ error: 'no published brief for slug=' + crSlug }));
+      return;
+    }
+    var crCites = await supabase.from('competitor_brief_citations').select('*').eq('brief_id', crBrief.data.id).order('relevance_score', { ascending: false });
+    res.writeHead(200, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+    res.end(JSON.stringify({
+      brief: crBrief.data,
+      citations: crCites.data || []
+    }));
+  } catch (cre) {
+    res.writeHead(500, { 'Content-Type':'application/json', 'Access-Control-Allow-Origin':'*' });
+    res.end(JSON.stringify({ error: cre.message }));
+  }
+  return;
+}
 
 // === COMPLIANCE CHECK — /api/compliance-check?id= ===
 if (url.startsWith('/api/compliance-check')) {
@@ -7699,6 +7891,357 @@ async function agentMethodologyResearcher(params, opts) {
     quality_score: qualityScore,
     hard_fails: hardFails,
     canon_violations: canonViolations,
+    cost_usd: Number(runCost.toFixed(4)),
+    wall_time_seconds: wallTime
+  };
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// agentCompetitorBriefResearcher — S126 L5
+// Replaces the prior cron text-dump version of agentCompetitorDeepDive (L8636,
+// kept in place for backward compatibility with any caller still depending on it).
+// Produces structured 4-6K word competitor briefs with 20-40 primary-source
+// citations, 7-section structure: corporate_profile, methodology_patterns,
+// recent_wins, recent_losses, pricing_patterns, known_weaknesses, teaming_history.
+// Stores in competitor_briefs table; cites tracked in competitor_brief_citations.
+// Used by L4 discriminator synthesizer and L7 senior writer via retrieveCompetitorBriefs().
+// ─────────────────────────────────────────────────────────────────────────────
+async function agentCompetitorBriefResearcher(params, opts) {
+  params = params || {};
+  opts = opts || {};
+  var SOFT_CAP = typeof opts.softCap === 'number' ? opts.softCap : 3.00;
+  var HARD_CAP = typeof opts.hardCap === 'number' ? opts.hardCap : 5.00;
+  var competitorName = String(params.competitor_name || '').trim();
+  var primaryVerticals = Array.isArray(params.primary_verticals) ? params.primary_verticals : [];
+  var geographicFocus = Array.isArray(params.geographic_focus) ? params.geographic_focus : ['Louisiana', 'Gulf Coast', 'national'];
+
+  if (!competitorName) {
+    return { status: 'failed', error: 'competitor_name_required' };
+  }
+  if (primaryVerticals.length === 0) {
+    return { status: 'failed', error: 'primary_verticals_required' };
+  }
+
+  var slug = competitorName.toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80);
+
+  var briefId = 'competitor-' + slug;
+  var log_prefix = 'COMPETITOR-BRIEF[' + slug.slice(0, 60) + ']';
+  var runStart = Date.now();
+  var runCost = 0;
+
+  function addCost(model, usage) {
+    if (!usage) return;
+    var p = PRICING[model] || PRICING['claude-haiku-4-5-20251001'];
+    runCost += (usage.input_tokens || 0) * p.in_per_tok + (usage.output_tokens || 0) * p.out_per_tok;
+  }
+
+  // 0. Freshness check
+  if (!opts.force) {
+    try {
+      var existing = await supabase.from('competitor_briefs')
+        .select('id,status,updated_at,word_count,citation_count')
+        .eq('id', briefId)
+        .single();
+      if (existing.data && existing.data.status === 'published') {
+        var ageDays = (Date.now() - new Date(existing.data.updated_at).getTime()) / (24*60*60*1000);
+        if (ageDays < 60) {
+          log(log_prefix + ' fresh brief exists (' + ageDays.toFixed(1) + ' days old), skipping');
+          return { status: 'skipped_fresh', brief_id: briefId, age_days: ageDays, word_count: existing.data.word_count, citation_count: existing.data.citation_count };
+        }
+      }
+    } catch (_ee) { /* non-fatal */ }
+  }
+
+  log(log_prefix + ' START: competitor=' + competitorName + ' verticals=' + primaryVerticals.join(','));
+
+  // ═══ 1. RESEARCH PHASE — 5 web-search passes ═══
+  var researchSystem =
+    'You are a senior competitive intelligence analyst researching government services contractors. For each query, use web_search to retrieve PUBLIC, AUTHORITATIVE sources ONLY. Prioritize: (1) USAspending.gov contract awards, (2) SAM.gov entity records, (3) GAO bid protest decisions, (4) state procurement award databases, (5) trade press coverage of major awards/losses (ENR, Federal News Network, FCW, Government Executive, Disaster Recovery Journal), (6) the firm\'s own published case studies, (7) corporate press releases, (8) SEC filings if publicly traded, (9) Glassdoor/LinkedIn for personnel signals. Avoid: vendor marketing copy from the firm itself for substantive claims, blogs without sourcing, opinion pieces.\n\n' +
+    'For each source you find, extract the most substantive passage (200-500 words) directly relevant to the research focus. Tag each extract with category: contract_award / protest_decision / press_coverage / corporate_filing / case_study / trade_publication / personnel_signal. Include source URL, source title, source date.\n\n' +
+    'Return ONLY JSON: [{"category":"contract_award","source_title":"...","source_url":"...","source_date":"YYYY-MM-DD","excerpt":"..."}]. No preamble. No markdown fences.';
+
+  var verticalsList = primaryVerticals.join(', ');
+  var geoList = geographicFocus.join(', ');
+
+  var researchQueries = [
+    {
+      focus: 'recent contract awards (last 24 months)',
+      query: 'Find publicly documented contract awards to "' + competitorName + '" in the past 24 months. Prioritize USAspending.gov records, state procurement award notices, agency press releases. Focus on awards in: ' + verticalsList + ', geography: ' + geoList + '. Extract 4-6 specific awards with dollar amounts, agency, scope, period of performance.'
+    },
+    {
+      focus: 'recent losses, protests, terminations',
+      query: 'Find publicly documented losses, GAO protests, contract terminations, or unsuccessful pursuits by "' + competitorName + '" in the past 36 months. Search GAO.gov protest decisions, agency debrief records, trade press. Extract 2-4 specific instances with the reason for the outcome where stated.'
+    },
+    {
+      focus: 'methodology patterns and corporate identity',
+      query: 'Find published descriptions of "' + competitorName + '" methodology, delivery model, and corporate positioning. Sources: corporate website case studies, press releases, leadership interviews, conference presentations, white papers. Focus on what the firm publicly claims as its differentiators in: ' + verticalsList + '. Extract 3-5 substantive descriptions.'
+    },
+    {
+      focus: 'pricing patterns and cost structure signals',
+      query: 'Find publicly available pricing signals for "' + competitorName + '": GSA Schedule rates, awarded contract values relative to scope, hourly rate disclosures, public protests citing pricing factors. Extract 2-4 specific pricing data points.'
+    },
+    {
+      focus: 'known weaknesses, audit findings, performance issues',
+      query: 'Find publicly documented weaknesses, audit findings, performance issues, IG reports, or critical press coverage of "' + competitorName + '". Sources: GAO reports, IG reports, state legislative auditor reports, investigative journalism, trade press. Focus on substantive findings in: ' + verticalsList + '. Extract 2-4 specific items.'
+    }
+  ];
+
+  var allSources = [];
+  for (var ri = 0; ri < researchQueries.length; ri++) {
+    if (runCost >= SOFT_CAP) { log(log_prefix + ' SOFT_CAP hit at research phase ' + ri); break; }
+    var rq = researchQueries[ri];
+    var rResp;
+    try {
+      rResp = await anthropic.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 3500,
+        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        system: researchSystem,
+        messages: [{ role: 'user', content: 'COMPETITOR: ' + competitorName + '\nRESEARCH FOCUS: ' + rq.focus + '\n\n' + rq.query + '\n\nReturn ONLY the JSON array of source extracts.' }]
+      });
+      trackCost('competitor_research', 'claude-sonnet-4-6', rResp.usage);
+      addCost('claude-sonnet-4-6', rResp.usage);
+    } catch (re) {
+      log(log_prefix + ' research pass ' + ri + ' error: ' + (re.message||'').slice(0,150));
+      continue;
+    }
+    var rText = (rResp.content || []).filter(function(b){return b.type==='text';}).map(function(b){return b.text;}).join('');
+    var rClean = rText.replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
+    var rFb = rClean.indexOf('['), rLb = rClean.lastIndexOf(']');
+    if (rFb >= 0 && rLb > rFb) rClean = rClean.slice(rFb, rLb+1);
+    try {
+      var parsed = JSON.parse(rClean);
+      if (Array.isArray(parsed)) {
+        allSources = allSources.concat(parsed.filter(function(s){return s && s.source_title && s.excerpt;}));
+      }
+    } catch(_rpe) { /* skip */ }
+    log(log_prefix + ' research ' + ri + ': +' + (allSources.length) + ' total sources, cost=$' + runCost.toFixed(3));
+  }
+
+  if (allSources.length < 6) {
+    log(log_prefix + ' insufficient sources (' + allSources.length + '), failing');
+    return { status: 'failed', error: 'insufficient_sources', source_count: allSources.length, cost_usd: Number(runCost.toFixed(4)) };
+  }
+
+  // Build research context block (cap 60K chars to leave room for Opus generation)
+  var researchBlock = allSources.map(function(s, idx) {
+    return '[' + (idx+1) + '] ' + String(s.category||'other').toUpperCase() + ' — ' + (s.source_title||'') +
+      (s.source_date ? ' (' + s.source_date + ')' : '') + '\n' +
+      'URL: ' + (s.source_url||'') + '\n' +
+      'Excerpt: ' + String(s.excerpt||'').slice(0, 1500);
+  }).join('\n\n').slice(0, 60000);
+
+  log(log_prefix + ' research assembled: ' + allSources.length + ' sources, ' + researchBlock.length + ' chars, cost=$' + runCost.toFixed(3));
+
+  // ═══ 2. BRIEF GENERATION — Opus + 8K thinking ═══
+  var briefSystem =
+    'You are a senior competitive intelligence analyst with 20 years of experience in government services market intelligence. You have studied this competitor across multiple pursuits and outcomes. You write competitor briefs that capture strategists at HGI Global use to position against this firm in head-to-head pursuits.\n\n' +
+    'You are producing a COMPETITOR BRIEF. The brief is NOT a generic profile. It is operational intelligence: where this firm is strong, where they are vulnerable, what their pricing looks like, what they bid recently and what they lost recently, who they team with, what audit findings they have. Every claim must be grounded in cited public sources.\n\n' +
+    'The brief MUST include these 7 sections (in order):\n' +
+    '1. CORPORATE PROFILE — entity structure, ownership, headquarters, geographic footprint, leadership signals, employee count signals, parent/subsidiary relationships. Cite each material fact.\n' +
+    '2. METHODOLOGY PATTERNS — how they publicly position their delivery model, what differentiators they claim, what they emphasize in their case studies and press. Cite from their own materials.\n' +
+    '3. RECENT WINS — specific contracts awarded in the last 24 months: agency, scope, dollar value, period of performance. Source each from USAspending, state procurement records, or trade press.\n' +
+    '4. RECENT LOSSES — specific losses, GAO protests, terminations, or unsuccessful pursuits in the last 36 months. Cite GAO decisions or trade coverage.\n' +
+    '5. PRICING PATTERNS — what their published rates look like (GSA Schedule, awarded contract values vs scope), pricing protest history, any signals on cost structure. Cite specifics.\n' +
+    '6. KNOWN WEAKNESSES — audit findings, IG reports, performance issues, critical press coverage with specific quotes/findings. Cite each.\n' +
+    '7. TEAMING HISTORY — who they team with as primes/subs in the verticals HGI competes in. Cite from contract awards.\n\n' +
+    'FORMAT RULES:\n' +
+    '- Target length: 4,000-6,000 words.\n' +
+    '- Inline citations: use [N] where N matches the numbered source list. Minimum 20 distinct inline citations across the brief.\n' +
+    '- Use ## section headers for the 7 sections above.\n' +
+    '- Write in operational analyst voice: factual, specific, attributable. Never speculative.\n' +
+    '- Never use the competitor\'s own marketing language without quotation. Never overstate findings beyond what sources support.\n' +
+    '- HGI is the consumer of this brief. NEVER write proposal-style language ("HGI will...", "HGI provides..."). The brief is intelligence ABOUT a competitor, not a marketing piece for HGI.\n\n' +
+    'OUTPUT FORMAT:\n' +
+    'Return ONLY valid JSON with this exact shape. No preamble. No markdown fences.\n' +
+    '{\n' +
+    '  "brief_text": "## CORPORATE PROFILE\\n\\n... full brief 4000-6000 words with inline [N] citations and 7 sections...",\n' +
+    '  "section_extracts": {\n' +
+    '    "corporate_profile": "the corporate profile section text only (for indexed retrieval)",\n' +
+    '    "methodology_patterns": "...",\n' +
+    '    "recent_wins": "...",\n' +
+    '    "recent_losses": "...",\n' +
+    '    "pricing_patterns": "...",\n' +
+    '    "known_weaknesses": "...",\n' +
+    '    "teaming_history": "..."\n' +
+    '  },\n' +
+    '  "citations_used": [\n' +
+    '    {"n": 1, "source_title": "...", "source_url": "...", "source_date": "YYYY-MM-DD", "citation_type": "contract_award", "relevance_score": 95, "citation_text": "brief quote or paraphrase"}\n' +
+    '  ]\n' +
+    '}\n' +
+    'citation_type must be one of: contract_award, protest_decision, press_coverage, corporate_filing, case_study, trade_publication, personnel_signal, audit_report, other\n' +
+    'Every [N] in brief_text MUST appear in citations_used.';
+
+  var briefUser =
+    'COMPETITOR: ' + competitorName + '\n' +
+    'PRIMARY VERTICALS HGI COMPETES IN: ' + verticalsList + '\n' +
+    'GEOGRAPHIC SCOPE: ' + geoList + '\n' +
+    '\nRESEARCH SOURCES (cite by [N] matching the bracketed numbers):\n\n' +
+    researchBlock +
+    '\n\nProduce the competitor brief now. Follow the 7-section structure exactly. Minimum 4,000 words. Minimum 20 distinct inline [N] citations. Return ONLY the JSON object.';
+
+  log(log_prefix + ' brief generation begin (Opus + 8K thinking, 20K max)');
+
+  var briefResp;
+  try {
+    briefResp = await anthropic.messages.create({
+      model: 'claude-opus-4-6',
+      max_tokens: 20000,
+      thinking: { type: 'enabled', budget_tokens: 8000 },
+      system: briefSystem,
+      messages: [{ role: 'user', content: briefUser }]
+    });
+    trackCost('competitor_brief', 'claude-opus-4-6', briefResp.usage);
+    addCost('claude-opus-4-6', briefResp.usage);
+  } catch (bge) {
+    log(log_prefix + ' brief generation error: ' + (bge.message||'').slice(0,200));
+    return { status: 'failed', error: 'brief_generation_error', detail: (bge.message||'').slice(0,200), cost_usd: Number(runCost.toFixed(4)) };
+  }
+
+  var briefText = (briefResp.content || []).filter(function(b){return b.type==='text';}).map(function(b){return b.text;}).join('');
+  var briefClean = briefText.replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
+  var bFb = briefClean.indexOf('{'), bLb = briefClean.lastIndexOf('}');
+  if (bFb >= 0 && bLb > bFb) briefClean = briefClean.slice(bFb, bLb+1);
+
+  var briefObj = null;
+  try { briefObj = JSON.parse(briefClean); } catch (bpe) {
+    log(log_prefix + ' brief JSON parse failed: ' + (bpe.message||'').slice(0,120));
+    return { status: 'failed', error: 'brief_parse_failed', cost_usd: Number(runCost.toFixed(4)) };
+  }
+
+  if (!briefObj.brief_text || typeof briefObj.brief_text !== 'string') {
+    return { status: 'failed', error: 'missing_brief_text', cost_usd: Number(runCost.toFixed(4)) };
+  }
+
+  var finalText = briefObj.brief_text;
+  var sectionExtracts = briefObj.section_extracts || {};
+  var citationsUsed = Array.isArray(briefObj.citations_used) ? briefObj.citations_used : [];
+
+  // ═══ 3. VALIDATION ═══
+  var wordCount = (finalText.match(/\b\w+\b/g) || []).length;
+  var inlineCitations = (finalText.match(/\[\d+\]/g) || []).length;
+  var distinctInlineCitations = {};
+  (finalText.match(/\[\d+\]/g) || []).forEach(function(m){ distinctInlineCitations[m] = true; });
+  var distinctInlineCount = Object.keys(distinctInlineCitations).length;
+
+  var validationChecks = {
+    word_count: wordCount,
+    word_count_ok: wordCount >= 3500,
+    distinct_citations_ok: distinctInlineCount >= 12,
+    has_corporate_profile: /##\s*CORPORATE PROFILE/i.test(finalText),
+    has_methodology_patterns: /##\s*METHODOLOGY PATTERNS/i.test(finalText),
+    has_recent_wins: /##\s*RECENT WINS/i.test(finalText),
+    has_recent_losses: /##\s*RECENT LOSSES/i.test(finalText),
+    has_pricing_patterns: /##\s*PRICING PATTERNS/i.test(finalText),
+    has_known_weaknesses: /##\s*KNOWN WEAKNESSES/i.test(finalText),
+    has_teaming_history: /##\s*TEAMING HISTORY/i.test(finalText)
+  };
+
+  var hardFails = [];
+  if (!validationChecks.word_count_ok) hardFails.push('word_count_low:' + wordCount);
+  if (!validationChecks.distinct_citations_ok) hardFails.push('distinct_citations_low:' + distinctInlineCount);
+  if (!validationChecks.has_recent_wins) hardFails.push('missing_recent_wins');
+  if (!validationChecks.has_known_weaknesses) hardFails.push('missing_known_weaknesses');
+
+  var briefStatus = hardFails.length === 0 ? 'published' : 'flagged';
+  var passCount = 0;
+  Object.keys(validationChecks).forEach(function(k){ if (k.indexOf('_ok')>=0 || k.indexOf('has_')===0) { if (validationChecks[k] === true) passCount++; } });
+  var qualityScore = Math.round((passCount / 9) * 100);
+
+  log(log_prefix + ' validation: status=' + briefStatus + ', words=' + wordCount + ', distinct_cites=' + distinctInlineCount + ', quality=' + qualityScore + (hardFails.length ? ', hardFails=' + hardFails.join(',') : ''));
+
+  // ═══ 4. STORAGE ═══
+  var wallTime = Math.floor((Date.now() - runStart) / 1000);
+
+  try {
+    await supabase.from('competitor_brief_citations').delete().eq('brief_id', briefId);
+    await supabase.from('competitor_briefs').delete().eq('id', briefId);
+  } catch (_de) { /* non-fatal */ }
+
+  try {
+    var insertBrief = await supabase.from('competitor_briefs').insert({
+      id: briefId,
+      competitor_name: competitorName,
+      competitor_slug: slug,
+      primary_verticals: primaryVerticals,
+      geographic_focus: geographicFocus,
+      brief_text: finalText,
+      corporate_profile: String(sectionExtracts.corporate_profile || '').slice(0, 20000),
+      methodology_patterns: String(sectionExtracts.methodology_patterns || '').slice(0, 20000),
+      recent_wins: String(sectionExtracts.recent_wins || '').slice(0, 20000),
+      recent_losses: String(sectionExtracts.recent_losses || '').slice(0, 20000),
+      pricing_patterns: String(sectionExtracts.pricing_patterns || '').slice(0, 20000),
+      known_weaknesses: String(sectionExtracts.known_weaknesses || '').slice(0, 20000),
+      teaming_history: String(sectionExtracts.teaming_history || '').slice(0, 20000),
+      word_count: wordCount,
+      citation_count: citationsUsed.length,
+      last_researched: new Date().toISOString(),
+      version: 1,
+      status: briefStatus,
+      quality_score: qualityScore,
+      generation_cost_usd: Number(runCost.toFixed(4)),
+      generation_wall_time_seconds: wallTime,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    });
+    if (insertBrief.error) log(log_prefix + ' brief insert error: ' + (insertBrief.error.message||'').slice(0,200));
+  } catch (bie) {
+    log(log_prefix + ' brief insert exception: ' + (bie.message||'').slice(0,200));
+    return { status: 'failed', error: 'storage_error', detail: (bie.message||'').slice(0,200), cost_usd: Number(runCost.toFixed(4)) };
+  }
+
+  if (citationsUsed.length > 0) {
+    var citationRows = citationsUsed.filter(function(c){return c && c.source_title;}).map(function(c){
+      return {
+        brief_id: briefId,
+        citation_type: String(c.citation_type||'other').slice(0, 60),
+        source_title: String(c.source_title||'').slice(0, 500),
+        source_url: c.source_url ? String(c.source_url).slice(0, 600) : null,
+        source_date: (c.source_date && /^\d{4}-\d{2}-\d{2}/.test(String(c.source_date))) ? String(c.source_date).slice(0, 10) : null,
+        citation_text: c.citation_text ? String(c.citation_text).slice(0, 2000) : null,
+        relevance_score: typeof c.relevance_score === 'number' ? c.relevance_score : 50,
+        created_at: new Date().toISOString()
+      };
+    });
+    if (citationRows.length > 0) {
+      try {
+        var insC = await supabase.from('competitor_brief_citations').insert(citationRows);
+        if (insC.error) log(log_prefix + ' citations insert error: ' + (insC.error.message||'').slice(0,200));
+      } catch (cie) {
+        log(log_prefix + ' citations insert exception: ' + (cie.message||'').slice(0,200));
+      }
+    }
+  }
+
+  // Memory trail
+  try {
+    await supabase.from('organism_memory').insert({
+      id: 'mem_compbrief_' + slug.slice(0,80) + '_' + Date.now(),
+      agent: 'competitor_brief_researcher',
+      observation: 'COMPETITOR BRIEF ' + briefStatus.toUpperCase() + ': ' + competitorName +
+        '. Words=' + wordCount + ', distinct citations=' + distinctInlineCount +
+        ', quality=' + qualityScore + ', cost=$' + runCost.toFixed(2) + ', wall=' + wallTime + 's.' +
+        (hardFails.length ? ' HardFails: ' + hardFails.join(',') : ''),
+      memory_type: 'competitive_intel',
+      created_at: new Date().toISOString()
+    });
+  } catch (_me) { /* non-fatal */ }
+
+  log(log_prefix + ' DONE: status=' + briefStatus + ', words=' + wordCount + ', cost=$' + runCost.toFixed(2) + ', wall=' + wallTime + 's');
+
+  return {
+    brief_id: briefId,
+    competitor_name: competitorName,
+    status: briefStatus,
+    word_count: wordCount,
+    citation_count: citationsUsed.length,
+    distinct_inline_citations: distinctInlineCount,
+    quality_score: qualityScore,
+    hard_fails: hardFails,
     cost_usd: Number(runCost.toFixed(4)),
     wall_time_seconds: wallTime
   };
