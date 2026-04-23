@@ -1536,6 +1536,26 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
           {}
         );
         if (techApproachSection && techApproachSection.section_text) {
+          // ═══ S132: L6 CITATION VERIFIER PASS ═══
+          // Runs AFTER the specialist produces the section, BEFORE persistence.
+          // Extracts regulatory/audit-report citations, cheap-path verifies the
+          // canonical ones, Haiku+web_search verifies the rest (cap 10/section),
+          // substitutes/flags failures. Non-fatal: on error, proceeds with
+          // unverified text so the pipeline is not blocked.
+          try {
+            var verifyRes = await verifySectionCitations(techApproachSection.section_text, ppId, 'technical_approach');
+            techApproachSection.section_text = verifyRes.verified_text;
+            techApproachSection.citation_verifier = {
+              run_id: verifyRes.run_id,
+              counts: verifyRes.counts,
+              flagged_count: verifyRes.flagged_count,
+              cost_usd: verifyRes.cost_usd,
+              version: 's132_v1'
+            };
+            log('PROPOSAL ENGINE: L6 citation verifier ran — ' + verifyRes.counts.total_candidates + ' candidates, ' + verifyRes.counts.cheap_passed + ' cheap-passed, ' + verifyRes.counts.structured_verified + ' structured-verified, ' + verifyRes.flagged_count + ' flagged, cost $' + verifyRes.cost_usd.toFixed(4) + ' (run_id=' + verifyRes.run_id + ')');
+          } catch (cvErr) {
+            log('PROPOSAL ENGINE: L6 citation verifier error (non-fatal, persisting unverified text): ' + (cvErr.message||'').slice(0,200));
+          }
           await supabase.from('opportunities').update({
             section_technical_approach: techApproachSection,
             last_updated: new Date().toISOString()
@@ -4622,6 +4642,51 @@ if (url.startsWith('/api/proposal-improve') && req.method === 'POST') {
     if (!piResult.improved && !piResult.redteam_findings) { res.end(JSON.stringify({ error: 'action must be improve, redteam, or both' })); return; }
     res.end(JSON.stringify({ success: true, result: piResult }));
   } catch (e) { res.end(JSON.stringify({ error: e.message })); }
+  return;
+}
+
+// === S132: CITATION VERIFIER TEST — /api/test-citation-verifier ===
+// POST {id: "opp_id", section?: "technical_approach"}
+// Runs verifySectionCitations() against an opportunity's already-populated
+// section_technical_approach. Lets us validate the verifier without re-running
+// produce-proposal ($2+). Returns audit_log + counts + verified_text preview.
+if (url.startsWith('/api/test-citation-verifier') && req.method === 'POST') {
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+  try {
+    var cvBody = '';
+    await new Promise(function(resolve) { req.on('data', function(c) { cvBody += c; }); req.on('end', resolve); });
+    var cvData = JSON.parse(cvBody || '{}');
+    var cvOppId = cvData.id || cvData.opportunity_id;
+    var cvSectionName = cvData.section || 'technical_approach';
+    if (!cvOppId) { res.end(JSON.stringify({ error: 'id required' })); return; }
+
+    var cvOppRes = await supabase.from('opportunities').select('id, section_technical_approach').eq('id', cvOppId).single();
+    if (!cvOppRes.data) { res.end(JSON.stringify({ error: 'opportunity not found' })); return; }
+    var cvSectionObj = cvOppRes.data.section_technical_approach;
+    if (!cvSectionObj || !cvSectionObj.section_text) {
+      res.end(JSON.stringify({ error: 'section_' + cvSectionName + ' not populated on this opportunity' }));
+      return;
+    }
+
+    log('CITATION VERIFIER TEST: oppId=' + cvOppId + ', section=' + cvSectionName + ', chars=' + cvSectionObj.section_text.length);
+
+    var cvResult = await verifySectionCitations(cvSectionObj.section_text, cvOppId, cvSectionName);
+
+    res.end(JSON.stringify({
+      success: true,
+      opportunity_id: cvOppId,
+      section: cvSectionName,
+      run_id: cvResult.run_id,
+      counts: cvResult.counts,
+      flagged_count: cvResult.flagged_count,
+      cost_usd: cvResult.cost_usd,
+      audit_log: cvResult.audit_log,
+      verified_text_length: cvResult.verified_text.length,
+      verified_text_preview: cvResult.verified_text.slice(0, 2000)
+    }));
+  } catch (e) {
+    res.end(JSON.stringify({ error: e.message, stack: (e.stack||'').slice(0,500) }));
+  }
   return;
 }
 
@@ -8408,6 +8473,11 @@ async function generateTechnicalApproachSection(opp, blueprint, methodologyCorpu
     '- Never name competitors in proposal text.\n' +
     '- Never use prohibited voice phrases: "we believe", "we feel", "leverage synergies", "best-in-class", "cutting-edge", "world-class", "innovative solutions", "paradigm shift", "next-generation", "turn-key solution", "robust framework".\n' +
     '- Never emit visible bracketed placeholders. The only permitted bracket is [TO BE ASSIGNED] for Key Personnel.\n\n' +
+    'CITATION DISCIPLINE (S132 — avoid stale and fabricated citations):\n' +
+    '- Whenever you cite a dollar amount, discount rate, threshold, deadline, or any time-sensitive figure, include the as-of-date in parentheses. Example: "The current FEMA BCA discount rate is 7% (as of April 2025)."\n' +
+    '- Prefer citing regulatory sections (CFR, U.S.C., P.L.) over specific OIG/GAO report numbers unless both the report number AND its subject matter are known with high confidence.\n' +
+    '- When citing an OIG or GAO report, state the report\'s subject in the sentence, not just the report number. Example: "OIG-19-54 found Louisiana drew down $50.4M in excess HMGP funds." — not "as documented in OIG-19-54."\n' +
+    '- Document numbers must match their titles: FEMA-325 is the Public Assistance Debris Management Guide; FEMA-327 is the Debris Monitoring Guide. Never pair a document number with the wrong title.\n\n' +
     'OUTPUT FORMAT — return ONLY valid JSON. No preamble. No markdown fences.\n' +
     '{\n' +
     '  "section_text": "Full Technical Approach section text in markdown. Use ## subsection headers. Target length: scaled to RFP weight (typically 4,000-8,000 words).",\n' +
@@ -8558,6 +8628,333 @@ async function generateTechnicalApproachSection(opp, blueprint, methodologyCorpu
     generated_at: new Date().toISOString()
   };
 }
+
+// ============================================================
+// L6 CITATION VERIFIER — S132
+//
+// Runs after an L6 section specialist produces text, BEFORE the section
+// is persisted to the opportunities row. Extracts regulatory/audit-report
+// citation candidates via regex, verifies them via a cheap path (canonical
+// pattern match, no API cost) or a structured path (Haiku + web_search),
+// and substitutes/flags failures.
+//
+// Persistence behavior:
+//   verified        -> leave sentence unchanged
+//   stale           -> leave sentence, note in audit_log (operator decides)
+//   wrong_subject
+//   figure_mismatch
+//   not_found       -> substitute with correction_text if provided,
+//                      else append [CITATION VERIFICATION FAILED — MANUAL REVIEW REQUIRED]
+//   over_cap        -> flagged for manual review (verification not attempted)
+//
+// Cost cap: STRUCTURED_CAP (=10) Haiku+web_search calls per section.
+// Candidates beyond the cap are flagged as over_cap, no verification.
+//
+// Returns: { verified_text, audit_log, flagged_count, cost_usd, run_id, counts }.
+// Per S131 handoff §5.1, S132 starter prompt Step 3.
+// ============================================================
+
+function extractCitationCandidatesFromSection(text) {
+  if (!text || typeof text !== 'string') return [];
+
+  var patterns = [
+    { type: 'OIG',         re: /\bOIG-DD-\d{2}-\d{2}\b/g },
+    { type: 'OIG',         re: /\bOIG-\d{2}-\d{2,3}(?:-[A-Z]+)?\b/g },
+    { type: 'GAO',         re: /\bGAO-\d{2}-\d{2,4}\b/g },
+    { type: 'FR',          re: /\b\d{2,3}\s*FR\s*\d{4,6}\b/g },
+    { type: 'FEMA_POLICY', re: /\bFP-\d{3}-\d{2}-\d{3,4}\b/g },
+    { type: 'FEMA_DOC',    re: /\bFEMA[-\s]\d{3,4}\b/g },
+    { type: 'CFR',         re: /\b\d+\s*CFR\s*(?:Part\s*)?\d+(?:\.\d+)*(?:\([a-z0-9]+\))*\b/g },
+    { type: 'USC',         re: /\b\d+\s*U\.?S\.?C\.?\s*(?:§§|§|Section|Sec\.?)\s*\d+(?:[-–]\d+)?\b/gi },
+    { type: 'PL',          re: /\bP\.?L\.?\s*\d{2,3}-\d{1,3}\b/g }
+  ];
+  var dollarRe = /\$\s?[\d,]+(?:\.\d+)?\s*(?:million|billion|M\b|B\b|thousand|K\b)?/gi;
+
+  var candidates = [];
+  var seen = {};
+
+  patterns.forEach(function(p) {
+    var m;
+    p.re.lastIndex = 0;
+    while ((m = p.re.exec(text)) !== null) {
+      var citation = m[0].trim();
+      var matchIdx = m.index;
+
+      // Find containing sentence by looking for nearest sentence boundary
+      var boundaries = ['. ', '.\n', '!\n', '?\n', '! ', '? '];
+      var sentStart = 0;
+      for (var bi = 0; bi < boundaries.length; bi++) {
+        var b = text.lastIndexOf(boundaries[bi], matchIdx);
+        if (b > sentStart) sentStart = b + boundaries[bi].length - 1;
+      }
+      var nlBefore = text.lastIndexOf('\n\n', matchIdx);
+      if (nlBefore > sentStart) sentStart = nlBefore + 2;
+      if (sentStart < 0 || sentStart > matchIdx) sentStart = Math.max(0, matchIdx - 400);
+
+      var sentEnd = text.length;
+      var endCandidates = [];
+      boundaries.forEach(function(b) {
+        var idx = text.indexOf(b, matchIdx + citation.length);
+        if (idx >= 0) endCandidates.push(idx + 1);
+      });
+      var nlAfter = text.indexOf('\n\n', matchIdx + citation.length);
+      if (nlAfter >= 0) endCandidates.push(nlAfter);
+      if (endCandidates.length > 0) sentEnd = Math.min.apply(null, endCandidates);
+      if (sentEnd - sentStart > 1200) {
+        sentStart = Math.max(sentStart, matchIdx - 500);
+        sentEnd = Math.min(sentEnd, matchIdx + citation.length + 500);
+      }
+
+      var sentence = text.slice(sentStart, sentEnd).trim();
+      if (sentence.length < 15) continue;
+
+      var windowStart = Math.max(0, matchIdx - 120);
+      var windowEnd = Math.min(text.length, matchIdx + citation.length + 120);
+      var contextWindow = text.slice(windowStart, windowEnd);
+      dollarRe.lastIndex = 0;
+      var dollarMatch = dollarRe.exec(contextWindow);
+      var coLocatedDollar = dollarMatch ? dollarMatch[0].trim() : null;
+
+      var key = citation + '|' + sentence.slice(0, 80);
+      if (seen[key]) continue;
+      seen[key] = true;
+
+      candidates.push({
+        citation: citation,
+        citation_type: p.type,
+        sentence: sentence,
+        sentence_index: sentStart,
+        co_located_dollar: coLocatedDollar
+      });
+    }
+  });
+
+  return candidates;
+}
+
+function isCheapVerifiable(c) {
+  // Canonical list — unconditional pass even with co-located dollar.
+  var canon = [
+    /^2\s*CFR\s*(?:Part\s*)?200/i,
+    /^44\s*CFR\s*(?:Part\s*)?206/i,
+    /^42\s*U\.?S\.?C\.?\s*(?:§§|§|Section|Sec\.?)\s*(?:5121|5122|5133|5150|5170|5172|5174|5189|5196|5198|5201|5205|5206|5207|5304|5305|5320|5404)/i,
+    /^40\s*U\.?S\.?C\.?\s*(?:§§|§|Section|Sec\.?)\s*314[1-8]/i,
+    /^P\.?L\.?\s*(?:93-288|113-2|100-707|109-295|109-347|110-161|111-5|113-76|115-123)/i
+  ];
+  for (var i = 0; i < canon.length; i++) {
+    if (canon[i].test(c.citation)) return true;
+  }
+  // CFR / USC / PL without co-located dollar -> cheap pass.
+  if (['CFR', 'USC', 'PL'].indexOf(c.citation_type) >= 0 && !c.co_located_dollar) {
+    return true;
+  }
+  return false;
+}
+
+async function verifyOneCitationStructured(c) {
+  var today = new Date().toISOString().slice(0, 10);
+  var sys = 'You are verifying a citation in a government proposal. Use web_search to look up the citation ID. Return ONLY valid JSON with no preamble, no markdown, no explanation.';
+  var prompt =
+    'CITATION IN PROPOSAL: ' + c.citation + '\n' +
+    'CITATION TYPE: ' + c.citation_type + '\n' +
+    'SURROUNDING SENTENCE: ' + (c.sentence || '').slice(0, 900) + '\n' +
+    (c.co_located_dollar ? 'CO-LOCATED DOLLAR FIGURE: ' + c.co_located_dollar + '\n' : '') +
+    "TODAY'S DATE: " + today + '\n\n' +
+    'STEP 1: Search the web for the citation ID (e.g., "' + c.citation + '") to find the actual report, rule, policy, or law.\n' +
+    'STEP 2: Classify based on what the web search returned:\n' +
+    '- "verified": the report/rule exists AND the subject matches how the proposal uses it AND any cited figure is consistent with the source.\n' +
+    '- "wrong_subject": the report/rule exists but is about a different topic than the proposal claims.\n' +
+    '- "stale": the cited figure/rate/policy was correct at an earlier date but has since been superseded as of today.\n' +
+    '- "figure_mismatch": the report/rule exists with the right subject, but the specific dollar/rate/threshold cited does not match the actual source.\n' +
+    '- "not_found": the citation ID does not appear in any verifiable source.\n\n' +
+    'STEP 3: If not "verified", attempt correction_text — a single sentence suitable as a drop-in replacement for the surrounding sentence, using only verified facts. If you cannot provide a high-confidence correction, return null.\n\n' +
+    'Return this JSON and NOTHING ELSE:\n' +
+    '{"status":"verified"|"wrong_subject"|"stale"|"figure_mismatch"|"not_found","correction_text":null|"...","web_search_snippet":"top web search result title + snippet, <=200 chars"}';
+
+  var raw;
+  try {
+    raw = await claudeCall(sys, prompt, 800, { model: 'claude-haiku-4-5-20251001', webSearch: true, agent: 'citation_verifier' });
+  } catch (err) {
+    return { status: 'not_found', correction_text: null, web_search_snippet: null, cost_usd: 0.02, error: 'claudeCall_failed: ' + (err.message||'').slice(0,120) };
+  }
+
+  var cleaned = (raw || '').replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+  var fb = cleaned.indexOf('{'), lb = cleaned.lastIndexOf('}');
+  if (fb >= 0 && lb > fb) cleaned = cleaned.slice(fb, lb + 1);
+  var parsed = null;
+  try { parsed = JSON.parse(cleaned); } catch (pe) {}
+
+  if (!parsed || !parsed.status) {
+    return { status: 'not_found', correction_text: null, web_search_snippet: null, cost_usd: 0.025, error: 'haiku_parse_failed' };
+  }
+
+  var validStatuses = ['verified', 'wrong_subject', 'stale', 'figure_mismatch', 'not_found'];
+  var status = validStatuses.indexOf(parsed.status) >= 0 ? parsed.status : 'not_found';
+  var correction = (typeof parsed.correction_text === 'string' && parsed.correction_text.trim().length > 10)
+    ? parsed.correction_text.trim().slice(0, 1500)
+    : null;
+  var snippet = (typeof parsed.web_search_snippet === 'string') ? parsed.web_search_snippet.slice(0, 400) : null;
+
+  return { status: status, correction_text: correction, web_search_snippet: snippet, cost_usd: 0.025 };
+}
+
+async function verifySectionCitations(sectionText, opportunityId, sectionName) {
+  sectionName = sectionName || 'technical_approach';
+  var runStart = Date.now();
+  var runId = 'cvr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  var log_prefix = 'L6-CV[' + (opportunityId||'').slice(0,30) + ']';
+
+  var candidates = extractCitationCandidatesFromSection(sectionText || '');
+  log(log_prefix + ' START: section="' + sectionName + '", chars=' + (sectionText||'').length + ', candidates=' + candidates.length);
+
+  var cheapCandidates = [];
+  var structuredCandidates = [];
+  for (var i = 0; i < candidates.length; i++) {
+    if (isCheapVerifiable(candidates[i])) cheapCandidates.push(candidates[i]);
+    else structuredCandidates.push(candidates[i]);
+  }
+
+  var auditLog = [];
+  var replacements = [];
+  var totalCost = 0;
+  var structuredVerifiedCount = 0;
+  var structuredFlaggedCount = 0;
+
+  cheapCandidates.forEach(function(c) {
+    auditLog.push({
+      citation: c.citation,
+      citation_type: c.citation_type,
+      status: 'verified',
+      path: 'cheap',
+      original_sentence: c.sentence,
+      replacement_sentence: null,
+      co_located_dollar: c.co_located_dollar || null,
+      verified_at: new Date().toISOString()
+    });
+  });
+
+  var STRUCTURED_CAP = 10;
+  var toVerify = structuredCandidates.slice(0, STRUCTURED_CAP);
+  var overCap = structuredCandidates.slice(STRUCTURED_CAP);
+
+  for (var j = 0; j < toVerify.length; j++) {
+    var cand = toVerify[j];
+    var verifyResult;
+    try {
+      verifyResult = await verifyOneCitationStructured(cand);
+    } catch (verr) {
+      verifyResult = { status: 'not_found', correction_text: null, cost_usd: 0, web_search_snippet: null, error: (verr.message||'').slice(0,180) };
+    }
+    totalCost += (verifyResult.cost_usd || 0);
+
+    var entry = {
+      citation: cand.citation,
+      citation_type: cand.citation_type,
+      status: verifyResult.status,
+      path: 'structured',
+      original_sentence: cand.sentence,
+      replacement_sentence: null,
+      co_located_dollar: cand.co_located_dollar || null,
+      web_search_snippet: verifyResult.web_search_snippet || null,
+      verified_at: new Date().toISOString()
+    };
+    if (verifyResult.error) entry.error = verifyResult.error;
+
+    if (verifyResult.status === 'verified') {
+      structuredVerifiedCount++;
+    } else if (verifyResult.status === 'stale') {
+      entry.note = '[STALE AS OF ' + new Date().toISOString().slice(0,10) + '] — text left unchanged per operator policy';
+      structuredFlaggedCount++;
+    } else if (['wrong_subject','figure_mismatch','not_found'].indexOf(verifyResult.status) >= 0) {
+      if (verifyResult.correction_text) {
+        replacements.push({
+          original: cand.sentence,
+          replacement: verifyResult.correction_text,
+          citation: cand.citation
+        });
+        entry.replacement_sentence = verifyResult.correction_text;
+      } else {
+        var failMarker = ' [CITATION VERIFICATION FAILED — MANUAL REVIEW REQUIRED]';
+        replacements.push({
+          original: cand.sentence,
+          replacement: cand.sentence + failMarker,
+          citation: cand.citation
+        });
+        entry.replacement_sentence = cand.sentence + failMarker;
+      }
+      structuredFlaggedCount++;
+    } else {
+      structuredFlaggedCount++;
+    }
+    auditLog.push(entry);
+  }
+
+  overCap.forEach(function(c) {
+    auditLog.push({
+      citation: c.citation,
+      citation_type: c.citation_type,
+      status: 'over_cap',
+      path: 'over_cap',
+      original_sentence: c.sentence,
+      replacement_sentence: null,
+      co_located_dollar: c.co_located_dollar || null,
+      note: 'Structured verification cap (' + STRUCTURED_CAP + '/section) reached; manual review required',
+      verified_at: new Date().toISOString()
+    });
+  });
+
+  var verifiedText = sectionText || '';
+  replacements.sort(function(a, b) { return b.original.length - a.original.length; });
+  for (var k = 0; k < replacements.length; k++) {
+    var r = replacements[k];
+    var idx = verifiedText.indexOf(r.original);
+    if (idx >= 0) {
+      verifiedText = verifiedText.slice(0, idx) + r.replacement + verifiedText.slice(idx + r.original.length);
+    }
+  }
+
+  var flaggedCount = auditLog.filter(function(e) {
+    return ['wrong_subject','figure_mismatch','not_found','stale','over_cap'].indexOf(e.status) >= 0;
+  }).length;
+  var wallMs = Date.now() - runStart;
+
+  log(log_prefix + ' DONE: candidates=' + candidates.length + ', cheap=' + cheapCandidates.length + ', structured_verified=' + structuredVerifiedCount + ', structured_flagged=' + structuredFlaggedCount + ', over_cap=' + overCap.length + ', cost=$' + totalCost.toFixed(4) + ', wall=' + wallMs + 'ms');
+
+  try {
+    await supabase.from('citation_verification_runs').insert({
+      opportunity_id: opportunityId,
+      section_name: sectionName,
+      run_id: runId,
+      v2_sha: process.env.RAILWAY_GIT_COMMIT_SHA || null,
+      total_candidates: candidates.length,
+      cheap_passed: cheapCandidates.length,
+      structured_verified: structuredVerifiedCount,
+      structured_flagged: structuredFlaggedCount,
+      over_cap_count: overCap.length,
+      total_cost_usd: Number(totalCost.toFixed(4)),
+      wall_ms: wallMs,
+      audit_log: auditLog
+    });
+  } catch (perr) {
+    log(log_prefix + ' persist warning: ' + (perr.message||'').slice(0,180));
+  }
+
+  return {
+    verified_text: verifiedText,
+    audit_log: auditLog,
+    flagged_count: flaggedCount,
+    cost_usd: Number(totalCost.toFixed(4)),
+    run_id: runId,
+    counts: {
+      total_candidates: candidates.length,
+      cheap_passed: cheapCandidates.length,
+      structured_verified: structuredVerifiedCount,
+      structured_flagged: structuredFlaggedCount,
+      over_cap: overCap.length
+    }
+  };
+}
+
 
 
 // ============================================================
