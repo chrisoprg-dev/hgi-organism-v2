@@ -7899,13 +7899,33 @@ async function runIterationToPlateau(opp, initialProposal, initialReview, initia
   var oppId = opp.id;
   var log_prefix = 'L7[' + oppId.slice(0, 30) + ']';
 
-  var trajectory = [{ iteration: 0, pwin: initialPWIN || 0, chars: (initialProposal || '').length, delta: null, timestamp: new Date().toISOString() }];
+  // S126 push 4: APPLES-TO-APPLES BASELINE RESCORE
+  // The caller passes initialPWIN from the lenient main red team in produce-proposal.
+  // Every iteration here scores with runSingleRedTeamPass (a stricter reviewer).
+  // Apples-to-oranges scoring caused every iteration to show false regression and
+  // L7 to quit after iter 1. Rescore the baseline with the SAME scorer used in
+  // iterations so delta math is meaningful. Cost: +1 Sonnet call (~$0.30) per L7 run.
+  var trueBaselinePWIN = initialPWIN || 0;
+  try {
+    log(log_prefix + ' rescoring baseline with iteration-grade red team for apples-to-apples comparison');
+    var baselineRescore = await runSingleRedTeamPass(opp, initialProposal);
+    if (baselineRescore && typeof baselineRescore.pwinEstimate === 'number') {
+      trueBaselinePWIN = baselineRescore.pwinEstimate;
+      log(log_prefix + ' baseline rescored: caller PWIN=' + (initialPWIN||0) + ' (lenient), iteration-scorer PWIN=' + trueBaselinePWIN + ' (strict). Using strict baseline.');
+    } else {
+      log(log_prefix + ' baseline rescore returned no PWIN — keeping caller PWIN=' + (initialPWIN||0));
+    }
+  } catch (brErr) {
+    log(log_prefix + ' baseline rescore error (non-fatal): ' + (brErr.message||'').slice(0,150) + ' — keeping caller PWIN=' + (initialPWIN||0));
+  }
+
+  var trajectory = [{ iteration: 0, pwin: trueBaselinePWIN, chars: (initialProposal || '').length, delta: null, timestamp: new Date().toISOString(), baseline_caller_pwin: initialPWIN || 0, baseline_iteration_scorer_pwin: trueBaselinePWIN }];
   var currentProposal = initialProposal;
   var currentReview = initialReview;
-  var currentPWIN = initialPWIN || 0;
+  var currentPWIN = trueBaselinePWIN;
   var stopReason = 'max_iterations_reached';
 
-  log(log_prefix + ' starting. Initial PWIN=' + currentPWIN + ', max_iter=' + MAX_ITER + ', plateau_delta=' + PLATEAU_DELTA);
+  log(log_prefix + ' starting. Initial PWIN=' + currentPWIN + ' (apples-to-apples baseline), max_iter=' + MAX_ITER + ', plateau_delta=' + PLATEAU_DELTA);
 
   for (var iter = 1; iter <= MAX_ITER; iter++) {
     log(log_prefix + ' iteration ' + iter + ' begin (current PWIN=' + currentPWIN + ')');
