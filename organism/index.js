@@ -8751,31 +8751,171 @@ function isCheapVerifiable(c) {
   return false;
 }
 
-async function verifyOneCitationStructured(c) {
+// ---------- S132 thin identity cache helpers ----------
+
+function normalizeCitationId(s) {
+  return (s || '').trim().toUpperCase().replace(/\s+/g, ' ');
+}
+
+function defaultTtlForCitationType(t) {
+  if (t === 'FEMA_POLICY') return 7;
+  if (t === 'FR') return 365;
+  if (t === 'CFR' || t === 'USC' || t === 'PL') return 365;
+  if (t === 'OIG' || t === 'GAO' || t === 'FEMA_DOC') return 90;
+  return 30;
+}
+
+async function lookupCitationIdentityCache(citationId) {
+  try {
+    var id = normalizeCitationId(citationId);
+    var res = await supabase.from('citation_identity_cache').select('*').eq('citation_id', id).maybeSingle();
+    if (!res || !res.data) return null;
+    var row = res.data;
+    var ageMs = Date.now() - new Date(row.last_verified_at).getTime();
+    var ttlMs = (row.ttl_days || 30) * 24 * 60 * 60 * 1000;
+    row._stale = ageMs > ttlMs;
+    return row;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function upsertCitationIdentityCache(citationId, citationType, facts) {
+  try {
+    var id = normalizeCitationId(citationId);
+    if (!id) return;
+    facts = facts || {};
+    var existing = await lookupCitationIdentityCache(id);
+    var nowIso = new Date().toISOString();
+    if (existing) {
+      var merged = {
+        canonical_title: facts.canonical_title || existing.canonical_title || null,
+        publication_date: facts.publication_date || existing.publication_date || null,
+        effective_date: facts.effective_date || existing.effective_date || null,
+        superseded_by: facts.superseded_by || existing.superseded_by || null,
+        superseded_date: facts.superseded_date || existing.superseded_date || null,
+        evidence_url: facts.evidence_url || existing.evidence_url || null,
+        exists_bool: (typeof facts.exists_bool === 'boolean') ? facts.exists_bool : (existing.exists_bool !== false),
+        last_verified_at: nowIso,
+        verify_count: (existing.verify_count || 1) + 1
+      };
+      await supabase.from('citation_identity_cache').update(merged).eq('citation_id', id);
+    } else {
+      await supabase.from('citation_identity_cache').insert({
+        citation_id: id,
+        citation_type: citationType || 'UNKNOWN',
+        exists_bool: (typeof facts.exists_bool === 'boolean') ? facts.exists_bool : true,
+        canonical_title: facts.canonical_title || null,
+        publication_date: facts.publication_date || null,
+        effective_date: facts.effective_date || null,
+        superseded_by: facts.superseded_by || null,
+        superseded_date: facts.superseded_date || null,
+        evidence_url: facts.evidence_url || null,
+        ttl_days: defaultTtlForCitationType(citationType),
+        last_verified_at: nowIso,
+        verify_count: 1
+      });
+    }
+  } catch (e) {
+    log('citation_identity_cache upsert warn [' + citationId + ']: ' + (e.message||'').slice(0,160));
+  }
+}
+
+// Pre-Haiku cache check: returns a { status, ... } result if the cache alone can
+// answer, otherwise null (meaning: proceed to Haiku).
+function preHaikuCacheCheck(candidate, cacheHit, todayIso) {
+  if (!cacheHit || cacheHit._stale) return null;
+
+  // Case A: cache says this citation does not exist (from a prior not_found verification).
+  if (cacheHit.exists_bool === false) {
+    return {
+      status: 'not_found',
+      correction_text: null,
+      web_search_snippet: 'CACHED: citation_id not found in any verifiable source (last verified ' + (cacheHit.last_verified_at||'').slice(0,10) + ')',
+      cost_usd: 0,
+      identity_facts: null,
+      pre_haiku: true
+    };
+  }
+
+  // Case B: cache has a known supersession and the sentence lacks an as-of-date before it.
+  if (cacheHit.superseded_date) {
+    var supDate = new Date(cacheHit.superseded_date + 'T00:00:00Z');
+    var today = new Date(todayIso + 'T00:00:00Z');
+    if (!isNaN(supDate.getTime()) && supDate < today) {
+      var sentence = candidate.sentence || '';
+      // Extract year mentions; if any year predates supersession, the proposal
+      // may be making a deliberate historical reference — bail out to Haiku for judgment.
+      var yearMatches = sentence.match(/\b(19|20)\d{2}\b/g) || [];
+      var hasPriorYear = false;
+      for (var y = 0; y < yearMatches.length; y++) {
+        if (parseInt(yearMatches[y], 10) < supDate.getFullYear()) { hasPriorYear = true; break; }
+      }
+      if (!hasPriorYear) {
+        return {
+          status: 'stale',
+          correction_text: null,
+          web_search_snippet: 'CACHED: superseded_by=' + (cacheHit.superseded_by||'unknown') + ' effective ' + cacheHit.superseded_date,
+          cost_usd: 0,
+          identity_facts: null,
+          pre_haiku: true
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+async function verifyOneCitationStructured(c, cacheHit) {
   var today = new Date().toISOString().slice(0, 10);
   var sys = 'You are verifying a citation in a government proposal. Use web_search to look up the citation ID. Return ONLY valid JSON with no preamble, no markdown, no explanation.';
+
+  var cacheBlock = '';
+  if (cacheHit) {
+    var cacheLines = [];
+    if (cacheHit.canonical_title) cacheLines.push('- canonical_title: ' + cacheHit.canonical_title);
+    if (cacheHit.publication_date) cacheLines.push('- publication_date: ' + cacheHit.publication_date);
+    if (cacheHit.effective_date) cacheLines.push('- effective_date: ' + cacheHit.effective_date);
+    if (cacheHit.superseded_by) cacheLines.push('- superseded_by: ' + cacheHit.superseded_by);
+    if (cacheHit.superseded_date) cacheLines.push('- superseded_date: ' + cacheHit.superseded_date);
+    if (cacheHit.evidence_url) cacheLines.push('- evidence_url: ' + cacheHit.evidence_url);
+    if (cacheLines.length > 0) {
+      cacheBlock = '\nKNOWN IDENTITY FACTS FROM PRIOR VERIFICATION (treat as authoritative grounding; confirm via web_search and override only if you have stronger primary-source evidence):\n' + cacheLines.join('\n') + '\n';
+    }
+  }
+
   var prompt =
     'CITATION IN PROPOSAL: ' + c.citation + '\n' +
     'CITATION TYPE: ' + c.citation_type + '\n' +
     'SURROUNDING SENTENCE: ' + (c.sentence || '').slice(0, 900) + '\n' +
     (c.co_located_dollar ? 'CO-LOCATED DOLLAR FIGURE: ' + c.co_located_dollar + '\n' : '') +
-    "TODAY'S DATE: " + today + '\n\n' +
-    'STEP 1: Search the web for the citation ID (e.g., "' + c.citation + '") to find the actual report, rule, policy, or law.\n' +
-    'STEP 2: Classify based on what the web search returned:\n' +
+    "TODAY'S DATE: " + today + '\n' +
+    cacheBlock + '\n' +
+    'STEP 1: Search the web for the citation ID (e.g., "' + c.citation + '") to find the actual report, rule, policy, or law. Confirm identity facts against web results.\n' +
+    'STEP 2: Classify based on what web_search returned AND the proposal\'s specific claim:\n' +
     '- "verified": the report/rule exists AND the subject matches how the proposal uses it AND any cited figure is consistent with the source.\n' +
     '- "wrong_subject": the report/rule exists but is about a different topic than the proposal claims.\n' +
     '- "stale": the cited figure/rate/policy was correct at an earlier date but has since been superseded as of today.\n' +
     '- "figure_mismatch": the report/rule exists with the right subject, but the specific dollar/rate/threshold cited does not match the actual source.\n' +
     '- "not_found": the citation ID does not appear in any verifiable source.\n\n' +
     'STEP 3: If not "verified", attempt correction_text — a single sentence suitable as a drop-in replacement for the surrounding sentence, using only verified facts. If you cannot provide a high-confidence correction, return null.\n\n' +
+    'STEP 4: Return identity facts about this citation for caching (from web_search results — these are pure facts about the citation itself, not about how the proposal uses it):\n' +
+    '- canonical_title: the actual title of the report/rule/policy/law\n' +
+    '- publication_date: when it was published (YYYY-MM-DD) or null\n' +
+    '- effective_date: when it became effective (YYYY-MM-DD; for regs/policies only) or null\n' +
+    '- superseded_by: citation ID of the replacement if it has been superseded, else null\n' +
+    '- superseded_date: date of supersession (YYYY-MM-DD) or null\n' +
+    '- evidence_url: primary-source URL or null\n' +
+    '- exists_bool: true if the citation exists in any verifiable source, false otherwise\n\n' +
     'Return this JSON and NOTHING ELSE:\n' +
-    '{"status":"verified"|"wrong_subject"|"stale"|"figure_mismatch"|"not_found","correction_text":null|"...","web_search_snippet":"top web search result title + snippet, <=200 chars"}';
+    '{"status":"verified"|"wrong_subject"|"stale"|"figure_mismatch"|"not_found","correction_text":null|"...","web_search_snippet":"top result title + snippet, <=200 chars","identity_facts":{"canonical_title":"..."|null,"publication_date":"YYYY-MM-DD"|null,"effective_date":"YYYY-MM-DD"|null,"superseded_by":"..."|null,"superseded_date":"YYYY-MM-DD"|null,"evidence_url":"..."|null,"exists_bool":true|false}}';
 
   var raw;
   try {
-    raw = await claudeCall(sys, prompt, 800, { model: 'claude-haiku-4-5-20251001', webSearch: true, agent: 'citation_verifier' });
+    raw = await claudeCall(sys, prompt, 1200, { model: 'claude-haiku-4-5-20251001', webSearch: true, agent: 'citation_verifier' });
   } catch (err) {
-    return { status: 'not_found', correction_text: null, web_search_snippet: null, cost_usd: 0.02, error: 'claudeCall_failed: ' + (err.message||'').slice(0,120) };
+    return { status: 'not_found', correction_text: null, web_search_snippet: null, identity_facts: null, cost_usd: 0.02, error: 'claudeCall_failed: ' + (err.message||'').slice(0,120) };
   }
 
   var cleaned = (raw || '').replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
@@ -8785,7 +8925,7 @@ async function verifyOneCitationStructured(c) {
   try { parsed = JSON.parse(cleaned); } catch (pe) {}
 
   if (!parsed || !parsed.status) {
-    return { status: 'not_found', correction_text: null, web_search_snippet: null, cost_usd: 0.025, error: 'haiku_parse_failed' };
+    return { status: 'not_found', correction_text: null, web_search_snippet: null, identity_facts: null, cost_usd: 0.025, error: 'haiku_parse_failed' };
   }
 
   var validStatuses = ['verified', 'wrong_subject', 'stale', 'figure_mismatch', 'not_found'];
@@ -8795,7 +8935,33 @@ async function verifyOneCitationStructured(c) {
     : null;
   var snippet = (typeof parsed.web_search_snippet === 'string') ? parsed.web_search_snippet.slice(0, 400) : null;
 
-  return { status: status, correction_text: correction, web_search_snippet: snippet, cost_usd: 0.025 };
+  // Validate identity_facts shape — only keep well-formed fields
+  var rawFacts = (parsed.identity_facts && typeof parsed.identity_facts === 'object') ? parsed.identity_facts : null;
+  var identityFacts = null;
+  if (rawFacts) {
+    function datestr(v) {
+      if (typeof v !== 'string') return null;
+      var m = v.match(/^\d{4}-\d{2}-\d{2}$/);
+      return m ? v : null;
+    }
+    function strOrNull(v, maxLen) {
+      if (typeof v !== 'string') return null;
+      var t = v.trim();
+      if (!t) return null;
+      return t.slice(0, maxLen || 400);
+    }
+    identityFacts = {
+      canonical_title: strOrNull(rawFacts.canonical_title, 400),
+      publication_date: datestr(rawFacts.publication_date),
+      effective_date: datestr(rawFacts.effective_date),
+      superseded_by: strOrNull(rawFacts.superseded_by, 100),
+      superseded_date: datestr(rawFacts.superseded_date),
+      evidence_url: strOrNull(rawFacts.evidence_url, 800),
+      exists_bool: (typeof rawFacts.exists_bool === 'boolean') ? rawFacts.exists_bool : (status !== 'not_found')
+    };
+  }
+
+  return { status: status, correction_text: correction, web_search_snippet: snippet, identity_facts: identityFacts, cost_usd: 0.025 };
 }
 
 async function verifySectionCitations(sectionText, opportunityId, sectionName) {
@@ -8833,29 +8999,58 @@ async function verifySectionCitations(sectionText, opportunityId, sectionName) {
     });
   });
 
-  var STRUCTURED_CAP = 10;
-  var toVerify = structuredCandidates.slice(0, STRUCTURED_CAP);
-  var overCap = structuredCandidates.slice(STRUCTURED_CAP);
+  // S132 cache-aware: no fixed cap. Each structured candidate consults the
+  // thin identity cache first. If the cache alone can answer (known-superseded
+  // or known-nonexistent), we flag at zero cost. Otherwise a Haiku+web_search
+  // pass runs, with any cached identity facts injected as authoritative grounding.
+  // A runaway safety limit at STRUCTURED_RUNAWAY_LIMIT prevents pathological sections.
+  var STRUCTURED_RUNAWAY_LIMIT = 50;
+  var toVerify = structuredCandidates.slice(0, STRUCTURED_RUNAWAY_LIMIT);
+  var overCap = structuredCandidates.slice(STRUCTURED_RUNAWAY_LIMIT);
+  var cacheHitCount = 0;
+  var preHaikuCaughtCount = 0;
+  var todayIso = new Date().toISOString().slice(0, 10);
 
   for (var j = 0; j < toVerify.length; j++) {
     var cand = toVerify[j];
-    var verifyResult;
-    try {
-      verifyResult = await verifyOneCitationStructured(cand);
-    } catch (verr) {
-      verifyResult = { status: 'not_found', correction_text: null, cost_usd: 0, web_search_snippet: null, error: (verr.message||'').slice(0,180) };
+
+    // Step 1: consult identity cache.
+    var cacheHit = null;
+    try { cacheHit = await lookupCitationIdentityCache(cand.citation); } catch (ce) { cacheHit = null; }
+    if (cacheHit && !cacheHit._stale) cacheHitCount++;
+
+    // Step 2: pre-Haiku cache check (cheap catch of known-superseded / known-nonexistent).
+    var verifyResult = preHaikuCacheCheck(cand, cacheHit, todayIso);
+
+    // Step 3: if cache could not answer, run the structured Haiku + web_search pass,
+    // injecting any cached identity facts as authoritative grounding.
+    if (!verifyResult) {
+      try {
+        verifyResult = await verifyOneCitationStructured(cand, cacheHit);
+      } catch (verr) {
+        verifyResult = { status: 'not_found', correction_text: null, cost_usd: 0, web_search_snippet: null, identity_facts: null, error: (verr.message||'').slice(0,180) };
+      }
+    } else {
+      preHaikuCaughtCount++;
     }
     totalCost += (verifyResult.cost_usd || 0);
+
+    // Step 4: upsert identity cache with whatever facts we learned (Haiku only).
+    if (verifyResult.identity_facts && !verifyResult.pre_haiku) {
+      try { await upsertCitationIdentityCache(cand.citation, cand.citation_type, verifyResult.identity_facts); } catch (ue) {}
+    }
 
     var entry = {
       citation: cand.citation,
       citation_type: cand.citation_type,
       status: verifyResult.status,
-      path: 'structured',
+      path: verifyResult.pre_haiku ? 'cache' : 'structured',
       original_sentence: cand.sentence,
       replacement_sentence: null,
       co_located_dollar: cand.co_located_dollar || null,
       web_search_snippet: verifyResult.web_search_snippet || null,
+      cache_hit: !!cacheHit,
+      cache_stale: cacheHit ? !!cacheHit._stale : null,
       verified_at: new Date().toISOString()
     };
     if (verifyResult.error) entry.error = verifyResult.error;
@@ -8863,23 +9058,15 @@ async function verifySectionCitations(sectionText, opportunityId, sectionName) {
     if (verifyResult.status === 'verified') {
       structuredVerifiedCount++;
     } else if (verifyResult.status === 'stale') {
-      entry.note = '[STALE AS OF ' + new Date().toISOString().slice(0,10) + '] — text left unchanged per operator policy';
+      entry.note = '[STALE AS OF ' + todayIso + '] — text left unchanged per operator policy';
       structuredFlaggedCount++;
     } else if (['wrong_subject','figure_mismatch','not_found'].indexOf(verifyResult.status) >= 0) {
       if (verifyResult.correction_text) {
-        replacements.push({
-          original: cand.sentence,
-          replacement: verifyResult.correction_text,
-          citation: cand.citation
-        });
+        replacements.push({ original: cand.sentence, replacement: verifyResult.correction_text, citation: cand.citation });
         entry.replacement_sentence = verifyResult.correction_text;
       } else {
         var failMarker = ' [CITATION VERIFICATION FAILED — MANUAL REVIEW REQUIRED]';
-        replacements.push({
-          original: cand.sentence,
-          replacement: cand.sentence + failMarker,
-          citation: cand.citation
-        });
+        replacements.push({ original: cand.sentence, replacement: cand.sentence + failMarker, citation: cand.citation });
         entry.replacement_sentence = cand.sentence + failMarker;
       }
       structuredFlaggedCount++;
@@ -8889,19 +9076,24 @@ async function verifySectionCitations(sectionText, opportunityId, sectionName) {
     auditLog.push(entry);
   }
 
-  overCap.forEach(function(c) {
-    auditLog.push({
-      citation: c.citation,
-      citation_type: c.citation_type,
-      status: 'over_cap',
-      path: 'over_cap',
-      original_sentence: c.sentence,
-      replacement_sentence: null,
-      co_located_dollar: c.co_located_dollar || null,
-      note: 'Structured verification cap (' + STRUCTURED_CAP + '/section) reached; manual review required',
-      verified_at: new Date().toISOString()
+  // Runaway safety: if we hit STRUCTURED_RUNAWAY_LIMIT, the remainder is flagged
+  // without verification. This is a pathology signal, not an expected path.
+  if (overCap.length > 0) {
+    log(log_prefix + ' WARN: ' + overCap.length + ' candidates exceeded STRUCTURED_RUNAWAY_LIMIT=' + STRUCTURED_RUNAWAY_LIMIT + '; flagged without verification.');
+    overCap.forEach(function(c) {
+      auditLog.push({
+        citation: c.citation,
+        citation_type: c.citation_type,
+        status: 'over_cap',
+        path: 'over_cap',
+        original_sentence: c.sentence,
+        replacement_sentence: null,
+        co_located_dollar: c.co_located_dollar || null,
+        note: 'Runaway safety limit (' + STRUCTURED_RUNAWAY_LIMIT + ') reached — this section has an unusually high citation count; manual review required',
+        verified_at: new Date().toISOString()
+      });
     });
-  });
+  }
 
   var verifiedText = sectionText || '';
   replacements.sort(function(a, b) { return b.original.length - a.original.length; });
@@ -8918,7 +9110,7 @@ async function verifySectionCitations(sectionText, opportunityId, sectionName) {
   }).length;
   var wallMs = Date.now() - runStart;
 
-  log(log_prefix + ' DONE: candidates=' + candidates.length + ', cheap=' + cheapCandidates.length + ', structured_verified=' + structuredVerifiedCount + ', structured_flagged=' + structuredFlaggedCount + ', over_cap=' + overCap.length + ', cost=$' + totalCost.toFixed(4) + ', wall=' + wallMs + 'ms');
+  log(log_prefix + ' DONE: candidates=' + candidates.length + ', cheap=' + cheapCandidates.length + ', structured_verified=' + structuredVerifiedCount + ', structured_flagged=' + structuredFlaggedCount + ', cache_hits=' + cacheHitCount + ', pre_haiku_caught=' + preHaikuCaughtCount + ', over_cap=' + overCap.length + ', cost=$' + totalCost.toFixed(4) + ', wall=' + wallMs + 'ms');
 
   try {
     await supabase.from('citation_verification_runs').insert({
