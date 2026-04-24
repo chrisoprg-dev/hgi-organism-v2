@@ -9326,6 +9326,175 @@ var _l6SpecialistRegistry = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// L6 PRICING NARRATIVE specialist — S137 push 1
+// CRITICAL: this is the specialist that closes the DISQUALIFYING missing-pricing
+// finding that hit SJPG at PWIN 38%. Produces the cost proposal narrative:
+// rate structure, NTE caps, pre-award vs post-award phase distinctions, cost
+// assumptions, what IS and IS NOT included, invoicing cadence. Works with
+// whatever rate_card the financial analysis produced. Does NOT invent rates.
+// ─────────────────────────────────────────────────────────────────────────────
+var L6_PRICING_NARRATIVE_CONFIG = {
+  name: 'pricing_narrative',
+  log_tag: 'PRICE',
+  default_section_title: 'Cost Proposal and Pricing Narrative',
+  persist_column_name: 'section_pricing_narrative',
+  version: 's137_v1_pricing',
+  cost_bucket: 'l6_pricing_narrative',
+  anchor_title_patterns: /cost\s*proposal|price\s*proposal|pricing|fee\s*schedule|rate\s*schedule|compensation|fees\s*and\s*expenses|cost\s*and\s*pricing/,
+  evaluation_criterion_match_patterns: /cost|pric|fee|rate|budget|compensation/,
+  role_framing:
+    'You are a senior Cost Proposal narrative writer at HGI Global. You produce the narrative that accompanies the rate schedule: explains the rate structure, maps rates to roles, documents cost assumptions, surfaces what IS and IS NOT included in the fee, addresses any NTE caps or phase-specific pricing the RFP requires, and states invoicing cadence. You do NOT invent rates — you use the rate card provided as authoritative and explain HOW it applies to this RFP\'s scope.\n\n' +
+    'YOU WRITE ONE SECTION ONLY: the Cost Proposal and Pricing Narrative. The companion rate table itself is produced separately (by the rate-table endpoint). Your job is the narrative that makes the rate table defensible to an evaluator.',
+  deliverables_per_3k_words: [
+    'Rate structure statement: fully-burdened hourly rates, what "fully-burdened" covers (salary, benefits, overhead, G&A, profit)',
+    'Role-to-rate mapping: each role named in the Staffing section is tied to its fully-burdened rate',
+    'NTE cap compliance if RFP requires one — explicit math showing the fee ceiling',
+    'Phase distinction if RFP requires it (pre-award vs post-award, design vs construction, etc.)',
+    'Cost assumptions — what IS included (travel within 50 miles, standard deliverables, ordinary communications)',
+    'Exclusions — what IS NOT included (out-of-region travel, specialized subconsultants beyond scope, change orders)',
+    'Invoicing cadence — monthly invoices with time detail and deliverable status; payment terms (net-30 standard)'
+  ],
+  structural_requirements: [
+    'Lead with the pricing approach that fits the RFP structure — NTE, time-and-materials, firm-fixed-price, cost-reimbursement — whichever the RFP actually requires',
+    'Every rate cited must match the rate card provided exactly; do NOT round, do NOT restate',
+    'If the RFP specifies a pricing ceiling (e.g., 10% NTE of grant award), show the math against HGI rates',
+    'When the RFP distinguishes pre-award and post-award phases, treat each as a separate pricing tier',
+    'Do NOT commit specific staff hours without an RFP basis — use role-weighted estimates tied to the Staffing section',
+    'If payment terms are specified in the RFP (e.g., net-30, net-45), adopt those; otherwise state net-30 as HGI standard',
+    'Close with a clear cost-certification statement: HGI certifies rates are true, complete, accurate, and align with standard commercial practice'
+  ],
+  extra_rules: [
+    'Rate card is the source of truth. If a rate is not in the card, do NOT name it.',
+    'If rate_card input is empty, state explicitly that rates are TBD per separate rate schedule — do NOT invent values.',
+    'Hourly rates are fully-burdened unless RFP specifies unburdened labor rates with separate loaded multipliers.',
+    'Fee structure must match what the RFP actually asks for (NTE, T&M, FFP, cost-reimbursement). Do not propose a pricing form the RFP did not request.'
+  ],
+  output_format_block:
+    'OUTPUT FORMAT — return ONLY valid JSON. No preamble. No markdown fences.\n' +
+    '{\n' +
+    '  "section_text": "Full Cost Proposal and Pricing Narrative in markdown. Use ## subsection headers (Rate Structure, Role-to-Rate Mapping, NTE/Cap Compliance, Cost Assumptions, Exclusions, Invoicing). Target length: 1,200-3,000 words depending on RFP complexity.",\n' +
+    '  "evidence_anchors": [\n' +
+    '    {"type": "rate_statement", "text": "Senior Project Manager: $180/hr fully-burdened", "section_used": "Role-to-Rate Mapping"},\n' +
+    '    {"type": "nte_math_statement", "text": "10% of $2M = $200,000 NTE ceiling", "section_used": "NTE Compliance"},\n' +
+    '    {"type": "phase_distinction", "text": "Pre-award costs invoiced at Parish-funded hourly rates; post-award costs invoiced against grant-funded NTE cap", "section_used": "..."},\n' +
+    '    {"type": "cost_assumption", "text": "Travel within 50-mile radius of Kenner HQ included in rates", "section_used": "..."},\n' +
+    '    {"type": "invoicing_statement", "text": "Monthly invoices with time detail, net-30 payment terms", "section_used": "Invoicing"}\n' +
+    '  ],\n' +
+    '  "rate_role_mappings": [\n' +
+    '    {"role": "Senior Project Manager", "hourly_rate_burdened": "$180", "source": "rate_card"}\n' +
+    '  ],\n' +
+    '  "pricing_structure": {"type": "NTE|T&M|FFP|cost_reimbursement", "ceiling_amount": "...", "phases": []}\n' +
+    '}',
+  evidence_anchor_types: ['rate_statement','nte_math_statement','phase_distinction','cost_assumption','invoicing_statement'],
+  density_floors_per_3k_words: {
+    rate_statement: 5,
+    cost_assumption: 3,
+    invoicing_statement: 1
+  },
+  min_floors_required_for_published: 2,
+  min_section_text_length: 800,
+  // Pricing canon violations. The biggest risk is rate invention without a card.
+  // Also guard against prohibited "best-in-class" pricing voice and wrong
+  // percentages on NTE calculations.
+  canon_violation_regex_set: [
+    { name: 'pricing_invented_rate_no_card', pattern: /\$\d{3,4}(\.\d{2})?\s*\/\s*(hour|hr|hr\.)/i, description: 'rate pattern — flagged for human verification against rate_card' },
+    { name: 'pricing_prohibited_voice', pattern: /\b(best-in-class|industry-leading|lowest-cost|most competitive|aggressive pricing|highly competitive pricing)\b/i },
+    { name: 'pricing_wrong_legal_entity', pattern: /Hammerman\s*&\s*Gainer\s+Global|\bHGI\s+LLC\b(?!\s+d\/b\/a)/i }
+  ],
+  user_message_include: ['opp_meta','rfp_requirements','scope_of_work','rate_card'],
+  output_schema_extras: ['rate_role_mappings','pricing_structure'],
+  max_tokens: 8000,
+  thinking_budget: 3000
+};
+
+var _l6PricingNarrativeSpecialist = createL6Specialist(L6_PRICING_NARRATIVE_CONFIG);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// L6 QA / COMPLIANCE NARRATIVE specialist — S137 push 1
+// Produces the compliance & quality-assurance section. Covers: QA approach,
+// deliverable review process, compliance matrix crosswalk to RFP submission
+// requirements, document retention, audit-readiness posture, subcontractor
+// oversight if applicable. This is where HGI\'s "zero-finding" posture is
+// anchored with an operational spine.
+// ─────────────────────────────────────────────────────────────────────────────
+var L6_QA_COMPLIANCE_CONFIG = {
+  name: 'qa_compliance',
+  log_tag: 'QA',
+  default_section_title: 'Quality Assurance and Compliance',
+  persist_column_name: 'section_qa_compliance',
+  version: 's137_v1_qa',
+  cost_bucket: 'l6_qa_compliance',
+  anchor_title_patterns: /quality\s*assurance|quality\s*control|qa|qc|compliance\s*plan|compliance\s*approach|audit\s*approach|document\s*control|records\s*management|deliverable\s*review/,
+  evaluation_criterion_match_patterns: /quality|compliance|audit|oversight|monitoring/,
+  role_framing:
+    'You are a senior Quality Assurance and Compliance specialist at HGI Global. You write the section that tells an evaluator how HGI keeps a federal-dollar engagement audit-clean. You have personally stood inside OIG reviews, GAO protests, state monitoring visits, and HUD CPD monitoring cycles. Your section reads as operational muscle, not as policy boilerplate.\n\n' +
+    'YOU WRITE ONE SECTION ONLY: the Quality Assurance and Compliance narrative. Your job is to show that HGI\'s zero-finding posture is backed by a concrete operational spine — not by marketing phrases.',
+  deliverables_per_3k_words: [
+    'QA approach: how deliverables are peer-reviewed before release; named review tiers (author → peer → PM → Program Director)',
+    'Compliance matrix approach: crosswalk of every RFP submission requirement to where HGI addresses it',
+    'Document retention: records retained per 2 CFR 200.334 (3 years post-closeout) plus any RFP-specific extended retention',
+    'Audit-readiness posture: continuous documentation, audit trail integrity, time-stamped task logs, version control',
+    'Specific failure-mode citations: OIG findings, GAO decisions, deobligation triggers — and how HGI\'s process prevents each',
+    'Subcontractor oversight if applicable: flow-down of federal requirements per 2 CFR 200.331, 2 CFR 200.332',
+    'Issue resolution protocol: how HGI handles a finding, a denied reimbursement, a scope dispute, a timeline slip'
+  ],
+  structural_requirements: [
+    'Lead with the operational outcome (zero findings, clean closeout, audit pass) — not with a policy statement',
+    'Every QA tier named must have a responsible role — NOT a specific person; use the staffing section role titles',
+    'Cite specific regulations by section number (2 CFR 200.303, 200.318, 200.331-333, 200.334) — not "applicable federal regulations"',
+    'Name specific failure modes evaluators know about (OIG-18-66, OIG-19-54, GAO findings) and show the corresponding HGI control',
+    'If the RFP lists submission requirements or compliance criteria, cross-reference them explicitly ("Per RFP Section 3.2.4, HGI will ...")',
+    'Close with HGI\'s audit-ready track record anchored to specific engagements (Road Home zero findings; Restore Louisiana clean monitoring cycles)'
+  ],
+  extra_rules: [
+    'All personnel references use role titles, not names. Only [TO BE ASSIGNED] for specific individual slots.',
+    'Do NOT claim ISO 9001 certification unless HGI has it (not in canon).',
+    'HGI has ~50 staff — do not claim a larger QA team than that headcount supports.',
+    'Zero-finding claims must be anchored to a specific named engagement — not made as a firm-wide generalization.'
+  ],
+  output_format_block:
+    'OUTPUT FORMAT — return ONLY valid JSON. No preamble. No markdown fences.\n' +
+    '{\n' +
+    '  "section_text": "Full QA and Compliance narrative in markdown. Use ## subsection headers (QA Approach, Compliance Matrix Approach, Document Retention, Audit-Readiness, Failure-Mode Defense, Subcontractor Oversight, Issue Resolution). Target length: 2,000-4,500 words depending on RFP weight.",\n' +
+    '  "evidence_anchors": [\n' +
+    '    {"type": "regulatory_citation", "text": "2 CFR 200.334", "section_used": "Document Retention"},\n' +
+    '    {"type": "qa_tier", "text": "Author → Peer Reviewer → PM → Program Director before release", "section_used": "QA Approach"},\n' +
+    '    {"type": "failure_mode", "text": "OIG-18-66 deobligation trigger — HGI control: weekly cost-category reconciliation", "section_used": "Failure-Mode Defense"},\n' +
+    '    {"type": "past_performance_anchor", "text": "Road Home zero findings across $67M HGI-direct scope", "section_used": "Audit-Readiness"},\n' +
+    '    {"type": "control_mechanism", "text": "Time-stamped activity logs retained at task level", "section_used": "..."}\n' +
+    '  ],\n' +
+    '  "compliance_crosswalk": [\n' +
+    '    {"rfp_section": "3.2.4", "requirement_text": "...", "addressed_in_subsection": "..."}\n' +
+    '  ]\n' +
+    '}',
+  evidence_anchor_types: ['regulatory_citation','qa_tier','failure_mode','past_performance_anchor','control_mechanism'],
+  density_floors_per_3k_words: {
+    regulatory_citation: 8,
+    qa_tier: 3,
+    failure_mode: 4,
+    past_performance_anchor: 3,
+    control_mechanism: 6
+  },
+  min_floors_required_for_published: 4,
+  min_section_text_length: 1500,
+  canon_violation_regex_set: [
+    { name: 'qa_iso_unclaimed', pattern: /\bISO\s*9001\s*(certified|certification)\b/i },
+    { name: 'qa_generic_best_practices', pattern: /\bbest\s+practices?\b|\bindustry\s+standard\b|\bapplicable\s+federal\s+regulations\b/i },
+    { name: 'qa_wrong_legal_entity', pattern: /Hammerman\s*&\s*Gainer\s+Global|\bHGI\s+LLC\b(?!\s+d\/b\/a)/i }
+  ],
+  user_message_include: ['opp_meta','rfp_requirements','scope_of_work','discriminators'],
+  output_schema_extras: ['compliance_crosswalk'],
+  max_tokens: 14000,
+  thinking_budget: 4000
+};
+
+var _l6QaComplianceSpecialist = createL6Specialist(L6_QA_COMPLIANCE_CONFIG);
+
+// Extend registry so test harness can invoke all 7 specialists
+_l6SpecialistRegistry.pricing_narrative = function(){ return _l6PricingNarrativeSpecialist; };
+_l6SpecialistRegistry.qa_compliance     = function(){ return _l6QaComplianceSpecialist; };
+
+// ─────────────────────────────────────────────────────────────────────────────
 // generateTechnicalApproachSection — S126 push 6 — L6 SECTION SPECIALIST #1
 // PURPOSE: produce a SME-depth Technical Approach section in a dedicated pass
 // BEFORE the L7 Opus mega-call, so the highest-weight section (typically 20-45
