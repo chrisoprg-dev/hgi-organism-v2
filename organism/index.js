@@ -9946,7 +9946,7 @@ async function refineWeakSections(oppId, options) {
 
   // 1. Load opportunity
   var oppRes = await supabase.from('opportunities')
-    .select('id,title,agency,vertical,state,estimated_value,rfp_text,scope_analysis,description,proposal_content,proposal_review,compliance_blueprint')
+    .select('id,title,agency,vertical,state,estimated_value,rfp_text,scope_analysis,description,proposal_content,proposal_review')
     .eq('id', oppId)
     .single();
   var opp = oppRes.data;
