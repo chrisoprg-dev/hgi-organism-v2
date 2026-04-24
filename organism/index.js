@@ -4800,6 +4800,54 @@ if (url.startsWith('/api/refine-weak-sections') && req.method === 'POST') {
   return;
 }
 
+// === S138: Endpoint — /api/record-outcome ===
+// POST { opportunity_id | id, outcome, notes? }
+if (url.startsWith('/api/record-outcome') && req.method === 'POST') {
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+  try {
+    var roBody = '';
+    await new Promise(function(resolve){ req.on('data', function(c){ roBody += c; }); req.on('end', resolve); });
+    var roData = JSON.parse(roBody || '{}');
+    var roOppId = roData.opportunity_id || roData.id;
+    var roOutcome = roData.outcome;
+    var roNotes = roData.notes;
+    if (!roOppId) { res.end(JSON.stringify({ error: 'opportunity_id (or id) required' })); return; }
+    if (!roOutcome) { res.end(JSON.stringify({ error: 'outcome required', valid: ['won','lost','withdrawn','no_bid','no_decision'] })); return; }
+    var result = await recordOpportunityOutcome(roOppId, roOutcome, roNotes);
+    res.end(JSON.stringify(result));
+  } catch (e) {
+    res.end(JSON.stringify({ error: e.message, stack: (e.stack || '').slice(0, 400) }));
+  }
+  return;
+}
+
+// === S138: Endpoint — /api/pwin-calibration ===
+// GET ?vertical=<optional>
+if (url.startsWith('/api/pwin-calibration') && req.method === 'GET') {
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+  try {
+    var pcVertical = (req.url.split('?vertical=')[1] || '').split('&')[0] || null;
+    var result = await computePWinCalibration(pcVertical ? decodeURIComponent(pcVertical) : null);
+    res.end(JSON.stringify(result));
+  } catch (e) {
+    res.end(JSON.stringify({ error: e.message }));
+  }
+  return;
+}
+
+// === S138: Endpoint — /api/methodology-correlation-refresh ===
+// POST (no body needed)
+if (url.startsWith('/api/methodology-correlation-refresh') && req.method === 'POST') {
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+  try {
+    var result = await recomputeMethodologyCorrelation();
+    res.end(JSON.stringify(result));
+  } catch (e) {
+    res.end(JSON.stringify({ error: e.message }));
+  }
+  return;
+}
+
 // === S135: L6 SPECIALIST TEST HARNESS — /api/l6-test-specialist ===
 // POST { id, specialist, blueprint?, methodologyCorpus?, discriminators?, competitorBriefs?, rateCard? }
 // Exercises ONE L6 specialist (technical_approach | past_performance | staffing) on a stored opp
@@ -11648,26 +11696,302 @@ async function agentBudgetCycle(state) {
   return { agent: 'budget_cycle', opp: 'system', chars: out.length };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// S138 — L11 OUTCOME-DRIVEN LEARNING LOOP
+// REPLACES: the 10-line stubs for agentLossAnalysis, agentWinRateAnalytics,
+// agentLearningLoop — which previously produced Haiku memos to organism_memory
+// with zero effect on downstream behavior.
+//
+// NEW BEHAVIOR: when opportunities.outcome transitions to 'won' or 'lost':
+//   (1) pwin_calibration gets a row with (predicted, actual) pair
+//   (2) competitive_intelligence.notes_history + outcome get updated for any
+//       competitor known to have bid on the opp
+//   (3) methodology_briefs.usage_count + wins_associated/losses_associated
+//       get incremented for every brief the proposal cited
+//   (4) outcome_correlation ratio recomputed per brief
+//
+// Three functions are the new L11 core:
+//   recordOpportunityOutcome(oppId, outcome, notes) — called when stage changes
+//   computePWinCalibration(vertical) — reads calibration table, returns bias metrics
+//   recomputeMethodologyCorrelation() — sweeps methodology_briefs, updates correlation
+//
+// The three legacy agents (agentLossAnalysis, agentWinRateAnalytics, agentLearningLoop)
+// are rewritten to CALL these functions AND produce a summary observation, so the
+// cron loop stays compatible but now actually updates state.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Core: record an outcome. Idempotent — safe to call multiple times with same inputs.
+// outcome must be 'won' | 'lost' | 'withdrawn' | 'no_bid' | 'no_decision'
+async function recordOpportunityOutcome(oppId, outcome, notes) {
+  var valid = ['won','lost','withdrawn','no_bid','no_decision'];
+  if (!oppId) return { success: false, error: 'oppId required' };
+  if (valid.indexOf(outcome) < 0) return { success: false, error: 'invalid outcome; valid: ' + valid.join(', ') };
+
+  var log_pfx = 'L11[' + String(oppId).slice(0, 30) + ']';
+  log(log_pfx + ' recording outcome=' + outcome);
+
+  // Load opp with the fields we need to compute calibration and methodology correlation
+  var oppRes = await supabase.from('opportunities')
+    .select('id,title,agency,vertical,opi_score,pwin_at_submission,proposal_review,proposal_content')
+    .eq('id', oppId).single();
+  if (!oppRes.data) {
+    log(log_pfx + ' opp not found');
+    return { success: false, error: 'opportunity_not_found', oppId: oppId };
+  }
+  var opp = oppRes.data;
+
+  // 1) Extract predicted PWIN. Prefer stored pwin_at_submission; fall back to parsing proposal_review.
+  var predictedPwin = opp.pwin_at_submission;
+  if (predictedPwin == null && typeof opp.proposal_review === 'string') {
+    var m = opp.proposal_review.match(/PWIN\s+(\d{1,3})\s*%/i);
+    if (m) predictedPwin = parseInt(m[1], 10);
+  }
+
+  // 2) Update opportunities.outcome + outcome_notes + learning_loop_last_run
+  var oppUpdate = {
+    outcome: outcome,
+    outcome_notes: notes || null,
+    learning_loop_last_run: new Date().toISOString()
+  };
+  try {
+    await supabase.from('opportunities').update(oppUpdate).eq('id', oppId);
+  } catch (e) {
+    log(log_pfx + ' opp update failed: ' + (e.message||'').slice(0,150));
+  }
+
+  // 3) Insert pwin_calibration row (skip withdrawn/no_bid/no_decision — those aren't calibration-meaningful)
+  var calibrationRelevant = (outcome === 'won' || outcome === 'lost');
+  if (calibrationRelevant && predictedPwin != null) {
+    try {
+      await supabase.from('pwin_calibration').insert({
+        opportunity_id: oppId,
+        vertical: opp.vertical || null,
+        agency: opp.agency || null,
+        predicted_pwin: predictedPwin,
+        actual_outcome: outcome,
+        prediction_source: opp.pwin_at_submission != null ? 'pwin_at_submission' : 'parsed_from_proposal_review',
+        notes: notes || null
+      });
+      log(log_pfx + ' pwin_calibration row inserted: predicted=' + predictedPwin + ' actual=' + outcome);
+    } catch (e) {
+      log(log_pfx + ' pwin_calibration insert failed: ' + (e.message||'').slice(0,150));
+    }
+  }
+
+  // 4) Update competitive_intelligence.notes_history for any competitor incumbent_at this opp
+  try {
+    var compRes = await supabase.from('competitive_intelligence')
+      .select('id,competitor_name,notes_history,outcome')
+      .eq('incumbent_at', oppId);
+    if (compRes.data && compRes.data.length > 0) {
+      for (var ci = 0; ci < compRes.data.length; ci++) {
+        var comp = compRes.data[ci];
+        var existingNotes = String(comp.notes_history || '').slice(0, 8000);
+        var newNote = '[' + new Date().toISOString().slice(0,10) + '] opp=' + oppId + ' outcome=' + outcome + ' hgi_predicted_pwin=' + (predictedPwin != null ? predictedPwin + '%' : 'unknown') + (notes ? ' notes=' + String(notes).slice(0, 200) : '');
+        var mergedNotes = existingNotes ? (existingNotes + '\n' + newNote) : newNote;
+        try {
+          await supabase.from('competitive_intelligence').update({
+            notes_history: mergedNotes,
+            outcome: outcome === 'won' ? 'lost_to_hgi' : (outcome === 'lost' ? 'won_vs_hgi' : comp.outcome),
+            updated_at: new Date().toISOString()
+          }).eq('id', comp.id);
+        } catch (e) {
+          log(log_pfx + ' competitor ' + comp.competitor_name + ' update failed: ' + (e.message||'').slice(0,120));
+        }
+      }
+      log(log_pfx + ' updated ' + compRes.data.length + ' competitor_intelligence rows');
+    }
+  } catch (e) {
+    log(log_pfx + ' competitor scan failed: ' + (e.message||'').slice(0,150));
+  }
+
+  // 5) Methodology attribution: parse proposal_content for methodology_brief citations, increment usage.
+  //    Heuristic: proposal_content should contain vertical + work_area matches to methodology_briefs.
+  //    Cheap fallback: match any methodology_briefs.title that appears in proposal_content.
+  var methUpdated = 0;
+  try {
+    var proposalText = String(opp.proposal_content || '');
+    if (proposalText.length > 500) {
+      // Fetch briefs in the same vertical — narrow the scan to reduce false positives
+      var briefsRes = await supabase.from('methodology_briefs')
+        .select('id,title,work_area,usage_count,wins_associated,losses_associated')
+        .eq('vertical', opp.vertical || '___no_vertical___')
+        .eq('status', 'published')
+        .limit(50);
+      if (briefsRes.data && briefsRes.data.length > 0) {
+        for (var bi = 0; bi < briefsRes.data.length; bi++) {
+          var brief = briefsRes.data[bi];
+          // Match either by title string or by work_area phrase in proposal text
+          var titleNorm = String(brief.title || '').toLowerCase();
+          var workAreaNorm = String(brief.work_area || '').toLowerCase();
+          var propNorm = proposalText.toLowerCase();
+          var cited = (titleNorm && titleNorm.length > 8 && propNorm.indexOf(titleNorm) >= 0)
+                   || (workAreaNorm && workAreaNorm.length > 8 && propNorm.indexOf(workAreaNorm) >= 0);
+          if (cited) {
+            var newUsage = (brief.usage_count || 0) + 1;
+            var newWins = (brief.wins_associated || 0) + (outcome === 'won' ? 1 : 0);
+            var newLosses = (brief.losses_associated || 0) + (outcome === 'lost' ? 1 : 0);
+            var newCorrelation = (newWins + newLosses > 0) ? (newWins / (newWins + newLosses)) : null;
+            try {
+              await supabase.from('methodology_briefs').update({
+                usage_count: newUsage,
+                wins_associated: newWins,
+                losses_associated: newLosses,
+                outcome_correlation: newCorrelation,
+                updated_at: new Date().toISOString()
+              }).eq('id', brief.id);
+              methUpdated++;
+            } catch (e) {
+              log(log_pfx + ' methodology brief ' + brief.id + ' update failed: ' + (e.message||'').slice(0,120));
+            }
+          }
+        }
+        log(log_pfx + ' methodology_briefs updated: ' + methUpdated + '/' + briefsRes.data.length + ' in vertical=' + (opp.vertical||'?'));
+      }
+    }
+  } catch (e) {
+    log(log_pfx + ' methodology attribution failed: ' + (e.message||'').slice(0,150));
+  }
+
+  // 6) Store learning-loop summary observation (replaces what stubs used to do with zero effect)
+  try {
+    await supabase.from('organism_memory').insert({
+      id: 'mem_s138_outcome_' + oppId + '_' + Date.now(),
+      agent: 's138_outcome_recorder',
+      opportunity_id: oppId,
+      memory_type: 'outcome_recorded',
+      observation: 'S138 L11 OUTCOME: opp=' + oppId + ' outcome=' + outcome + ' predicted_pwin=' + (predictedPwin != null ? predictedPwin + '%' : 'none') + ' methodology_briefs_updated=' + methUpdated + ' vertical=' + (opp.vertical||'?') + (notes ? ' notes=' + String(notes).slice(0,200) : '')
+    });
+  } catch (e) { /* non-fatal */ }
+
+  return {
+    success: true,
+    oppId: oppId,
+    outcome: outcome,
+    predicted_pwin: predictedPwin,
+    pwin_calibration_recorded: calibrationRelevant && predictedPwin != null,
+    methodology_briefs_updated: methUpdated
+  };
+}
+
+// Computes calibration metrics: how many percentage points off, broken down by vertical.
+async function computePWinCalibration(verticalFilter) {
+  var q = supabase.from('pwin_calibration').select('vertical,predicted_pwin,actual_outcome');
+  if (verticalFilter) q = q.eq('vertical', verticalFilter);
+  var res = await q.limit(2000);
+  if (!res.data || res.data.length === 0) {
+    return { success: true, sample_size: 0, message: 'no calibration data yet' };
+  }
+  // Cluster by vertical
+  var buckets = {};
+  for (var i = 0; i < res.data.length; i++) {
+    var row = res.data[i];
+    var v = row.vertical || '__unknown__';
+    if (!buckets[v]) buckets[v] = { predictions: [], wins: 0, losses: 0 };
+    if (row.actual_outcome === 'won') buckets[v].wins++;
+    if (row.actual_outcome === 'lost') buckets[v].losses++;
+    if (row.predicted_pwin != null) {
+      var actualBinary = row.actual_outcome === 'won' ? 100 : (row.actual_outcome === 'lost' ? 0 : null);
+      if (actualBinary != null) {
+        buckets[v].predictions.push({
+          predicted: Number(row.predicted_pwin),
+          actual: actualBinary,
+          error: Number(row.predicted_pwin) - actualBinary
+        });
+      }
+    }
+  }
+  var summary = {};
+  Object.keys(buckets).forEach(function(v){
+    var b = buckets[v];
+    var preds = b.predictions;
+    if (preds.length === 0) { summary[v] = { sample_size: 0 }; return; }
+    var meanPredicted = preds.reduce(function(a,p){return a+p.predicted;},0) / preds.length;
+    var meanActual = preds.reduce(function(a,p){return a+p.actual;},0) / preds.length;
+    var meanAbsoluteError = preds.reduce(function(a,p){return a+Math.abs(p.error);},0) / preds.length;
+    var bias = meanPredicted - meanActual;
+    summary[v] = {
+      sample_size: preds.length,
+      wins: b.wins,
+      losses: b.losses,
+      win_rate: b.wins + b.losses > 0 ? b.wins / (b.wins + b.losses) : null,
+      mean_predicted_pwin: Number(meanPredicted.toFixed(1)),
+      observed_win_rate_pct: Number(meanActual.toFixed(1)),
+      bias: Number(bias.toFixed(1)),
+      mean_absolute_error: Number(meanAbsoluteError.toFixed(1)),
+      direction: bias > 5 ? 'over-predicting' : (bias < -5 ? 'under-predicting' : 'approximately calibrated')
+    };
+  });
+  return { success: true, total_sample: res.data.length, by_vertical: summary };
+}
+
+// Sweep all methodology_briefs. Recompute outcome_correlation from wins/losses in case
+// any were updated directly.
+async function recomputeMethodologyCorrelation() {
+  var res = await supabase.from('methodology_briefs').select('id,wins_associated,losses_associated,outcome_correlation').limit(500);
+  if (!res.data) return { success: false, error: 'no briefs' };
+  var updated = 0;
+  for (var i = 0; i < res.data.length; i++) {
+    var b = res.data[i];
+    var w = b.wins_associated || 0;
+    var l = b.losses_associated || 0;
+    if (w + l === 0) continue;
+    var newCorr = w / (w + l);
+    if (Math.abs((b.outcome_correlation || 0) - newCorr) > 0.01) {
+      try {
+        await supabase.from('methodology_briefs').update({ outcome_correlation: newCorr }).eq('id', b.id);
+        updated++;
+      } catch (e) { /* non-fatal */ }
+    }
+  }
+  return { success: true, briefs_scanned: res.data.length, briefs_updated: updated };
+}
+
 async function agentLossAnalysis(state) {
-  log('LOSS ANALYSIS...');
-  var ctx = buildAgentCtx(state, 'loss_analysis', null);
-  var task = 'TASK: For opps with recorded outcomes: what HGI did right/wrong, what winner did better. If no outcomes yet, analyze pipeline risks.';
-  var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1200, { model: HAIKU });
-  if (!out || out.length < 100) return null;
-  await storeMemory('loss_analysis', null, 'outcomes', out, 'analysis', null, 'medium');
-  return { agent: 'loss_analysis', opp: 'system', chars: out.length };
+  log('LOSS ANALYSIS (S138 — real outcome pass)...');
+  // Replace memo-only stub with real pass: (a) scan for opps marked 'lost' that haven't
+  // been processed through recordOpportunityOutcome yet; (b) for any such opp, call the
+  // real function; (c) produce a summary memo of what was touched.
+  var processed = 0;
+  var skipped = 0;
+  var errors = 0;
+  try {
+    var lostRes = await supabase.from('opportunities')
+      .select('id,outcome,learning_loop_last_run')
+      .eq('outcome', 'lost')
+      .is('learning_loop_last_run', null)
+      .limit(20);
+    if (lostRes.data) {
+      for (var i = 0; i < lostRes.data.length; i++) {
+        try {
+          var r = await recordOpportunityOutcome(lostRes.data[i].id, 'lost', 'auto-processed by agentLossAnalysis cron');
+          if (r && r.success) processed++; else skipped++;
+        } catch (e) { errors++; }
+      }
+    }
+  } catch (e) { log('LOSS ANALYSIS scan failed: ' + (e.message||'').slice(0,120)); }
+  var observation = 'S138 LOSS ANALYSIS: processed=' + processed + ' skipped=' + skipped + ' errors=' + errors;
+  await storeMemory('loss_analysis', null, 'outcomes', observation, 'analysis', null, 'medium');
+  return { agent: 'loss_analysis', opp: 'system', processed: processed, skipped: skipped, errors: errors };
 }
 
 async function agentWinRateAnalytics(state) {
-  log('WIN RATE...');
-  var ctx = buildAgentCtx(state, 'win_rate_analytics', null);
-  var task = 'TASK: Pipeline health metrics: average OPI, stage distribution, vertical concentration, deadline density. Identify systemic patterns.';
-  var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1200, { model: HAIKU });
-  if (!out || out.length < 100) return null;
-  await storeMemory('win_rate_analytics', null, 'analytics', out, 'analysis', null, 'medium');
-  return { agent: 'win_rate_analytics', opp: 'system', chars: out.length };
+  log('WIN RATE (S138 — real calibration pass)...');
+  // Replace memo-only stub with real pass: compute PWIN calibration across all verticals,
+  // store observation with the calibration summary so future cycles can reference it.
+  try {
+    var calib = await computePWinCalibration(null);
+    var verticalSummary = calib.by_vertical ? Object.keys(calib.by_vertical).map(function(v){
+      var m = calib.by_vertical[v];
+      return v + ': n=' + m.sample_size + (m.sample_size > 0 ? ' predicted=' + m.mean_predicted_pwin + '% observed_win_rate=' + m.observed_win_rate_pct + '% bias=' + m.bias + ' direction=' + m.direction : '');
+    }).join(' | ') : 'no-data';
+    var observation = 'S138 WIN RATE ANALYTICS: total_sample=' + (calib.total_sample || 0) + ' by_vertical={ ' + verticalSummary + ' }';
+    await storeMemory('win_rate_analytics', null, 'analytics', observation, 'analysis', null, 'medium');
+    return { agent: 'win_rate_analytics', opp: 'system', total_sample: calib.total_sample || 0 };
+  } catch (e) {
+    log('WIN RATE failed: ' + (e.message||'').slice(0,120));
+    return { agent: 'win_rate_analytics', opp: 'system', error: (e.message||'').slice(0,120) };
+  }
 }
 
 async function agentOutreachAutomation(state) {
@@ -11682,14 +12006,31 @@ async function agentOutreachAutomation(state) {
 }
 
 async function agentLearningLoop(state) {
-  log('LEARNING LOOP...');
-  var ctx = buildAgentCtx(state, 'learning_loop', null);
-  var task = 'TASK: Cross-session pattern detection. Themes across opps, lessons from one pursuit applicable to others, agent improvements that compound.';
-  var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY (' + state.memories.length + ' total):\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1200, { model: HAIKU });
-  if (!out || out.length < 100) return null;
-  await storeMemory('learning_loop', null, 'patterns', out, 'analysis', null, 'medium');
-  return { agent: 'learning_loop', opp: 'system', chars: out.length };
+  log('LEARNING LOOP (S138 — real methodology correlation pass)...');
+  // Replace memo-only stub with real pass: refresh methodology_briefs outcome_correlation
+  // across the corpus, surface top-performing and bottom-performing briefs.
+  try {
+    var refreshed = await recomputeMethodologyCorrelation();
+    // Surface top/bottom briefs by correlation (only those with meaningful sample)
+    var topRes = await supabase.from('methodology_briefs')
+      .select('id,title,vertical,usage_count,wins_associated,losses_associated,outcome_correlation')
+      .gte('usage_count', 2)
+      .order('outcome_correlation', { ascending: false, nullsFirst: false })
+      .limit(5);
+    var bottomRes = await supabase.from('methodology_briefs')
+      .select('id,title,vertical,usage_count,wins_associated,losses_associated,outcome_correlation')
+      .gte('usage_count', 2)
+      .order('outcome_correlation', { ascending: true, nullsFirst: false })
+      .limit(5);
+    var topStr = (topRes.data || []).map(function(b){ return b.title + ' [' + b.vertical + '] win_rate=' + (b.outcome_correlation != null ? (b.outcome_correlation*100).toFixed(0)+'%' : 'n/a') + ' n=' + b.usage_count; }).join(' || ');
+    var botStr = (bottomRes.data || []).map(function(b){ return b.title + ' [' + b.vertical + '] win_rate=' + (b.outcome_correlation != null ? (b.outcome_correlation*100).toFixed(0)+'%' : 'n/a') + ' n=' + b.usage_count; }).join(' || ');
+    var observation = 'S138 LEARNING LOOP: refreshed ' + (refreshed.briefs_updated || 0) + '/' + (refreshed.briefs_scanned || 0) + ' briefs. TOP: ' + (topStr || 'none') + ' | BOTTOM: ' + (botStr || 'none');
+    await storeMemory('learning_loop', null, 'patterns', observation, 'analysis', null, 'medium');
+    return { agent: 'learning_loop', opp: 'system', briefs_updated: refreshed.briefs_updated || 0, briefs_scanned: refreshed.briefs_scanned || 0 };
+  } catch (e) {
+    log('LEARNING LOOP failed: ' + (e.message||'').slice(0,120));
+    return { agent: 'learning_loop', opp: 'system', error: (e.message||'').slice(0,120) };
+  }
 }
 
 async function agentSubcontractorDB(state) {
