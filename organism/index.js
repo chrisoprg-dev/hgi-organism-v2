@@ -4851,11 +4851,11 @@ if (url.startsWith('/api/l6-test-specialist') && req.method === 'POST') {
     };
 
     var l6tSpecialist = null;
-    if (l6tWhich === 'technical_approach') l6tSpecialist = _l6TechnicalApproachSpecialist;
-    else if (l6tWhich === 'past_performance') l6tSpecialist = _l6PastPerformanceSpecialist;
-    else if (l6tWhich === 'staffing') l6tSpecialist = _l6StaffingSpecialist;
-    else {
-      res.end(JSON.stringify({ error: 'unknown_specialist', specialist: l6tWhich, valid: ['technical_approach','past_performance','staffing'] }));
+    if (_l6SpecialistRegistry && typeof _l6SpecialistRegistry[l6tWhich] === 'function') {
+      l6tSpecialist = _l6SpecialistRegistry[l6tWhich]();
+    }
+    if (!l6tSpecialist) {
+      res.end(JSON.stringify({ error: 'unknown_specialist', specialist: l6tWhich, valid: Object.keys(_l6SpecialistRegistry || {}) }));
       return;
     }
 
@@ -9163,6 +9163,167 @@ var L6_STAFFING_CONFIG = {
 };
 
 var _l6StaffingSpecialist = createL6Specialist(L6_STAFFING_CONFIG);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// L6 EXECUTIVE SUMMARY specialist — S136 push 1
+// 800-1500 words. Outcome-first, thesis-threaded. Evaluator's first read.
+// Every thesis from strategic_thesis gets one paragraph of exposure here.
+// ─────────────────────────────────────────────────────────────────────────────
+var L6_EXECUTIVE_SUMMARY_CONFIG = {
+  name: 'executive_summary',
+  log_tag: 'EXEC',
+  default_section_title: 'Executive Summary',
+  persist_column_name: 'section_executive_summary',
+  version: 's136_v1_exec',
+  cost_bucket: 'l6_executive_summary',
+  anchor_title_patterns: /executive\s*summary|introduction|overview|firm\s*overview|statement\s*of\s*interest/,
+  evaluation_criterion_match_patterns: /executive\s*summary|introduction|overview/,
+  role_framing:
+    'You are a senior Executive Summary writer at HGI Global. You write the first 800-1500 words the evaluator reads — the section that decides whether the rest of the proposal gets read carefully or skimmed. You write in the voice of the firm President: direct, outcome-first, zero hedging. Every sentence earns its place.\n\n' +
+    'YOU WRITE ONE SECTION ONLY: the Executive Summary. It is not a full proposal. It is the strategic frame. It threads every thesis from the STRATEGIC THESIS spine you receive, names HGI\'s specific past performance anchors relevant to this RFP, surfaces the stated tradeoffs that signal strategic clarity, and closes with a direct statement of what HGI will deliver. The L7 senior writer downstream will integrate your section into the full proposal.',
+  deliverables_per_3k_words: [
+    'Every thesis from the strategic spine gets at least one paragraph advancing it',
+    'At least 5 past_performance_anchor citations (canonical HGI_PP entries with figures)',
+    'At least 4 quantified_benchmark statements (measurable outcomes, not capability claims)',
+    'At least 3 regulatory_citation tags when the RFP authority calls for it',
+    'At least 2 tradeoff_positioning_statement entries where a thesis has a stated tradeoff'
+  ],
+  structural_requirements: [
+    'Open with the single highest-leverage strategic move HGI makes for THIS RFP — not a firm history paragraph',
+    'Do NOT begin with "The RFP requires..." or "HGI is pleased to submit..." — these are hedge openings',
+    'Lead every paragraph with the OUTCOME HGI delivers, then the evidence, then the methodology',
+    'Reference canonical PP by name with dollar figures (Road Home $67M, Restore LA $42.3M, etc.) — never generic capability claims',
+    'Where the strategic thesis surfaces a tradeoff, make it visible in one sentence ("HGI is not optimizing for X; HGI is optimizing for Y")',
+    'Close with a direct delivery commitment — what HGI will execute, on what timeline, against what accountability standard',
+    'Target length 800-1500 words; more is worse, not better'
+  ],
+  extra_rules: [
+    'Cover letter is a separate section with its own specialist. Do NOT include cover-letter-style transmittal language here.',
+    'This section does NOT get signed by anyone. No name blocks, no signatures, no "respectfully submitted".',
+    'Do NOT list [TO BE ASSIGNED] here — this section is strategic framing, not personnel enumeration.'
+  ],
+  output_format_block:
+    'OUTPUT FORMAT — return ONLY valid JSON. No preamble. No markdown fences.\n' +
+    '{\n' +
+    '  "section_text": "Full Executive Summary in markdown. Use ## subsection headers sparingly (optional). Target length: 800-1500 words.",\n' +
+    '  "evidence_anchors": [\n' +
+    '    {"type": "past_performance_anchor", "text": "Road Home $67M / $13B+ / 2006-2015 / CDBG-DR", "section_used": "paragraph 2"},\n' +
+    '    {"type": "quantified_benchmark", "text": "zero misappropriation findings across $14B+ federal program admin", "section_used": "..."},\n' +
+    '    {"type": "regulatory_citation", "text": "2 CFR Part 200", "section_used": "..."},\n' +
+    '    {"type": "tradeoff_positioning_statement", "text": "HGI is not optimizing for lowest hourly rate; HGI is optimizing for zero-finding audit defense", "section_used": "..."}\n' +
+    '  ],\n' +
+    '  "thesis_alignment": [\n' +
+    '    {"thesis_id": "T1", "advanced_in_paragraph": "paragraph 2", "tradeoff_surfaced": true}\n' +
+    '  ]\n' +
+    '}',
+  evidence_anchor_types: ['past_performance_anchor','quantified_benchmark','regulatory_citation','tradeoff_positioning_statement'],
+  density_floors_per_3k_words: {
+    past_performance_anchor: 5,
+    quantified_benchmark: 4,
+    regulatory_citation: 3,
+    tradeoff_positioning_statement: 2
+  },
+  min_floors_required_for_published: 3,
+  min_section_text_length: 600,
+  canon_violation_regex_set: [
+    { name: 'exec_rfp_paraphrase_open', pattern: /^(The RFP\s+requires|Section\s+\d+(\.\d+)*\s+of\s+the\s+RFP|HGI\s+is\s+pleased\s+to\s+submit|HGI\s+respectfully\s+submits)/i },
+    { name: 'exec_signature_block', pattern: /Respectfully\s+submitted|Sincerely,|Signature:|\bSigned:/i },
+    { name: 'exec_wrong_legal_entity', pattern: /Hammerman\s*&\s*Gainer\s+Global|\bHGI\s+LLC\b(?!\s+d\/b\/a)/i }
+  ],
+  user_message_include: ['opp_meta','rfp_requirements','thesis_spine','scope_of_work','hgi_pp_entries','discriminators'],
+  output_schema_extras: ['thesis_alignment'],
+  max_tokens: 8000,
+  thinking_budget: 3000
+};
+
+var _l6ExecutiveSummarySpecialist = createL6Specialist(L6_EXECUTIVE_SUMMARY_CONFIG);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// L6 COVER LETTER specialist — S136 push 1
+// 1-page transmittal. ONLY section where a specific name appears: Christopher
+// J. Oney as President signatory. Does not enumerate personnel, does not restate
+// technical approach. It transmits.
+// ─────────────────────────────────────────────────────────────────────────────
+var L6_COVER_LETTER_CONFIG = {
+  name: 'cover_letter',
+  log_tag: 'COVER',
+  default_section_title: 'Cover Letter / Letter of Transmittal',
+  persist_column_name: 'section_cover_letter',
+  version: 's136_v1_cover',
+  cost_bucket: 'l6_cover_letter',
+  anchor_title_patterns: /cover\s*letter|letter\s*of\s*transmittal|transmittal\s*letter|letter\s*of\s*interest/,
+  evaluation_criterion_match_patterns: /cover\s*letter|transmittal/,
+  role_framing:
+    'You are drafting a one-page Letter of Transmittal signed by the President of HGI Global. It is a business letter to the named solicitation contact. It is NOT a sales pitch, NOT a summary of the proposal, NOT a restatement of technical approach. It transmits the proposal, names the firm, acknowledges any addenda, confirms the proposal validity period, and closes under the President\'s signature.\n\n' +
+    'YOU WRITE ONE SECTION ONLY: the Cover Letter / Letter of Transmittal.',
+  deliverables_per_3k_words: [
+    'Proper business-letter header: date, recipient name, recipient title, agency, address',
+    'One opening paragraph: HGI transmits proposal to [solicitation #]',
+    'One middle paragraph: firm identity (HGI Global dba Hammerman & Gainer LLC, 1929 founding, 97 years, 100% minority-owned, Louisiana HQ)',
+    'Addendum acknowledgment sentence if any addenda exist',
+    'Validity period statement (typically 90-120 days as RFP requires)',
+    'One closing paragraph: thanks and contact for questions',
+    'Signature block: Christopher J. Oney / President / HGI Global (Hammerman & Gainer LLC) / 2400 Veterans Memorial Blvd, Suite 510, Kenner, LA 70062 / (504) 681-6135 / info@hgi-global.com'
+  ],
+  structural_requirements: [
+    'Total length: 250-450 words. Longer is wrong.',
+    'Business-letter format. Not markdown-heavy. No subsection headers.',
+    'CANON EXEMPTION: Christopher J. Oney appears here as signatory. This is the ONLY section where Christopher\'s name appears. He does NOT appear in Staffing, does NOT appear in Past Performance, does NOT appear in Technical Approach or Executive Summary.',
+    'Do NOT name any other HGI staff (no Larry Oney, Lou Resweber, Candy Dottolo, Dillon Truax, Vanessa James, Chris Feduccia, Geoffrey Brien). Only Christopher as signatory.',
+    'Do NOT restate technical approach, past performance specifics, or pricing. Those live in their own sections.',
+    'Do NOT include [TO BE ASSIGNED] — this is a transmittal, not a personnel plan.'
+  ],
+  extra_rules: [
+    'HGI legal entity on signature: "HGI Global (Hammerman & Gainer LLC)" — that exact form.',
+    'HQ address: 2400 Veterans Memorial Blvd, Suite 510, Kenner, LA 70062 (never Suite 200).',
+    'Phone: (504) 681-6135. Email: info@hgi-global.com.',
+    'If RFP specifies a validity period (e.g., 120 days), use that exact number. If not, use 90 days as safe default.',
+    'If RFP lists a specific recipient (name + title), use that recipient. If not, use the solicitation contact as named in the RFP.'
+  ],
+  output_format_block:
+    'OUTPUT FORMAT — return ONLY valid JSON. No preamble. No markdown fences.\n' +
+    '{\n' +
+    '  "section_text": "Full cover letter as plain business-letter text. Include date, recipient block, salutation, body paragraphs, closing, signature block. 250-450 words.",\n' +
+    '  "evidence_anchors": [\n' +
+    '    {"type": "identity_fact", "text": "founded 1929", "section_used": "firm identity paragraph"},\n' +
+    '    {"type": "addendum_acknowledgment", "text": "Addendum #1 dated April 17 2026 acknowledged", "section_used": "..."},\n' +
+    '    {"type": "validity_period", "text": "proposal valid for 120 days", "section_used": "..."},\n' +
+    '    {"type": "signature_block", "text": "Christopher J. Oney, President, HGI Global (Hammerman & Gainer LLC)", "section_used": "signature"}\n' +
+    '  ]\n' +
+    '}',
+  evidence_anchor_types: ['identity_fact','addendum_acknowledgment','validity_period','signature_block'],
+  density_floors_per_3k_words: {
+    identity_fact: 3,
+    validity_period: 1,
+    signature_block: 1
+  },
+  min_floors_required_for_published: 3,
+  min_section_text_length: 400,
+  // Cover letter canon: the ONE exemption for Christopher's name. Everyone else
+  // staying out is enforced here. Wrong legal entity blocked. Suite 200 blocked.
+  canon_violation_regex_set: [
+    { name: 'cover_wrong_legal_entity', pattern: /Hammerman\s*&\s*Gainer\s+Global|\bHGI\s+LLC\b(?!\s+d\/b\/a)/i },
+    { name: 'cover_wrong_suite', pattern: /Suite\s*200\b/i },
+    { name: 'cover_wrong_phone', pattern: /\(504\)\s*681-(?!6135\b)/ },
+    { name: 'cover_other_staff_name', pattern: /\b(Larry\s+Oney|Lou\s+Resweber|Candy\s+Dottolo|Dillon\s+Truax|Vanessa\s+James|Chris\s+Feduccia|Geoffrey\s+Brien)\b/i },
+    { name: 'cover_signature_missing_president', pattern: /^(?!.*Christopher\s+J\.?\s*Oney)/s }
+  ],
+  user_message_include: ['opp_meta','rfp_requirements'],
+  output_schema_extras: [],
+  max_tokens: 2500,
+  thinking_budget: 1500
+};
+
+var _l6CoverLetterSpecialist = createL6Specialist(L6_COVER_LETTER_CONFIG);
+
+// Extend test harness so /api/l6-test-specialist can invoke these two.
+var _l6SpecialistRegistry = {
+  technical_approach: function(){ return _l6TechnicalApproachSpecialist; },
+  past_performance:  function(){ return _l6PastPerformanceSpecialist; },
+  staffing:          function(){ return _l6StaffingSpecialist; },
+  executive_summary: function(){ return _l6ExecutiveSummarySpecialist; },
+  cover_letter:      function(){ return _l6CoverLetterSpecialist; }
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // generateTechnicalApproachSection — S126 push 6 — L6 SECTION SPECIALIST #1
