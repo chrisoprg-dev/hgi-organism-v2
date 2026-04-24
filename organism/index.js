@@ -4800,6 +4800,96 @@ if (url.startsWith('/api/refine-weak-sections') && req.method === 'POST') {
   return;
 }
 
+// === S135: L6 SPECIALIST TEST HARNESS — /api/l6-test-specialist ===
+// POST { id, specialist, blueprint?, methodologyCorpus?, discriminators?, competitorBriefs?, rateCard? }
+// Exercises ONE L6 specialist (technical_approach | past_performance | staffing) on a stored opp
+// WITHOUT running full produce-proposal. Returns the specialist result in the response body;
+// does NOT persist to opportunities (persistence for PP/Staffing awaits their columns being added
+// in S136; Tech Approach persists only through full produce-proposal).
+// Purpose: validate factory mechanism + each specialist's output shape end-to-end cheaply
+// ($1-3 per call, 30-90s wall) before auto-wiring into produce-proposal (S137 scope).
+if (url.startsWith('/api/l6-test-specialist') && req.method === 'POST') {
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+  try {
+    var l6tBody = '';
+    await new Promise(function(resolve) { req.on('data', function(c) { l6tBody += c; }); req.on('end', resolve); });
+    var l6tData = JSON.parse(l6tBody || '{}');
+    var l6tOppId = l6tData.id || l6tData.opportunity_id;
+    var l6tWhich = l6tData.specialist || '';
+    if (!l6tOppId) { res.end(JSON.stringify({ error: 'id required' })); return; }
+    if (!l6tWhich) { res.end(JSON.stringify({ error: 'specialist required', valid: ['technical_approach','past_performance','staffing'] })); return; }
+
+    // Load opp — use columns that exist (verified via information_schema; compliance_blueprint_json does NOT exist,
+    // S134 bug caught that pattern. Use rfp_requirements as blueprint source.)
+    var l6tOppRes = await supabase.from('opportunities')
+      .select('id,title,agency,vertical,scope_analysis,rfp_requirements,strategic_thesis')
+      .eq('id', l6tOppId).single();
+    if (!l6tOppRes.data) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'opportunity_not_found', opportunity_id: l6tOppId }));
+      return;
+    }
+    var l6tOpp = l6tOppRes.data;
+
+    // Caller can override blueprint; default uses stored rfp_requirements.
+    var l6tBlueprint = l6tData.blueprint || l6tOpp.rfp_requirements || {};
+
+    // Specialist input bag. Thin-corpus inputs come from caller (for cost control);
+    // HGI_PP + HGI staff canon pulled from in-memory constants (free).
+    var l6tHgiPp = '';
+    try { l6tHgiPp = JSON.stringify(HGI_PP).slice(0, 12000); } catch (e) {}
+    var l6tHgiStaff = (typeof HGI === 'string') ? HGI.slice(0, 6000) : '';
+
+    var l6tBag = {
+      methodologyCorpus: l6tData.methodologyCorpus || '',
+      discriminators: l6tData.discriminators || '',
+      competitorBriefs: l6tData.competitorBriefs || '',
+      thesis: l6tOpp.strategic_thesis || null,
+      hgiPpEntries: l6tHgiPp,
+      hgiStaffCanon: l6tHgiStaff,
+      rateCard: l6tData.rateCard || ''
+    };
+
+    var l6tSpecialist = null;
+    if (l6tWhich === 'technical_approach') l6tSpecialist = _l6TechnicalApproachSpecialist;
+    else if (l6tWhich === 'past_performance') l6tSpecialist = _l6PastPerformanceSpecialist;
+    else if (l6tWhich === 'staffing') l6tSpecialist = _l6StaffingSpecialist;
+    else {
+      res.end(JSON.stringify({ error: 'unknown_specialist', specialist: l6tWhich, valid: ['technical_approach','past_performance','staffing'] }));
+      return;
+    }
+
+    log('L6 TEST: opp=' + l6tOppId + ' specialist=' + l6tWhich + ' starting');
+    var l6tStart = Date.now();
+    var l6tResult = await l6tSpecialist(l6tOpp, l6tBlueprint, l6tBag, {});
+    var l6tWall = Math.floor((Date.now() - l6tStart) / 1000);
+    log('L6 TEST: opp=' + l6tOppId + ' specialist=' + l6tWhich + ' status=' + (l6tResult && l6tResult.status) + ' cost=$' + (l6tResult && l6tResult.cost_usd) + ' wall=' + l6tWall + 's');
+
+    // Log to organism_memory for handoff discoverability (pattern mirrors S134 refineWeakSections)
+    try {
+      await supabase.from('organism_memory').insert({
+        id: 'mem_l6test_' + l6tOppId + '_' + l6tWhich + '_' + Date.now(),
+        agent: 's135_l6_test_harness',
+        opportunity_id: l6tOppId,
+        memory_type: 'l6_specialist_test',
+        observation: 'S135 L6 TEST: specialist=' + l6tWhich + ', status=' + (l6tResult && l6tResult.status) + ', words=' + (l6tResult && l6tResult.word_count) + ', floors_met=' + (l6tResult && l6tResult.floors_met_count) + '/' + Object.keys((l6tResult && l6tResult.floors_required) || {}).length + ', canon_violations=' + ((l6tResult && l6tResult.canon_violations && l6tResult.canon_violations.length) || 0) + ', quality=' + (l6tResult && l6tResult.quality_score) + ', cost=$' + (l6tResult && l6tResult.cost_usd) + ', wall=' + l6tWall + 's'
+      });
+    } catch (memErr) { log('L6 TEST: memory log failed (non-fatal): ' + (memErr.message||'').slice(0,150)); }
+
+    res.end(JSON.stringify({
+      success: true,
+      specialist: l6tWhich,
+      opportunity_id: l6tOppId,
+      wall_seconds: l6tWall,
+      result: l6tResult
+    }));
+  } catch (e) {
+    log('L6 TEST: error ' + (e.message||'').slice(0,200));
+    res.end(JSON.stringify({ error: e.message, stack: (e.stack || '').slice(0, 500) }));
+  }
+  return;
+}
+
 // === PROPOSAL DOCUMENT GENERATOR — /api/proposal-doc ===
 if (url.startsWith('/api/proposal-doc')) {
   var docId = (req.url.split('?id=')[1]||'').split('&')[0];
