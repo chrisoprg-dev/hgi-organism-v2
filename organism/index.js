@@ -8890,6 +8890,191 @@ var L6_TECHNICAL_APPROACH_CONFIG = {
 var _l6TechnicalApproachSpecialist = createL6Specialist(L6_TECHNICAL_APPROACH_CONFIG);
 
 // ─────────────────────────────────────────────────────────────────────────────
+// L6 PAST PERFORMANCE specialist — S135 push 2
+// Builds the Past Performance section. Evidence anchors are per-entry from the
+// HGI_PP canon (Road Home $67M/$13B, HAP $2.23B, Restore Louisiana $1.7B, TPSD,
+// HTHA, City of NOLA WC, SWBNO Billing, Property Tax Appeals, TPCIGA).
+// Canon enforcement is strict: figures must match canon exactly, hard-exclusion
+// clients (PBGC, OPSB, LIGA, TPCIGA) cannot appear as HGI PP unless the RFP IS
+// that client (S133 guardrail already blocks produce-proposal entry on those).
+// Scrub-rule-4 internal consistency: same canonical entity must carry same
+// figures across the section.
+// ─────────────────────────────────────────────────────────────────────────────
+var L6_PAST_PERFORMANCE_CONFIG = {
+  name: 'past_performance',
+  log_tag: 'PP',
+  default_section_title: 'Past Performance',
+  persist_column_name: 'section_past_performance',
+  version: 's135_v1_pp',
+  cost_bucket: 'l6_past_performance',
+  anchor_title_patterns: /past\s*performance|experience\s*and\s*qualifications|references|qualifications\s*(and|&)\s*experience|firm\s*experience|relevant\s*experience|client\s*references/,
+  evaluation_criterion_match_patterns: /past\s*performance|experience|qualifications|references|track\s*record/,
+  role_framing:
+    'You are a senior Past Performance narrative specialist at HGI Global writing from the president\'s-desk voice. You have personally walked every one of HGI\'s canonical past performance engagements — Road Home, Hurricane Katrina/Rita recovery, HAP, Restore Louisiana, Terrebonne Parish School District, Houma-Terrebonne Housing Authority, the active City of New Orleans WC TPA, SWBNO Billing Appeals, the 15-year Property Tax Appeals practice. You know each engagement\'s dollar value, client agency, period of performance, authority, and the specific outcome metrics that matter to evaluators.\n\n' +
+    'YOU WRITE ONE SECTION ONLY: the Past Performance narrative. This is not a full proposal. It is a focused treatment of HGI\'s relevant past performance, citing only canonical entries with figures that match canon byte-exact. The L7 senior writer downstream will integrate your section into the full proposal.',
+  deliverables_per_3k_words: [
+    'At least 6 past_performance_anchor citations to specific canonical HGI_PP entries (each with client agency, dollar figure, period of performance, authority)',
+    'At least 8 quantified_benchmark statements tied to PP outcomes (application counts, compliance rates, zero-finding metrics, recovery amounts, cost avoidance)',
+    'At least 4 specific_client_name references (government clients by formal agency name)',
+    'At least 5 specific_outcome_metric statements (measurable results: timelines met, dollars recovered, findings avoided, participants served)',
+    'At least 3 regulatory_citation tags when authority is germane (CDBG-DR, 2 CFR 200, FEMA PA authorities, HUD CPD notices)'
+  ],
+  structural_requirements: [
+    'Lead with the most vertical-relevant HGI engagement to this RFP (disaster_recovery RFP → Road Home + Restore Louisiana lead; workforce RFP → WIOA engagements lead; tpa_claims RFP → NOLA WC + TPCIGA lead; housing/hud RFP → HTHA + HAP lead; grant_management RFP → Road Home + HAP grant admin lead)',
+    'Cite each canonical PP entry in a dedicated paragraph with client, dollar figure, period, authority, and specific outcome metrics',
+    'Every dollar figure must match HGI_PP canon byte-exactly — no rounding, no restatement (Road Home is $67M HGI direct / $13B program total; never $12B, $14B, or combined)',
+    'Same named entity must carry the same figure across every mention in the section (internal consistency; scrub rule 4)',
+    'Do NOT include PBGC, Orleans Parish School Board, LIGA, or TPCIGA as HGI past performance unless the RFP IS that client',
+    'Do NOT invent past performance — if an engagement is not in HGI_PP canon, it does not appear',
+    'For Terrebonne Parish School District, always write "Terrebonne Parish School District" or "TPSD" — never "Tangipahoa"',
+    'Federal contract history: HGI has NEVER had a direct federal prime contract. Never claim direct federal prime status. All work flows through state/local/HA/insurance pass-through'
+  ],
+  extra_rules: [
+    'HGI founding year is 1929 — 97 years in April 2026. Never 1931, 95-year, 96-year.',
+    'HGI legal entity: "Hammerman & Gainer LLC" or "Hammerman & Gainer LLC d/b/a HGI Global" or "HGI Global". Forbidden: "Hammerman & Gainer Global", "HGI LLC", "HGI Global LLC".',
+    'UEI: DL4SJEVKZ6H4. CAGE: 47C60 (never 47G60).',
+    'HQ: 2400 Veterans Memorial Blvd, Suite 510, Kenner, LA 70062. Never Suite 200.'
+  ],
+  output_format_block:
+    'OUTPUT FORMAT — return ONLY valid JSON. No preamble. No markdown fences.\n' +
+    '{\n' +
+    '  "section_text": "Full Past Performance narrative in markdown. Use ## subsection headers (one per canonical PP entry or per engagement cluster). Target length: scaled to RFP weight (typically 2,500-5,000 words).",\n' +
+    '  "evidence_anchors": [\n' +
+    '    {"type": "past_performance_anchor", "text": "Road Home — Louisiana OCD, $67M HGI direct / $13B+ program, 2006-2015, CDBG-DR", "section_used": "subsection name"},\n' +
+    '    {"type": "quantified_benchmark", "text": "185,000+ applications processed", "section_used": "..."},\n' +
+    '    {"type": "specific_client_name", "text": "Louisiana Office of Community Development", "section_used": "..."},\n' +
+    '    {"type": "specific_outcome_metric", "text": "zero misappropriation findings on Road Home", "section_used": "..."},\n' +
+    '    {"type": "regulatory_citation", "text": "24 CFR 570.483(b)", "section_used": "..."}\n' +
+    '  ],\n' +
+    '  "pp_entries_cited": [\n' +
+    '    {"entry_id": "pp-road-home", "subsection": "...", "figures_stated": {"hgi_direct": "$67M", "program_total": "$13B+"}}\n' +
+    '  ],\n' +
+    '  "thesis_alignment": [\n' +
+    '    {"thesis_id": "T1", "advanced_in_subsection": "...", "anchor_entry_id": "pp-road-home"}\n' +
+    '  ]\n' +
+    '}',
+  evidence_anchor_types: ['past_performance_anchor','quantified_benchmark','specific_client_name','specific_outcome_metric','regulatory_citation'],
+  density_floors_per_3k_words: {
+    past_performance_anchor: 6,
+    quantified_benchmark: 8,
+    specific_client_name: 4,
+    specific_outcome_metric: 5,
+    regulatory_citation: 3
+  },
+  min_floors_required_for_published: 4,
+  min_section_text_length: 1000,
+  // PP-specific canon violations beyond universal set. Hard-exclusion regex
+  // matches the S133 hard-exclusion set — if the opp is NOT that client, the
+  // specialist must not list them as HGI PP. (When the opp IS that client,
+  // S133 guardrail blocks produce-proposal entry anyway, so the specialist
+  // never runs in that configuration without forceExclusionOverride.)
+  canon_violation_regex_set: [
+    { name: 'pp_exclusion_pbgc', pattern: /\bPBGC\b/ },
+    { name: 'pp_exclusion_opsb', pattern: /\b(Orleans\s+Parish\s+School\s+Board|OPSB)\b/i },
+    { name: 'pp_exclusion_liga', pattern: /\bLIGA\b/ },
+    { name: 'pp_exclusion_tpciga', pattern: /\bTPCIGA\b/ },
+    { name: 'pp_wrong_legal_entity', pattern: /Hammerman\s*&\s*Gainer\s+Global|\bHGI\s+LLC\b|\bHGI\s+Global\s+LLC\b/i },
+    { name: 'pp_wrong_uei', pattern: /(?:UEI[^A-Z0-9]{0,5})(?!DL4SJEVKZ6H4)[A-Z0-9]{12}/ },
+    { name: 'pp_wrong_cage', pattern: /\b47G60\b/ }
+  ],
+  user_message_include: ['opp_meta','rfp_requirements','thesis_spine','scope_of_work','hgi_pp_entries','discriminators'],
+  output_schema_extras: ['pp_entries_cited','thesis_alignment'],
+  max_tokens: 16000,
+  thinking_budget: 6000
+};
+
+var _l6PastPerformanceSpecialist = createL6Specialist(L6_PAST_PERFORMANCE_CONFIG);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// L6 STAFFING specialist — S135 push 2
+// Builds the Staffing / Key Personnel section. Every position [TO BE ASSIGNED]
+// by canon (Christopher signs cover letter only; no personnel auto-assignment).
+// Roles identified by title + required qualifications + certifications + years
+// of relevant experience. Escalation paths named. Geoffrey Brien exclusion
+// enforced. Rate card used as hourly-rate reference when cost context applies.
+// ─────────────────────────────────────────────────────────────────────────────
+var L6_STAFFING_CONFIG = {
+  name: 'staffing',
+  log_tag: 'STAFF',
+  default_section_title: 'Staffing Plan and Key Personnel',
+  persist_column_name: 'section_staffing',
+  version: 's135_v1_staffing',
+  cost_bucket: 'l6_staffing',
+  anchor_title_patterns: /staffing|key\s*personnel|key\s*staff|project\s*team|team\s*composition|organizational\s*chart|staffing\s*plan|personnel\s*plan|proposed\s*staff/,
+  evaluation_criterion_match_patterns: /staffing|personnel|key\s*staff|team|qualifications\s*of\s*staff|personnel\s*plan/,
+  role_framing:
+    'You are a senior Staffing Plan specialist at HGI Global. You build staffing plans for government procurements by identifying roles, required qualifications, required certifications, required years of relevant experience, and the escalation path from field staff through the President. You write staffing sections that evaluators can map directly to the RFP\'s staffing requirements without ambiguity.\n\n' +
+    'YOU WRITE ONE SECTION ONLY: the Staffing Plan and Key Personnel section. This is not a full proposal. Every position is identified by ROLE TITLE and REQUIREMENT PROFILE (qualifications, certifications, years of relevant experience, reporting lines) — NOT by the name of a specific person. Personnel assignments use [TO BE ASSIGNED] exclusively. The L7 senior writer downstream will integrate your section into the full proposal.',
+  deliverables_per_3k_words: [
+    'At least 8 named_role entries (role title + seniority level for the engagement)',
+    'At least 6 required_certification statements (credentials mapped to role; e.g., PMP, CCM, LEED AP, CRE, CHA, CDL, professional licensure)',
+    'At least 6 years_of_experience_claim statements (minimum years of relevant-vertical experience required per role)',
+    'At least 3 escalation_path entries (who a role reports to, who substitutes in absences, how exceptions escalate)',
+    'At least 4 quantified_benchmark statements (staff-to-project ratios, coverage hours, response SLAs, geographic deployment capacity)'
+  ],
+  structural_requirements: [
+    'EVERY personnel assignment uses [TO BE ASSIGNED] — no name appears in any role slot. Christopher J. Oney, President, is signatory on the cover letter only; do not assign him to an engagement role in this section.',
+    'For each role, state: role title, minimum years of relevant experience, required certifications, required clearances if any, reporting line, substitute coverage plan',
+    'Provide an escalation ladder from field staff through project management through program director through VP to President',
+    'When the RFP specifies role-specific requirements (e.g., LA-licensed engineer, CDBG-Certified Grant Manager, PMP-certified PM), state HGI\'s commitment to staffing a [TO BE ASSIGNED] individual meeting or exceeding those requirements',
+    'If the rate card is provided, tag each role with its fully-burdened hourly rate as a cost-context reference (not a commitment unless explicitly required by RFP)',
+    'Never name a specific individual in a role — every bracket is [TO BE ASSIGNED]',
+    'Never claim current staff size beyond HGI\'s canonical ~50 (staff canon); do not invent headcount',
+    'Never list Geoffrey Brien — he is no longer with HGI'
+  ],
+  extra_rules: [
+    'Only permitted bracket: [TO BE ASSIGNED]. No other bracket shapes.',
+    'Christopher J. Oney is President and appears only on cover letter. He does not hold an engagement role in the staffing section.',
+    'Reporting-line canon: field staff → PM → Program Director → VP → President.',
+    'HGI has ~50 staff — do not claim larger rosters (e.g., no "110+" headcount from legacy V1 drift).'
+  ],
+  output_format_block:
+    'OUTPUT FORMAT — return ONLY valid JSON. No preamble. No markdown fences.\n' +
+    '{\n' +
+    '  "section_text": "Full Staffing Plan and Key Personnel section in markdown. Use ## subsection headers (one per role cluster or per organizational tier). Target length: scaled to RFP weight (typically 1,500-4,000 words).",\n' +
+    '  "evidence_anchors": [\n' +
+    '    {"type": "named_role", "text": "Senior Project Manager (disaster recovery)", "section_used": "subsection name"},\n' +
+    '    {"type": "required_certification", "text": "PMP required", "section_used": "..."},\n' +
+    '    {"type": "years_of_experience_claim", "text": "minimum 15 years CDBG-DR program management", "section_used": "..."},\n' +
+    '    {"type": "escalation_path", "text": "PM reports to Program Director reports to VP reports to President", "section_used": "..."},\n' +
+    '    {"type": "quantified_benchmark", "text": "1:4 senior-to-junior staffing ratio", "section_used": "..."}\n' +
+    '  ],\n' +
+    '  "roles_with_assignments_tbd": [\n' +
+    '    {"role_title": "Senior Project Manager", "qualifications": "...", "years_required": "15+", "certifications": ["PMP"], "assignment": "[TO BE ASSIGNED]"}\n' +
+    '  ],\n' +
+    '  "escalation_paths": [\n' +
+    '    {"from_role": "Field Staff", "to_role": "Project Manager", "escalation_trigger": "..."}\n' +
+    '  ]\n' +
+    '}',
+  evidence_anchor_types: ['named_role','required_certification','years_of_experience_claim','escalation_path','quantified_benchmark'],
+  density_floors_per_3k_words: {
+    named_role: 8,
+    required_certification: 6,
+    years_of_experience_claim: 6,
+    escalation_path: 3,
+    quantified_benchmark: 4
+  },
+  min_floors_required_for_published: 4,
+  min_section_text_length: 1000,
+  // Staffing-specific canon violations. Key rule: any name in a personnel
+  // assignment position is a violation (except Christopher on cover letter,
+  // which this specialist does not produce). Named-leadership detection uses
+  // common role-assignment patterns.
+  canon_violation_regex_set: [
+    { name: 'staffing_christopher_in_role', pattern: /(?:Project\s+Manager|Program\s+Director|Lead|Principal|Director|Manager)[^\n]{0,80}Christopher\s+J?\.?\s*Oney/i },
+    { name: 'staffing_bracket_other_than_tba', pattern: /\[(?!TO BE ASSIGNED\])[A-Z][^\]]{2,40}\]/ },
+    { name: 'staffing_geoffrey_brien', pattern: /geoffrey\s+brien/i },
+    { name: 'staffing_wrong_legal_entity', pattern: /Hammerman\s*&\s*Gainer\s+Global|\bHGI\s+LLC\b(?!\s+d\/b\/a)/i }
+  ],
+  user_message_include: ['opp_meta','rfp_requirements','scope_of_work','hgi_staff_canon','rate_card'],
+  output_schema_extras: ['roles_with_assignments_tbd','escalation_paths'],
+  max_tokens: 12000,
+  thinking_budget: 4000
+};
+
+var _l6StaffingSpecialist = createL6Specialist(L6_STAFFING_CONFIG);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // generateTechnicalApproachSection — S126 push 6 — L6 SECTION SPECIALIST #1
 // PURPOSE: produce a SME-depth Technical Approach section in a dedicated pass
 // BEFORE the L7 Opus mega-call, so the highest-weight section (typically 20-45
