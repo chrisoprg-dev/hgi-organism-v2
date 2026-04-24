@@ -4738,6 +4738,68 @@ if (url.startsWith('/api/test-citation-verifier') && req.method === 'POST') {
   return;
 }
 
+
+// === S134: SECTION-TARGETED REFINEMENT — /api/refine-weak-sections ===
+// POST { id, threshold=60, dryRun=true, maxSectionsToRegen=3, forceExclusionOverride=false }
+// Identifies sections scoring below threshold in opp.proposal_review.scoring_matrix,
+// regenerates each weak section (Opus 4.6), re-scores with same scorer for apples-to-apples
+// delta. Dry-run (default) does NOT write to proposal_content. Set dryRun:false to splice
+// improved regenerations back in. Mirrors S133 hard-exclusion guardrail on NON-dry-run only.
+// Standalone — does NOT auto-wire into /api/produce-proposal in S134.
+if (url.startsWith('/api/refine-weak-sections') && req.method === 'POST') {
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+  try {
+    var rwsBody = '';
+    await new Promise(function(resolve) { req.on('data', function(c) { rwsBody += c; }); req.on('end', resolve); });
+    var rwsData = JSON.parse(rwsBody || '{}');
+    var rwsOppId = rwsData.id || rwsData.opportunity_id;
+    if (!rwsOppId) { res.end(JSON.stringify({ error: 'id required' })); return; }
+
+    var rwsDryRun = rwsData.dryRun !== false;  // default true
+    var rwsForceOverride = !!rwsData.forceExclusionOverride;
+
+    // Hard-exclusion guardrail — only fires on NON-dry-run invocations (dry-run is analysis only).
+    if (!rwsDryRun && !rwsForceOverride) {
+      var rwsOppCheck = await supabase.from('opportunities').select('id,agency,title').eq('id', rwsOppId).single();
+      if (rwsOppCheck.data) {
+        var rwsAgency = String(rwsOppCheck.data.agency || '').toLowerCase();
+        var rwsTitle = String(rwsOppCheck.data.title || '').toLowerCase();
+        var rwsMatched = null;
+        for (var rxi = 0; rxi < HGI_PP_EXCLUSIONS.length; rxi++) {
+          var rxTerm = String(HGI_PP_EXCLUSIONS[rxi]).toLowerCase();
+          if (rwsAgency.indexOf(rxTerm) >= 0 || rwsTitle.indexOf(rxTerm) >= 0) {
+            rwsMatched = HGI_PP_EXCLUSIONS[rxi];
+            break;
+          }
+        }
+        if (rwsMatched) {
+          log('REFINE WEAK SECTIONS: REFUSED — hard exclusion "' + rwsMatched + '" matched for ' + rwsOppId + ' on non-dry-run. Override with {forceExclusionOverride:true}.');
+          res.writeHead(409, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            error: 'hard_exclusion_client',
+            message: 'Opportunity agency matches hard-exclusion entry "' + rwsMatched + '". Cannot write to proposal_content without President authorization. Dry-run mode (dryRun:true) is always permitted.',
+            matched_exclusion: rwsMatched,
+            opportunity_id: rwsOppId,
+            override_with: { id: rwsOppId, dryRun: false, forceExclusionOverride: true }
+          }));
+          return;
+        }
+      }
+    }
+
+    var rwsResult = await refineWeakSections(rwsOppId, {
+      threshold: typeof rwsData.threshold === 'number' ? rwsData.threshold : 60,
+      dryRun: rwsDryRun,
+      maxSectionsToRegen: typeof rwsData.maxSectionsToRegen === 'number' ? rwsData.maxSectionsToRegen : 3
+    });
+
+    res.end(JSON.stringify(rwsResult));
+  } catch (e) {
+    res.end(JSON.stringify({ error: e.message, stack: (e.stack || '').slice(0, 500) }));
+  }
+  return;
+}
+
 // === PROPOSAL DOCUMENT GENERATOR — /api/proposal-doc ===
 if (url.startsWith('/api/proposal-doc')) {
   var docId = (req.url.split('?id=')[1]||'').split('&')[0];
@@ -9525,6 +9587,559 @@ async function runIterationToPlateau(opp, initialProposal, initialReview, initia
 
   log(log_prefix + ' complete. ' + (trajectory.length - 1) + ' iterations. PWIN ' + (initialPWIN||0) + ' -> ' + currentPWIN + '. Stop: ' + stopReason);
   return { iterations: trajectory.length - 1, initialPWIN: initialPWIN || 0, finalPWIN: currentPWIN, stopReason: stopReason, trajectory: trajectory };
+}
+
+
+
+// ============================================================
+// S134 — SECTION-TARGETED REFINEMENT LOOP
+//
+// Purpose: when the red team produces a scoring_matrix with per-section
+// evaluator scores, rewrite ONLY sections that scored below threshold
+// rather than rewriting the whole proposal (what L9 runIterationToPlateau
+// does). Preserves sections the red team rated well.
+//
+// Standalone endpoint: POST /api/refine-weak-sections
+//   Body: { id, threshold=60, dryRun=true, maxSectionsToRegen=3, forceExclusionOverride=false }
+//
+// Does NOT auto-wire into /api/produce-proposal in S134. Composition with
+// L9 (before/after/replace) is deferred until we have section-regen quality
+// data from OPSB + St. George. Test-before-integrate, mirroring S132
+// /api/test-citation-verifier.
+//
+// Cost per invocation (typical): ~$0.70-$1.50.
+// Wall time: ~60-180s.
+//
+// Built fresh in S134. Does NOT reference or reuse the 228-line
+// refineWeakSections function from reverted commit 0f33c1b (origin suspect).
+// ============================================================
+
+function extractReviewReport(proposalReviewText) {
+  // proposal_review is a text blob: optional "[CANON FAIL]" prefix + summary line
+  // + "\n\n" + JSON.stringify(rtReport) + optional "=== DETERMINISTIC CANON SWEEP ..." block.
+  // Extract the inner JSON object and return it, or null on failure.
+  if (!proposalReviewText || typeof proposalReviewText !== 'string') return null;
+  var s134s = proposalReviewText;
+  // Strip the canon sweep block if present (comes after the JSON, would confuse lastIndexOf('}'))
+  var sweepIdx = s134s.indexOf('=== DETERMINISTIC CANON SWEEP');
+  if (sweepIdx > 0) s134s = s134s.slice(0, sweepIdx);
+  var firstBrace = s134s.indexOf('{');
+  var lastBrace = s134s.lastIndexOf('}');
+  if (firstBrace < 0 || lastBrace <= firstBrace) return null;
+  try {
+    return JSON.parse(s134s.slice(firstBrace, lastBrace + 1));
+  } catch (e) {
+    return null;
+  }
+}
+
+function selectWeakSections(rtReport, threshold, maxSections) {
+  // Duck-type both scoring_matrix schemas:
+  //   Schema A (main produce-proposal red team): {section, max_points, estimated_score, pct, risk_level, note}
+  //   Schema B (runSingleRedTeamPass):           {section, evaluator_score, rationale}
+  // Normalize to {section_name, score, rationale}.
+  if (!rtReport || !Array.isArray(rtReport.scoring_matrix)) return { schema: 'none', weak: [], all_sections: [] };
+  var detectedSchema = 'unknown';
+  var normalized = rtReport.scoring_matrix.map(function(row) {
+    var name = row.section || row.section_name || '';
+    var score = null;
+    if (typeof row.evaluator_score === 'number') { score = row.evaluator_score; detectedSchema = 'B'; }
+    else if (typeof row.pct === 'number') { score = row.pct; detectedSchema = 'A'; }
+    else if (typeof row.estimated_score === 'number' && typeof row.max_points === 'number' && row.max_points > 0) {
+      score = Math.round((row.estimated_score / row.max_points) * 100);
+      detectedSchema = 'A';
+    } else if (typeof row.score === 'number') { score = row.score; }
+    return {
+      section_name: name,
+      score: score,
+      rationale: row.rationale || row.note || '',
+      max_points: row.max_points || null,
+      estimated_score: row.estimated_score || null,
+      risk_level: row.risk_level || null
+    };
+  }).filter(function(r) { return r.section_name && typeof r.score === 'number'; });
+
+  var weak = normalized
+    .filter(function(r) { return r.score < threshold; })
+    .sort(function(a, b) { return a.score - b.score; })
+    .slice(0, maxSections);
+
+  return { schema: detectedSchema, weak: weak, all_sections: normalized };
+}
+
+function findingsForSection(rtReport, sectionName) {
+  if (!rtReport || !Array.isArray(rtReport.findings)) return [];
+  var nameLower = String(sectionName).toLowerCase();
+  return rtReport.findings.filter(function(f) {
+    var where = String(f.section || f.location || '').toLowerCase();
+    if (!where) return false;
+    // Loose containment: either side may be a substring of the other (formatting drift tolerant)
+    return where.indexOf(nameLower) >= 0 || nameLower.indexOf(where) >= 0;
+  });
+}
+
+async function locateSection(proposalText, sectionName) {
+  // Returns { start, end, confidence, method, header_text } or null.
+  // Strategy: regex anchor first, Haiku fallback if zero or multiple matches.
+  if (!proposalText || !sectionName) return null;
+
+  // Escape regex specials in section name
+  var esc = String(sectionName).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  // Header-shape patterns, most specific first
+  var patterns = [
+    new RegExp('^#{1,4}\\s+\\d+(?:\\.\\d+)*\\s+' + esc + '\\s*$', 'im'),   // ## 2.1 Section Name
+    new RegExp('^#{1,4}\\s+' + esc + '\\s*$', 'im'),                         // ## Section Name
+    new RegExp('^\\d+(?:\\.\\d+)*\\s+' + esc + '\\s*$', 'im'),               // 2.1 Section Name (no #)
+    new RegExp('^' + esc + '\\s*$', 'im')                                    // bare line
+  ];
+
+  var matches = [];
+  for (var i = 0; i < patterns.length; i++) {
+    var m = patterns[i].exec(proposalText);
+    if (m) matches.push({ index: m.index, length: m[0].length, header: m[0] });
+  }
+
+  if (matches.length === 1) {
+    var match = matches[0];
+    var startChar = match.index;
+    var rest = proposalText.slice(startChar + match.length);
+    var nextHeader = rest.search(/\n#{1,4}\s+|\n\d+(?:\.\d+)+\s+[A-Z]/);
+    var endChar = nextHeader < 0 ? proposalText.length : startChar + match.length + nextHeader;
+    return {
+      start: startChar,
+      end: endChar,
+      confidence: 'high',
+      method: 'regex_exact',
+      header_text: match.header
+    };
+  }
+
+  // Zero or multiple regex matches — Haiku fallback
+  try {
+    var locatePrompt =
+      'Locate the section titled "' + sectionName + '" in the proposal text below. ' +
+      'Return ONLY a JSON object with fields: {start_marker, end_marker, confidence}. ' +
+      'start_marker = the exact first ~40 characters of the section (INCLUDING its header line, copied verbatim). ' +
+      'end_marker = the exact first ~40 characters of whatever comes AFTER this section ends (typically the next section header), or "END_OF_DOCUMENT" if this is the last section. ' +
+      'confidence = "high", "medium", or "low". ' +
+      'If the section does not exist in the text, return {start_marker: null, end_marker: null, confidence: "not_found"}. ' +
+      'No preamble. No markdown fences.\n\n' +
+      '=== PROPOSAL TEXT ===\n' + proposalText.slice(0, 60000);
+    var locateResp = await claudeCall(
+      'You are a precise section locator. Return only JSON.',
+      locatePrompt,
+      500,
+      { model: 'claude-haiku-4-5-20251001', agent: 's134_section_locator' }
+    );
+    var clean = (locateResp || '').replace(/```json/g, '').replace(/```/g, '').trim();
+    var fb = clean.indexOf('{'), lb = clean.lastIndexOf('}');
+    if (fb < 0 || lb <= fb) return null;
+    var loc = JSON.parse(clean.slice(fb, lb + 1));
+    if (!loc.start_marker || loc.confidence === 'not_found') return null;
+    var startIdx = proposalText.indexOf(loc.start_marker);
+    if (startIdx < 0) {
+      // Prefix match (first 20 chars) if full marker didn't land verbatim
+      var prefix = String(loc.start_marker).slice(0, 20);
+      startIdx = proposalText.indexOf(prefix);
+      if (startIdx < 0) return null;
+    }
+    var endIdx;
+    if (loc.end_marker === 'END_OF_DOCUMENT' || !loc.end_marker) {
+      endIdx = proposalText.length;
+    } else {
+      endIdx = proposalText.indexOf(loc.end_marker, startIdx + 1);
+      if (endIdx < 0) {
+        var endPrefix = String(loc.end_marker).slice(0, 20);
+        endIdx = proposalText.indexOf(endPrefix, startIdx + 1);
+      }
+      if (endIdx < 0) endIdx = proposalText.length;
+    }
+    if (endIdx <= startIdx) return null;
+    return {
+      start: startIdx,
+      end: endIdx,
+      confidence: loc.confidence || 'medium',
+      method: 'haiku_locate',
+      header_text: proposalText.slice(startIdx, Math.min(startIdx + 80, endIdx)).split('\n')[0]
+    };
+  } catch (e) {
+    log('S134 locateSection Haiku error: ' + (e.message || '').slice(0, 150));
+    return null;
+  }
+}
+
+async function scoreSingleSection(sectionText, sectionName, rfpSlice, findingsForThisSection) {
+  // Haiku-based same-scorer score used on BOTH pre- and post-regen sides so
+  // the delta is apples-to-apples. Returns { score, rationale, residual_findings_count, cost_usd }.
+  if (!sectionText || sectionText.length < 50) {
+    return { score: 0, rationale: 'section_too_short', residual_findings_count: 0, cost_usd: 0 };
+  }
+
+  var findingsBlock = (findingsForThisSection || []).slice(0, 8).map(function(f, i) {
+    return (i + 1) + '. [' + (f.severity || '?') + '] ' + (f.issue || f.detail || '') +
+      (f.fix ? ' -- Fix: ' + f.fix : '');
+  }).join('\n');
+
+  var system = 'You are a government proposal red team evaluator scoring ONE section against its RFP requirements. Return ONLY valid JSON. No preamble. No markdown fences.';
+  var prompt =
+    'SECTION NAME: ' + sectionName + '\n\n' +
+    '=== RFP CONTEXT (requirements this section must satisfy) ===\n' +
+    String(rfpSlice || '(no RFP context provided)').slice(0, 4000) + '\n\n' +
+    (findingsBlock ? '=== PRIOR FINDINGS AGAINST THIS SECTION (reference — do they still apply?) ===\n' + findingsBlock + '\n\n' : '') +
+    '=== SECTION TEXT ===\n' + sectionText.slice(0, 12000) + '\n\n' +
+    'Score this section 0-100 against the RFP requirements. Be strict: government evaluators award full points only for specific, evidence-backed, compliant content. Generic or incomplete answers lose points. Return:\n' +
+    '{"score": 0-100, "rationale": "two-sentence rationale", "residual_findings_count": number of prior findings still unresolved}';
+
+  try {
+    var resp = await claudeCall(
+      system,
+      prompt,
+      600,
+      { model: 'claude-haiku-4-5-20251001', agent: 's134_section_scorer' }
+    );
+    var clean = (resp || '').replace(/```json/g, '').replace(/```/g, '').trim();
+    var fb = clean.indexOf('{'), lb = clean.lastIndexOf('}');
+    if (fb < 0 || lb <= fb) return { score: 0, rationale: 'parse_failed', residual_findings_count: 0, cost_usd: 0.001 };
+    var parsed = JSON.parse(clean.slice(fb, lb + 1));
+    return {
+      score: Math.max(0, Math.min(100, Number(parsed.score) || 0)),
+      rationale: String(parsed.rationale || '').slice(0, 500),
+      residual_findings_count: Number(parsed.residual_findings_count) || 0,
+      cost_usd: 0.001
+    };
+  } catch (e) {
+    return { score: 0, rationale: 'error: ' + (e.message || '').slice(0, 120), residual_findings_count: 0, cost_usd: 0 };
+  }
+}
+
+async function regenerateSection(opp, sectionName, currentSectionText, preContext, postContext, rfpSlice, findings, scoreRationale) {
+  // Opus 4.6 streaming, 10K max_tokens, 3K thinking budget.
+  // Returns { regenerated_text, cost_usd, wall_seconds, usage } or null on failure.
+  var runStart = Date.now();
+  var vertical = (opp.vertical || 'professional services').trim();
+  var agency = (opp.agency || '').trim();
+
+  // Top-3 HGI_PP via existing selector (already respects exclusions + vertical fit)
+  var ppTopText = '(no HGI_PP selected)';
+  try {
+    var ppResult = selectHGIPP(opp, {
+      vertical: opp.vertical,
+      agency: opp.agency,
+      state: opp.state,
+      estimated_value: opp.estimated_value,
+      rfpText: opp.rfp_text
+    });
+    var topPPs = (ppResult && ppResult.selected) || [];
+    if (topPPs.length > 0) {
+      ppTopText = topPPs.slice(0, 3).map(function(p, i) {
+        var v = p.value || {};
+        var hgiD = v.hgi_direct ? '$' + (v.hgi_direct / 1e6).toFixed(1) + 'M HGI direct' : '';
+        var progT = v.program_total ?
+          ' / $' + (v.program_total / 1e9 >= 1 ?
+            (v.program_total / 1e9).toFixed(1) + 'B' :
+            (v.program_total / 1e6).toFixed(0) + 'M') + ' program total' : '';
+        return (i + 1) + '. ' + (p.client || '?') + ' — ' + (p.contract_name || '?') + ': ' +
+          hgiD + progT + '. Period: ' + ((p.period && p.period.start) || '?') + '-' +
+          ((p.period && p.period.end) || 'ongoing') + '. Scope: ' + String(p.scope || '').slice(0, 240);
+      }).join('\n');
+    }
+  } catch (ppe) { /* non-fatal */ }
+
+  var findingsBlock = (findings || []).slice(0, 10).map(function(f, i) {
+    return (i + 1) + '. [' + (f.severity || '?') + '] ' + (f.issue || '') +
+      (f.detail ? ' — ' + f.detail : '') +
+      (f.fix ? '\n   Fix: ' + f.fix : '') +
+      (f.replacement_text ? '\n   Suggested replacement: ' + String(f.replacement_text).slice(0, 300) : '');
+  }).join('\n\n');
+
+  var system =
+    'You are a senior HGI Global proposal writer rewriting ONE SECTION of a proposal that scored below threshold in red team review. Your output REPLACES the current section text in place. Do not regenerate anything outside this section.\n\n' +
+    'YOU WRITE ONE SECTION ONLY. Not a full proposal. Not adjacent sections. The section name is: "' + sectionName + '".\n\n' +
+    'HARD RULES (NON-NEGOTIABLE):\n' +
+    '- Founded 1929. 97-year. Never 1931, 1930, 95-year, 96-year.\n' +
+    '- Legal entity: "Hammerman & Gainer LLC d/b/a HGI Global" or "HGI Global". Never "Hammerman & Gainer Global", "HGI LLC", "HGI Global LLC".\n' +
+    '- Geoffrey Brien is no longer with HGI. Never mention.\n' +
+    '- HARD EXCLUSIONS — never list as HGI past performance: PBGC, Orleans Parish School Board, OPSB, LIGA, TPCIGA. (Reference only as client name where the opportunity IS that client.)\n' +
+    '- Terrebonne Parish School District (TPSD). Never Tangipahoa.\n' +
+    '- Never name competitors in proposal text. No comparative language ("unlike", "competitors lack", "while others", "we are the only", "compared to", "whereas others").\n' +
+    '- UEI: DL4SJEVKZ6H4. CAGE: 47C60. HQ: 2400 Veterans Memorial Blvd, Suite 510, Kenner, LA 70062. Phone: (504) 681-6135.\n' +
+    '- Past performance figures: Road Home $67M HGI direct / $13B+ program total. Restore Louisiana $42.3M HGI direct. HAP program $950M. TPSD $2.96M. Never drift from these figures.\n' +
+    '- The only permitted bracket in output is [TO BE ASSIGNED] for Key Personnel. No [ACTION REQUIRED], [TBD], [Insert ...], [Verify ...], [Confirm ...], [Note ...], [Placeholder ...], [Pending ...].\n' +
+    '- Christopher J. Oney is the signatory for the cover letter only. Do not assign any other staff to any other position; use [TO BE ASSIGNED] where a role needs naming.\n' +
+    '- No prohibited voice phrases: "we believe", "we feel", "leverage synergies", "best-in-class", "cutting-edge", "world-class", "innovative solutions", "paradigm shift", "next-generation", "turn-key solution", "robust framework".\n\n' +
+    'OUTPUT FORMAT: Return the regenerated section text directly — no JSON wrapper, no preamble, no explanation, no markdown fences. Start with the section header (preserving the same header depth and numbering as the original) and end with the last sentence of the section. The output will be spliced directly into the proposal at the section boundary.';
+
+  var user =
+    'OPPORTUNITY: ' + (opp.title || '').slice(0, 200) + '\n' +
+    'AGENCY: ' + agency + '\n' +
+    'VERTICAL: ' + vertical + '\n' +
+    'SECTION TO REGENERATE: ' + sectionName + '\n\n' +
+    '=== WHY THIS SECTION SCORED LOW (red team rationale) ===\n' +
+    (scoreRationale || '(no rationale recorded)') + '\n\n' +
+    (findingsBlock ? '=== SPECIFIC FINDINGS AGAINST THIS SECTION (address every one) ===\n' + findingsBlock + '\n\n' : '') +
+    '=== CURRENT SECTION TEXT (rewrite this) ===\n' + String(currentSectionText).slice(0, 15000) + '\n\n' +
+    (preContext ? '=== PRECEDING CONTEXT (for narrative continuity — do NOT rewrite) ===\n' + preContext.slice(-2000) + '\n\n' : '') +
+    (postContext ? '=== FOLLOWING CONTEXT (for narrative continuity — do NOT rewrite) ===\n' + postContext.slice(0, 2000) + '\n\n' : '') +
+    (rfpSlice ? '=== RFP REQUIREMENTS THIS SECTION MUST SATISFY ===\n' + String(rfpSlice).slice(0, 6000) + '\n\n' : '') +
+    '=== HGI CANONICAL PAST PERFORMANCE (top 3 for this opp — cite exactly these figures if referencing PP) ===\n' + ppTopText + '\n\n' +
+    'Rewrite the section now. Address every finding. Preserve narrative continuity with the preceding and following context. Output ONLY the regenerated section text (header through final sentence).';
+
+  var resp;
+  try {
+    var stream = await anthropic.messages.stream({
+      model: 'claude-opus-4-6',
+      max_tokens: 10000,
+      thinking: { type: 'enabled', budget_tokens: 3000 },
+      system: system,
+      messages: [{ role: 'user', content: user }]
+    });
+    resp = await stream.finalMessage();
+    trackCost('s134_section_regen', 'claude-opus-4-6', resp.usage);
+  } catch (e) {
+    log('S134 regenerateSection Opus error: ' + (e.message || '').slice(0, 200));
+    return null;
+  }
+
+  var regenText = (resp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
+  if (!regenText || regenText.length < 300) {
+    log('S134 regenerateSection: output too short (' + (regenText || '').length + ' chars)');
+    return null;
+  }
+
+  var pp = PRICING['claude-opus-4-6'];
+  var cost = ((resp.usage && resp.usage.input_tokens) || 0) * pp.in_per_tok +
+             ((resp.usage && resp.usage.output_tokens) || 0) * pp.out_per_tok;
+  var wall = Math.floor((Date.now() - runStart) / 1000);
+
+  return {
+    regenerated_text: regenText,
+    cost_usd: Number(cost.toFixed(4)),
+    wall_seconds: wall,
+    usage: resp.usage || {}
+  };
+}
+
+function checkCanonViolations(sectionText) {
+  // Fast regex sweep for the most dangerous canon violations in regenerated text.
+  // Not a replacement for the full S125 canon sweep (which runs on the full proposal).
+  // This is a pre-flight check on a single regenerated section before splice.
+  var v = [];
+  if (/\b19(?:30|31|32)\b/.test(sectionText)) v.push('wrong_founding_year');
+  if (/\b9[3456]\s*[-\s]?\s*year/i.test(sectionText)) v.push('wrong_firm_age');
+  if (/geoffrey\s+brien/i.test(sectionText)) v.push('geoffrey_brien');
+  if (/\btangipahoa\b/i.test(sectionText)) v.push('tangipahoa');
+  if (/Hammerman\s*&\s*Gainer\s+Global/i.test(sectionText)) v.push('wrong_legal_entity');
+  return v;
+}
+
+async function refineWeakSections(oppId, options) {
+  options = options || {};
+  var threshold = typeof options.threshold === 'number' ? options.threshold : 60;
+  var dryRun = options.dryRun !== false;  // default TRUE
+  var maxSectionsToRegen = typeof options.maxSectionsToRegen === 'number' ? options.maxSectionsToRegen : 3;
+  var log_prefix = 'S134[' + String(oppId).slice(0, 30) + ']';
+  var runStart = Date.now();
+  var totalCost = 0;
+
+  log(log_prefix + ' START: threshold=' + threshold + ', dryRun=' + dryRun + ', maxRegen=' + maxSectionsToRegen);
+
+  // 1. Load opportunity
+  var oppRes = await supabase.from('opportunities')
+    .select('id,title,agency,vertical,state,estimated_value,rfp_text,scope_analysis,description,proposal_content,proposal_review,compliance_blueprint')
+    .eq('id', oppId)
+    .single();
+  var opp = oppRes.data;
+  if (!opp) return { error: 'opportunity_not_found', opp_id: oppId };
+  if (!opp.proposal_content || opp.proposal_content.length < 500) {
+    return { error: 'no_proposal_content', opp_id: oppId, proposal_length: (opp.proposal_content || '').length };
+  }
+  if (!opp.proposal_review) {
+    return { error: 'no_proposal_review', opp_id: oppId, note: 'Run /api/produce-proposal first to populate proposal_review with scoring_matrix' };
+  }
+
+  // 2. Parse proposal_review for scoring_matrix
+  var rtReport = extractReviewReport(opp.proposal_review);
+  if (!rtReport) {
+    return { error: 'proposal_review_parse_failed', opp_id: oppId, preview: opp.proposal_review.slice(0, 400) };
+  }
+
+  // 3. Identify weak sections (schema-tolerant)
+  var selection = selectWeakSections(rtReport, threshold, maxSectionsToRegen);
+  if (selection.weak.length === 0) {
+    return {
+      success: true,
+      opp_id: oppId,
+      threshold: threshold,
+      baseline_schema: selection.schema,
+      weak_sections_identified: [],
+      all_sections: selection.all_sections,
+      regenerations: [],
+      proposal_content_written: false,
+      cost_usd: 0,
+      wall_time_seconds: Math.floor((Date.now() - runStart) / 1000),
+      message: 'No sections scored below threshold'
+    };
+  }
+
+  log(log_prefix + ' identified ' + selection.weak.length + ' weak section(s) below threshold ' + threshold + ': ' +
+    selection.weak.map(function(w) { return w.section_name + '=' + w.score; }).join(', '));
+
+  // 4. Per weak section: locate, score baseline (same scorer), regenerate, score post-regen
+  var proposalText = opp.proposal_content;
+  var rfpSlice = (opp.rfp_text || opp.scope_analysis || opp.description || '');
+  var regenerations = [];
+  var weakSectionsOutput = [];
+  var splices = [];
+
+  for (var wi = 0; wi < selection.weak.length; wi++) {
+    var weak = selection.weak[wi];
+    var outputEntry = {
+      section_name: weak.section_name,
+      baseline_score_red_team: weak.score,
+      rationale_red_team: weak.rationale,
+      findings_count: 0,
+      located_at: null,
+      locate_method: null
+    };
+
+    // 4a. Locate in proposal text
+    var loc = await locateSection(proposalText, weak.section_name);
+    if (!loc) {
+      outputEntry.error = 'section_not_located';
+      weakSectionsOutput.push(outputEntry);
+      log(log_prefix + ' weak section "' + weak.section_name + '" could not be located');
+      continue;
+    }
+    outputEntry.located_at = [loc.start, loc.end];
+    outputEntry.locate_method = loc.method;
+    outputEntry.header_text = loc.header_text;
+
+    var currentSection = proposalText.slice(loc.start, loc.end);
+    var preContext = proposalText.slice(Math.max(0, loc.start - 2500), loc.start);
+    var postContext = proposalText.slice(loc.end, Math.min(proposalText.length, loc.end + 2500));
+
+    // 4b. Filter red-team findings to this section
+    var sectionFindings = findingsForSection(rtReport, weak.section_name);
+    outputEntry.findings_count = sectionFindings.length;
+
+    // 4c. Baseline score with same scorer (apples-to-apples with the post-regen score)
+    var baselineScore = await scoreSingleSection(currentSection, weak.section_name, rfpSlice, sectionFindings);
+    totalCost += baselineScore.cost_usd || 0;
+    outputEntry.baseline_score_same_scorer = baselineScore.score;
+    outputEntry.baseline_score_rationale = baselineScore.rationale;
+
+    // 4d. Regenerate
+    var regen = await regenerateSection(
+      opp, weak.section_name, currentSection, preContext, postContext, rfpSlice, sectionFindings, weak.rationale
+    );
+    if (!regen) {
+      outputEntry.error = 'regeneration_failed';
+      weakSectionsOutput.push(outputEntry);
+      continue;
+    }
+    totalCost += regen.cost_usd;
+
+    // 4e. Canon violation pre-flight check on regenerated text
+    var canonViolations = checkCanonViolations(regen.regenerated_text);
+
+    // 4f. Score regen with same scorer
+    var postScore = await scoreSingleSection(regen.regenerated_text, weak.section_name, rfpSlice, sectionFindings);
+    totalCost += postScore.cost_usd || 0;
+
+    var delta = postScore.score - baselineScore.score;
+    var status = canonViolations.length > 0 ? 'canon_violation_flagged' :
+      (delta > 0 ? 'improved' : (delta === 0 ? 'no_change' : 'regressed'));
+
+    regenerations.push({
+      section_name: weak.section_name,
+      baseline_score_red_team: weak.score,
+      baseline_score_same_scorer: baselineScore.score,
+      post_regen_score: postScore.score,
+      delta: delta,
+      baseline_chars: currentSection.length,
+      regenerated_chars: regen.regenerated_text.length,
+      canon_violations: canonViolations,
+      status: status,
+      baseline_rationale: baselineScore.rationale,
+      post_regen_rationale: postScore.rationale,
+      residual_findings_count: postScore.residual_findings_count,
+      regen_cost_usd: regen.cost_usd,
+      regen_wall_seconds: regen.wall_seconds,
+      regenerated_text_preview: regen.regenerated_text.slice(0, 600)
+    });
+
+    // Only queue for splice on: improved AND no canon violations AND not dry-run
+    if (!dryRun && status === 'improved' && canonViolations.length === 0) {
+      splices.push({ start: loc.start, end: loc.end, text: regen.regenerated_text });
+    }
+
+    log(log_prefix + ' section "' + weak.section_name + '": baseline=' + baselineScore.score +
+      ' -> post=' + postScore.score + ' (delta=' + delta + '), status=' + status +
+      ', canon_viol=' + canonViolations.length);
+    weakSectionsOutput.push(outputEntry);
+  }
+
+  // 5. Apply splices (right-to-left to preserve offsets)
+  var proposalWritten = false;
+  var updatedProposalText = proposalText;
+  if (!dryRun && splices.length > 0) {
+    splices.sort(function(a, b) { return b.start - a.start; });
+    for (var si = 0; si < splices.length; si++) {
+      var sp = splices[si];
+      updatedProposalText = updatedProposalText.slice(0, sp.start) + sp.text + updatedProposalText.slice(sp.end);
+    }
+    try {
+      await supabase.from('opportunities').update({
+        proposal_content: updatedProposalText,
+        last_updated: new Date().toISOString()
+      }).eq('id', oppId);
+      proposalWritten = true;
+      log(log_prefix + ' PROPOSAL UPDATED: ' + splices.length + ' section(s) spliced in');
+    } catch (upErr) {
+      log(log_prefix + ' proposal_content update error: ' + (upErr.message || '').slice(0, 200));
+    }
+  }
+
+  // 6. Log to organism_memory
+  try {
+    await supabase.from('organism_memory').insert({
+      id: 'mem_s134_' + oppId + '_' + Date.now(),
+      agent: 's134_section_refiner',
+      opportunity_id: oppId,
+      observation: 'S134 RUN: threshold=' + threshold + ', dryRun=' + dryRun +
+        ', weak_sections_identified=' + selection.weak.length +
+        ', regenerations=' + regenerations.length +
+        ', improved=' + regenerations.filter(function(r) { return r.status === 'improved'; }).length +
+        ', proposal_written=' + proposalWritten +
+        ', cost=$' + totalCost.toFixed(3),
+      memory_type: 'refinement_iteration',
+      created_at: new Date().toISOString()
+    });
+  } catch (me) { /* non-fatal */ }
+
+  var wallTime = Math.floor((Date.now() - runStart) / 1000);
+  log(log_prefix + ' DONE: ' + regenerations.length + ' regen(s), cost=$' + totalCost.toFixed(3) +
+    ', wall=' + wallTime + 's, proposal_written=' + proposalWritten);
+
+  return {
+    success: true,
+    opp_id: oppId,
+    opp_title: (opp.title || '').slice(0, 120),
+    threshold: threshold,
+    dry_run: dryRun,
+    baseline_schema: selection.schema,
+    all_sections: selection.all_sections,
+    weak_sections_identified: weakSectionsOutput,
+    regenerations: regenerations,
+    proposal_content_written: proposalWritten,
+    splices_applied: splices.length,
+    cost_usd: Number(totalCost.toFixed(4)),
+    wall_time_seconds: wallTime,
+    models: { locate: 'claude-haiku-4-5-20251001', regen: 'claude-opus-4-6', score: 'claude-haiku-4-5-20251001' },
+    version: 's134_v1',
+    generated_at: new Date().toISOString()
+  };
 }
 
 
