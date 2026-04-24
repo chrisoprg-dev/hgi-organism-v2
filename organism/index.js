@@ -812,6 +812,54 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
     log('PROPOSAL ENGINE: fact-check guardrail query failed for ' + ppId + ' (' + (fcErr.message||fcErr) + '). Proceeding without block.');
   }
 
+  // === S133: HARD EXCLUSION GUARDRAIL ===
+  // Refuse produce-proposal on opportunities whose agency matches HGI_PP_EXCLUSIONS
+  // (PBGC, Orleans Parish School Board, OPSB, LIGA, TPCIGA). These clients may not be
+  // listed as HGI past performance and HGI does not bid to them without explicit
+  // President confirmation. Without this check, produce-proposal burns the full pipeline
+  // (~$5-10, ~25 min) only to have the red team surface the exclusion at review time.
+  // Observed on OPSB run lapac-654321-26-0108 — S132 close final state.
+  // Override: POST body {forceExclusionOverride:true} — reserved for President authorization.
+  var ppForceExclusion = false;
+  try { ppForceExclusion = !!JSON.parse(body || '{}').forceExclusionOverride; } catch(e) {}
+  try {
+    var exclCheckR = await supabase.from('opportunities')
+      .select('id,agency,title')
+      .eq('id', ppId)
+      .single();
+    var exclOpp = exclCheckR.data;
+    if (exclOpp) {
+      var exclAgency = String(exclOpp.agency || '').toLowerCase();
+      var exclTitle = String(exclOpp.title || '').toLowerCase();
+      var exclMatched = null;
+      for (var xi = 0; xi < HGI_PP_EXCLUSIONS.length; xi++) {
+        var exclTerm = String(HGI_PP_EXCLUSIONS[xi]).toLowerCase();
+        if (exclAgency.indexOf(exclTerm) >= 0 || exclTitle.indexOf(exclTerm) >= 0) {
+          exclMatched = HGI_PP_EXCLUSIONS[xi];
+          break;
+        }
+      }
+      if (exclMatched && !ppForceExclusion) {
+        log('PROPOSAL ENGINE: REFUSED - hard exclusion client "' + exclMatched + '" matched on agency "' + exclOpp.agency + '" for ' + ppId + '. Override with {forceExclusionOverride:true}.');
+        res.writeHead(409, {'Content-Type':'application/json'});
+        res.end(JSON.stringify({
+          error: 'hard_exclusion_client',
+          message: 'Opportunity agency "' + exclOpp.agency + '" matches hard-exclusion entry "' + exclMatched + '". HGI may not list past performance with this client and does not bid without explicit President confirmation.',
+          matched_exclusion: exclMatched,
+          agency: exclOpp.agency,
+          opportunity_id: ppId,
+          override_with: { id: ppId, forceExclusionOverride: true }
+        }));
+        return;
+      }
+      if (exclMatched && ppForceExclusion) {
+        log('PROPOSAL ENGINE: WARN - hard exclusion "' + exclMatched + '" matched but {forceExclusionOverride:true} provided. Proceeding under explicit override for ' + ppId + '.');
+      }
+    }
+  } catch(exclErr) {
+    log('PROPOSAL ENGINE: exclusion guardrail query failed for ' + ppId + ' (' + (exclErr.message||exclErr) + '). Proceeding without block.');
+  }
+
   log('PROPOSAL ENGINE: Starting for ' + ppId);
   res.writeHead(200, {'Content-Type':'application/json'});
   res.end(JSON.stringify({started:true, id:ppId}));
