@@ -771,6 +771,52 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
   // CONTAMINATED + !force => 409; FLAGGED => warn + proceed; CLEAN => proceed; NONE => warn + proceed.
   var ppForce = false;
   try { ppForce = !!JSON.parse(body || '{}').force; } catch(e) {}
+  // Also honor ?force=true in URL
+  if (!ppForce && req.url.indexOf('force=true') >= 0) ppForce = true;
+
+  // === S142: COST CIRCUIT BREAKER ===
+  // Refuse fire if produce-proposal ran on this opp in last 24h.
+  // POST {force:true} or append ?force=true to URL to override.
+  if (!ppForce) {
+    try {
+      var pp24hCutoff = new Date(Date.now() - 24*60*60*1000).toISOString();
+      var ppRecent = await supabase.from('organism_memory')
+        .select('id,created_at,agent')
+        .eq('opportunity_id', ppId)
+        .in('agent', ['pp_selector','proposal_auto_regen','proposal_bundle'])
+        .gte('created_at', pp24hCutoff)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (ppRecent.data && ppRecent.data.length > 0) {
+        var ppLast = ppRecent.data[0];
+        log('COST CIRCUIT BREAKER (produce-proposal): refused fire on ' + ppId + ' — last fire ' + ppLast.agent + ' @ ' + ppLast.created_at + ' (within 24h). Override: {force:true}.');
+        try {
+          await supabase.from('organism_memory').insert({
+            id: 'cost_breaker-' + Date.now() + '-' + Math.random().toString(36).slice(2,6),
+            agent: 'cost_circuit_breaker',
+            opportunity_id: ppId,
+            entity_tags: 'cost_control,refuse,produce_proposal',
+            observation: 'COST CIRCUIT BREAKER (produce-proposal): refused. Last fire: ' + ppLast.agent + ' @ ' + ppLast.created_at + '. Override: POST {force:true} or ?force=true.',
+            memory_type: 'cost_control',
+            source_url: null, confidence: 'high', status: 'scratch',
+            created_at: new Date().toISOString()
+          });
+        } catch(_ppBrkLog){}
+        res.writeHead(429, {'Content-Type':'application/json'});
+        res.end(JSON.stringify({
+          error: 'cost_circuit_breaker',
+          message: 'Recent fire within 24h. POST {force:true} or ?force=true to override.',
+          last_fire: { agent: ppLast.agent, created_at: ppLast.created_at }
+        }));
+        return;
+      }
+    } catch(ppBreakerErr) {
+      log('COST CIRCUIT BREAKER (produce-proposal): query failed (' + (ppBreakerErr.message||ppBreakerErr) + '). Proceeding without block.');
+    }
+  } else {
+    log('COST CIRCUIT BREAKER (produce-proposal): bypassed via force flag on ' + ppId);
+  }
+
   try {
     var fcCheckR = await supabase.from('organism_memory')
       .select('id,observation,created_at')
@@ -6715,6 +6761,50 @@ if (url.startsWith('/api/proposal-bundle')) {
   var pbId = (req.url.split('?id=')[1]||'').split('&')[0];
   if (!pbId) { res.writeHead(400); res.end(JSON.stringify({error:'id required'})); return; }
 
+  // === S142: COST CIRCUIT BREAKER ===
+  // Refuse fire if produce-proposal or proposal-bundle ran on this opp in last 24h.
+  // Append ?force=true to URL to override.
+  var pbForce = (req.url.indexOf('force=true') >= 0);
+  if (!pbForce) {
+    try {
+      var pb24hCutoff = new Date(Date.now() - 24*60*60*1000).toISOString();
+      var pbRecent = await supabase.from('organism_memory')
+        .select('id,created_at,agent')
+        .eq('opportunity_id', pbId)
+        .in('agent', ['pp_selector','proposal_bundle','proposal_auto_regen'])
+        .gte('created_at', pb24hCutoff)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (pbRecent.data && pbRecent.data.length > 0) {
+        var pbLast = pbRecent.data[0];
+        log('COST CIRCUIT BREAKER (proposal-bundle): refused fire on ' + pbId + ' — last fire ' + pbLast.agent + ' @ ' + pbLast.created_at + ' (within 24h). Override: append ?force=true to URL.');
+        try {
+          await supabase.from('organism_memory').insert({
+            id: 'cost_breaker-' + Date.now() + '-' + Math.random().toString(36).slice(2,6),
+            agent: 'cost_circuit_breaker',
+            opportunity_id: pbId,
+            entity_tags: 'cost_control,refuse,proposal_bundle',
+            observation: 'COST CIRCUIT BREAKER (proposal-bundle): refused. Last fire: ' + pbLast.agent + ' @ ' + pbLast.created_at + '. Override: append ?force=true to URL.',
+            memory_type: 'cost_control',
+            source_url: null, confidence: 'high', status: 'scratch',
+            created_at: new Date().toISOString()
+          });
+        } catch(_pbBrkLog){}
+        res.writeHead(429, {'Content-Type':'application/json'});
+        res.end(JSON.stringify({
+          error: 'cost_circuit_breaker',
+          message: 'Recent fire within 24h. Append ?force=true to URL to override.',
+          last_fire: { agent: pbLast.agent, created_at: pbLast.created_at }
+        }));
+        return;
+      }
+    } catch(pbBreakerErr) {
+      log('COST CIRCUIT BREAKER (proposal-bundle): query failed (' + (pbBreakerErr.message||pbBreakerErr) + '). Proceeding without block.');
+    }
+  } else {
+    log('COST CIRCUIT BREAKER (proposal-bundle): bypassed via ?force=true on ' + pbId);
+  }
+
   log('PROPOSAL BUNDLE: Starting full pipeline for ' + pbId);
   res.writeHead(200, {'Content-Type':'application/json'});
   res.end(JSON.stringify({started:true, id:pbId, steps:['compliance-matrix','rate-table','org-chart','produce-proposal','proposal-doc']}));
@@ -6759,10 +6849,10 @@ if (url.startsWith('/api/proposal-bundle')) {
       // Step 4: Produce Proposal (Opus — most expensive step)
       log('PROPOSAL BUNDLE: Step 4/5 — Produce Proposal (Opus)');
       try {
-        var ppResp = await fetch('http://localhost:' + (process.env.PORT || 8080) + '/api/produce-proposal?id=' + pbId, {
+        var ppResp = await fetch('http://localhost:' + (process.env.PORT || 8080) + '/api/produce-proposal?id=' + pbId + '&force=true', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: pbId })
+          body: JSON.stringify({ id: pbId, force: true })
         });
         results.produce_proposal = ppResp.ok ? 'OK (async)' : 'FAILED (' + ppResp.status + ')';
         // Wait for Opus to finish — check every 15 seconds for up to 5 minutes
