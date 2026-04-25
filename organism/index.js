@@ -1626,12 +1626,100 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         log('PROPOSAL ENGINE: L6 Technical Approach error (non-fatal, falling back): ' + (l6Err.message||'').slice(0,200));
       }
 
+      // ═══ S139: L6 SPECIALIST WIRE-UP — runs the 6 remaining L6 specialists ═══
+      // Each specialist runs through _l6SpecialistRegistry, persists its result to
+      // opportunities.section_<key> (jsonb columns added in S139 schema migration),
+      // and returns a prompt-text snippet that gets concatenated into the mega-prompt
+      // alongside techApproachPromptText. All errors are non-fatal — on failure we
+      // fall back to the mega-prompt generating that section from scratch (the same
+      // behavior that existed before any L6 specialist was wired in).
+      var pastPerformancePromptText = '';
+      var staffingPromptText = '';
+      var executiveSummaryPromptText = '';
+      var coverLetterPromptText = '';
+      var pricingNarrativePromptText = '';
+      var qaCompliancePromptText = '';
+      try {
+        var _l6BaseBag = {
+          methodologyCorpus: methodologyCorpusText || '',
+          discriminators: discriminatorsText || '',
+          competitorBriefs: competitorBriefsText || '',
+          thesis: strategicThesis,
+          hgiPpEntries: (function(){ try { return JSON.stringify(HGI_PP).slice(0, 12000); } catch(_e){ return ''; } })(),
+          hgiStaffCanon: (typeof HGI === 'string') ? HGI.slice(0, 6000) : '',
+          rateCard: ''
+        };
+
+        // Helper: run one specialist by registry key, persist to opportunities.section_<colSuffix>,
+        // return a prompt-text snippet (or '' on failure).
+        async function _runL6(key, label, colName) {
+          try {
+            if (!_l6SpecialistRegistry || typeof _l6SpecialistRegistry[key] !== 'function') {
+              log('PROPOSAL ENGINE: L6 ' + label + ' not in registry — skipping');
+              return '';
+            }
+            var spec = _l6SpecialistRegistry[key]();
+            if (!spec) { log('PROPOSAL ENGINE: L6 ' + label + ' specialist resolver returned null — skipping'); return ''; }
+            var sectionResult = await spec(opp, complianceBlueprint, _l6BaseBag, {});
+            if (!sectionResult || !sectionResult.section_text) {
+              log('PROPOSAL ENGINE: L6 ' + label + ' returned null/short — falling back to mega-prompt generation');
+              return '';
+            }
+            // Persist to dedicated jsonb column. Column names are hard-coded so a typo
+            // here surfaces immediately as a Postgres error rather than silently writing
+            // to nothing. last_updated kept in sync with prior persistence patterns.
+            var updPayload = { last_updated: new Date().toISOString() };
+            updPayload[colName] = sectionResult;
+            try {
+              await supabase.from('opportunities').update(updPayload).eq('id', ppId);
+            } catch (perErr) {
+              log('PROPOSAL ENGINE: L6 ' + label + ' persistence failed (non-fatal): ' + (perErr.message||'').slice(0,200));
+            }
+            var floors = sectionResult.floors_met_count || 0;
+            var floorsTotal = (sectionResult.floors_required && Object.keys(sectionResult.floors_required).length) || 0;
+            var status = sectionResult.status || 'unknown';
+            var canonHits = (sectionResult.canon_violations && sectionResult.canon_violations.length) || 0;
+            log('PROPOSAL ENGINE: L6 ' + label + ' persisted (' + (sectionResult.word_count||0) + ' words, ' + floors + '/' + floorsTotal + ' floors, ' + canonHits + ' canon hits, status=' + status + ')');
+            return (
+              '## PRE-GENERATED ' + label.toUpperCase() + ' SECTION (L6 specialist output — USE AS CANONICAL TEXT)\n' +
+              'This ' + label + ' section was produced by a dedicated L6 specialist with full access to the methodology corpus, discriminators, competitor intelligence, HGI past performance canon, HGI staff canon, and (where applicable) the rate card. It has been validated against the section-specific quality floors (status=' + status + ', floors=' + floors + '/' + floorsTotal + ', canon_violations=' + canonHits + ').\n\n' +
+              'INSTRUCTION: Use this section text VERBATIM (with light formatting integration only) as the ' + label + ' section of the proposal. Do NOT regenerate, expand, or paraphrase. Do NOT add subsections that would dilute the specialist structure. If page-limit constraints force shortening, trim evenly rather than removing entire subsections. Place the section under whatever Tab/Section number the RFP designates for ' + label + '.\n\n' +
+              '=== BEGIN PRE-GENERATED ' + label.toUpperCase() + ' ===\n' +
+              sectionResult.section_text +
+              '\n=== END PRE-GENERATED ' + label.toUpperCase() + ' ===\n\n'
+            );
+          } catch (specErr) {
+            log('PROPOSAL ENGINE: L6 ' + label + ' error (non-fatal, falling back): ' + (specErr.message||'').slice(0,200));
+            return '';
+          }
+        }
+
+        // Run sequentially. Order matches typical proposal organization (cover letter
+        // and exec summary appear first in the document but are produced after the
+        // body specialists so they can reference what the body actually contains).
+        pastPerformancePromptText  = await _runL6('past_performance',  'past performance',     'section_past_performance');
+        staffingPromptText         = await _runL6('staffing',          'staffing',             'section_staffing');
+        executiveSummaryPromptText = await _runL6('executive_summary', 'executive summary',    'section_executive_summary');
+        coverLetterPromptText      = await _runL6('cover_letter',      'cover letter',         'section_cover_letter');
+        pricingNarrativePromptText = await _runL6('pricing_narrative', 'pricing narrative',    'section_pricing_narrative');
+        qaCompliancePromptText     = await _runL6('qa_compliance',     'QA and compliance',    'section_qa_compliance');
+      } catch (wireErr) {
+        log('PROPOSAL ENGINE: L6 wire-up block error (non-fatal): ' + (wireErr.message||'').slice(0,200));
+      }
+
       // ═══ BUILD THE MEGA-PROMPT WITH ALL INTELLIGENCE ═══
       var D = String.fromCharCode(36);
       var proposalPrompt = 'You are the HGI Global proposal production engine. Your job is to produce a COMPLETE, SUBMISSION-READY response document.\n\n' +
         'THE ENTIRE INTELLIGENCE OF THE HGI ORGANISM IS BELOW. Use ALL of it. Every competitive insight informs your ghost language. Every past outcome teaches what works. Every relationship tells you who the evaluators are. Every regulatory change shapes compliance language. Every KB chunk provides proven methodology. This proposal must be the synthesis of everything the organism knows — not a generic document with data sprinkled in.\n\n' +
         thesisPromptText +
         techApproachPromptText +
+        // S139: insert L6 specialist outputs in the order they appear in a typical proposal document.
+        coverLetterPromptText +
+        executiveSummaryPromptText +
+        pastPerformancePromptText +
+        staffingPromptText +
+        pricingNarrativePromptText +
+        qaCompliancePromptText +
         '## OPPORTUNITY\n' +
         'Title: ' + (opp.title||'') + '\n' +
         'Agency: ' + (opp.agency||'') + '\n' +
@@ -4876,6 +4964,27 @@ if (url.startsWith('/api/l6-test-specialist') && req.method === 'POST') {
   return;
 }
 
+// S139: PNG aspect-ratio fitter. Reads native dimensions from the PNG IHDR
+// chunk and returns {width, height} that preserves aspect ratio at the
+// caller-provided maxWidth. Falls back to a safe 5:3 default if the header
+// cannot be parsed. Used by /api/proposal-doc to embed Kroki-rendered
+// org chart and methodology flow PNGs without distorting them.
+function _pngFitDimensions(buf, maxWidth) {
+  try {
+    if (!buf || buf.length < 24) return { width: maxWidth, height: Math.round(maxWidth * 0.6) };
+    // PNG signature is 8 bytes; IHDR chunk starts at byte 8 with 4-byte length + 4-byte type.
+    // Width is bytes 16-19 big-endian; height is bytes 20-23 big-endian.
+    var nW = buf.readUInt32BE(16);
+    var nH = buf.readUInt32BE(20);
+    if (!nW || !nH) return { width: maxWidth, height: Math.round(maxWidth * 0.6) };
+    var aspect = nH / nW;
+    var h = Math.max(60, Math.round(maxWidth * aspect));
+    return { width: maxWidth, height: h };
+  } catch (e) {
+    return { width: maxWidth, height: Math.round(maxWidth * 0.6) };
+  }
+}
+
 // === PROPOSAL DOCUMENT GENERATOR — /api/proposal-doc ===
 if (url.startsWith('/api/proposal-doc')) {
   var docId = (req.url.split('?id=')[1]||'').split('&')[0];
@@ -5279,7 +5388,8 @@ if (url.startsWith('/api/proposal-doc')) {
                 appendixChildren.push(new Paragraph({
                   alignment: AlignmentType.CENTER,
                   spacing: { after: 200 },
-                  children: [new ImageRun({ data: orgPngBuf, transformation: { width: 620, height: 480 }, type: 'png' })]
+                  // S139: was transformation:{width:620,height:480} which forced 1.29:1 aspect onto a typical 2.5:1 native PNG, vertically stretching the chart. _pngFitDimensions now preserves native aspect at 620 maxWidth.
+                  children: [new ImageRun({ data: orgPngBuf, transformation: _pngFitDimensions(orgPngBuf, 620), type: 'png' })]
                 }));
               }
             } catch(pngErr) { log('PROPOSAL DOC: Org chart PNG failed — ' + pngErr.message); }
@@ -5308,7 +5418,8 @@ if (url.startsWith('/api/proposal-doc')) {
                   appendixChildren.push(new Paragraph({
                     alignment: AlignmentType.CENTER,
                     spacing: { after: 200 },
-                    children: [new ImageRun({ data: methPngBuf, transformation: { width: 640, height: 380 }, type: 'png' })]
+                    // S139: was transformation:{width:640,height:380} which forced ~1.7:1 aspect onto methodology flow's native ~7:1 aspect, making text unreadable. Native dimensions preserved at 640 maxWidth.
+                  children: [new ImageRun({ data: methPngBuf, transformation: _pngFitDimensions(methPngBuf, 640), type: 'png' })]
                   }));
                 }
               } catch(methErr) { log('PROPOSAL DOC: Methodology PNG failed — ' + methErr.message); }
@@ -5330,7 +5441,8 @@ if (url.startsWith('/api/proposal-doc')) {
             }));
 
             // Compliance matrix table
-            var cmColWidths = [1000, 3500, 1200, 1400, 1200, 1060];
+            // S139: Status col widened from 1400 to 1700 to fit 'ACTION_REQUIRED' on one line; stole 200 from Requirement (3500->3300) and 100 from Notes (1060->960). Total still 9360 DXA.
+            var cmColWidths = [1000, 3300, 1200, 1700, 1200, 960];
             var cmHeaderRow = new TableRow({
               children: ['ID', 'Requirement', 'Category', 'Status', 'Response Section', 'Notes'].map(function(h, ci) {
                 return new TableCell({
