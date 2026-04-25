@@ -2017,6 +2017,63 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         }
 
         // Store review — structured JSON if available, text fallback otherwise
+        // S141 Item D: per-criterion weighted scoring enrichment.
+        // Pull eval_criteria from opp.compliance_blueprint_json or opp.rfp_requirements;
+        // if neither has it, fetch the latest compliance_matrix observation from
+        // organism_memory. Map criteria to scoring_matrix sections and add
+        // rtReport.per_criterion_scoring as a sibling field. Existing scoring_matrix
+        // is preserved verbatim. Runs BEFORE reviewStorage is built so per-criterion
+        // data lands in the persisted JSON automatically.
+        try {
+          if (rtReport && Array.isArray(rtReport.scoring_matrix) && rtReport.scoring_matrix.length > 0) {
+            var _evalCriteria = null;
+            var _ecSource = 'none';
+            if (opp.compliance_blueprint_json && Array.isArray(opp.compliance_blueprint_json.eval_criteria) && opp.compliance_blueprint_json.eval_criteria.length > 0) {
+              _evalCriteria = opp.compliance_blueprint_json.eval_criteria;
+              _ecSource = 'compliance_blueprint_json';
+            } else if (opp.rfp_requirements && Array.isArray(opp.rfp_requirements.eval_criteria) && opp.rfp_requirements.eval_criteria.length > 0) {
+              _evalCriteria = opp.rfp_requirements.eval_criteria;
+              _ecSource = 'rfp_requirements';
+            } else {
+              try {
+                var _cmMem = await supabase.from('organism_memory')
+                  .select('observation,created_at')
+                  .eq('opportunity_id', ppId)
+                  .eq('agent', 'compliance_matrix')
+                  .order('created_at', { ascending: false })
+                  .limit(1);
+                var _cmObs = _cmMem.data && _cmMem.data[0] && _cmMem.data[0].observation;
+                if (_cmObs) {
+                  var _firstBrace = _cmObs.indexOf('{');
+                  var _lastBrace = _cmObs.lastIndexOf('}');
+                  if (_firstBrace >= 0 && _lastBrace > _firstBrace) {
+                    var _cmJson = JSON.parse(_cmObs.slice(_firstBrace, _lastBrace + 1));
+                    if (Array.isArray(_cmJson.eval_criteria) && _cmJson.eval_criteria.length > 0) {
+                      _evalCriteria = _cmJson.eval_criteria;
+                      _ecSource = 'organism_memory.compliance_matrix';
+                    }
+                  }
+                }
+              } catch (_ecMemErr) { log('PER-CRITERION: eval_criteria mem fetch failed: ' + (_ecMemErr.message||'').slice(0,150)); }
+            }
+            if (_evalCriteria && _evalCriteria.length > 0) {
+              var _perCrit = computePerCriterionScores(rtReport, _evalCriteria);
+              if (_perCrit) {
+                _perCrit.eval_criteria_source = _ecSource;
+                rtReport.per_criterion_scoring = _perCrit;
+                log('PER-CRITERION: ' + _perCrit.per_criterion.length + ' criteria scored, ' +
+                    _perCrit.unmapped_criteria_count + ' unmapped, overall=' +
+                    (_perCrit.overall_pct !== null ? _perCrit.overall_pct + '%' : 'n/a') +
+                    ' (source=' + _ecSource + ')');
+              }
+            } else {
+              log('PER-CRITERION: no eval_criteria available for ' + ppId + ' — skipping (compliance_matrix may not have run yet)');
+            }
+          }
+        } catch (_perCritErr) {
+          log('PER-CRITERION: error (non-fatal): ' + (_perCritErr.message||'').slice(0, 200));
+        }
+
         var reviewStorage = rtReport ?
           summary + '\n\n' + JSON.stringify(rtReport, null, 2) :
           summary + '\n\n' + reviewResp;
@@ -3183,6 +3240,41 @@ if (url.startsWith('/api/analytics')) {
 }
 
 
+
+// === DIAG TOOLING — /api/_diag-tooling (S141 Item E feasibility) ===
+// Reports presence/absence of binaries used by potential OCR fallback in /api/fetch-rfp.
+// Read-only; safe to call any time. Used to decide whether OCR fallback is buildable
+// inline (~50-100 LOC) or whether it requires a Docker image change (multi-session).
+if (url === '/api/_diag-tooling' && req.method === 'GET') {
+  var _diagTools = ['tesseract','pdftoppm','pdftocairo','pdftotext','gs','mutool','convert','python3','poppler-utils'];
+  var _diagExec = require('child_process').execSync;
+  var _diagResults = {};
+  _diagTools.forEach(function(t) {
+    try {
+      var _w = _diagExec('which ' + t + ' 2>/dev/null', { encoding: 'utf8', timeout: 2000 });
+      _diagResults[t] = (_w || '').trim() || null;
+    } catch (e) { _diagResults[t] = null; }
+  });
+  var _diagVersions = {};
+  ['tesseract --version','pdftoppm -v','pdftocairo -v','gs --version'].forEach(function(cmd) {
+    try {
+      var _v = _diagExec(cmd + ' 2>&1 | head -1', { encoding: 'utf8', timeout: 2000 });
+      _diagVersions[cmd.split(' ')[0]] = (_v || '').trim() || null;
+    } catch (e) { _diagVersions[cmd.split(' ')[0]] = null; }
+  });
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({
+    tools: _diagResults,
+    versions: _diagVersions,
+    node_version: process.version,
+    platform: process.platform,
+    arch: process.arch,
+    cwd: process.cwd(),
+    ocr_fallback_buildable_inline: !!(_diagResults.tesseract && (_diagResults.pdftoppm || _diagResults.pdftocairo)),
+    note: 'If ocr_fallback_buildable_inline=true, /api/fetch-rfp can build OCR fallback in ~50-100 LOC. If false, requires Docker image update (nixpacks/dockerfile).'
+  }, null, 2));
+  return;
+}
 
 // === SYSTEM STATUS — /api/system-status ===
 if (url === '/api/system-status') {
@@ -10682,6 +10774,107 @@ function extractReviewReport(proposalReviewText) {
   } catch (e) {
     return null;
   }
+}
+
+// S141 Item D: per-criterion weighted scoring helper.
+// Reads eval_criteria (e.g., from compliance_matrix output: [{criterion, points, weight}, ...])
+// and rtReport.scoring_matrix (per-section scores); maps each criterion to one or more
+// sections and computes weighted scores per criterion. Existing scoring_matrix structure
+// is left untouched; output goes into rtReport.per_criterion_scoring as a sibling field.
+// Mapping rules: criterion-keyword regex -> section-name regex set. First match wins.
+// Unmapped criteria carry mapping_status='unmapped' for human review.
+function _s141ParseEvalWeight(weightStr, points) {
+  if (typeof weightStr === 'string') {
+    var m = weightStr.match(/(\d+(?:\.\d+)?)\s*%/);
+    if (m) return parseFloat(m[1]);
+  }
+  if (typeof weightStr === 'number') return weightStr;
+  if (typeof points === 'number') return points;
+  return null;
+}
+
+function computePerCriterionScores(rtReport, evalCriteria) {
+  if (!rtReport || !Array.isArray(rtReport.scoring_matrix) || !Array.isArray(evalCriteria) || evalCriteria.length === 0) {
+    return null;
+  }
+
+  var normalized = rtReport.scoring_matrix.map(function(row) {
+    var origName = row.section || row.section_name || '';
+    var name = String(origName).toLowerCase();
+    var pct = null;
+    if (typeof row.pct === 'number') pct = row.pct;
+    else if (typeof row.estimated_score === 'number' && typeof row.max_points === 'number' && row.max_points > 0) {
+      pct = (row.estimated_score / row.max_points) * 100;
+    } else if (typeof row.evaluator_score === 'number') pct = row.evaluator_score;
+    return { name: name, original_name: origName, pct: pct };
+  }).filter(function(r) { return r.name && typeof r.pct === 'number'; });
+
+  if (normalized.length === 0) return null;
+
+  // Mapping rules: criterion keyword -> section name patterns. Order = priority.
+  var mappingRules = [
+    { criterion_pattern: /qualif|firm.*experience|firm.*capabilit|capabilit.*firm/i,
+      section_patterns: [/qualif/i, /firm.*(experience|capabilit)/i, /\bcapabilit/i, /executive\s*summary/i, /cover\s*letter/i] },
+    { criterion_pattern: /past\s*performance|track\s*record|references|relevant\s*experience/i,
+      section_patterns: [/past\s*performance/i, /reference/i, /relevant\s*experience/i] },
+    { criterion_pattern: /technical|approach|methodology|scope|work\s*plan/i,
+      section_patterns: [/technical\s*approach/i, /methodology/i, /work\s*plan/i, /\bscope\b/i, /\btechnical\b/i] },
+    { criterion_pattern: /staff|personnel|key\s*staff|team|capacity|resume/i,
+      section_patterns: [/staffing/i, /personnel/i, /key\s*staff/i, /resume/i, /\bteam\b/i] },
+    { criterion_pattern: /pricing|price|cost|fee|rate|compensation/i,
+      section_patterns: [/pricing/i, /\bcost\b/i, /\bfee\b/i, /\brate\b/i, /\bprice\b/i, /compensation/i] },
+    { criterion_pattern: /quality|qa|compliance|control|process/i,
+      section_patterns: [/qa\s*compliance/i, /\bquality\b/i, /\bcompliance\b/i] },
+    { criterion_pattern: /minority|mwbe|dbe|disadvantaged|small\s*business/i,
+      section_patterns: [/minority/i, /\bmwbe\b/i, /\bdbe\b/i, /disadvantaged/i, /small\s*business/i] }
+  ];
+
+  var perCriterion = evalCriteria.map(function(ec) {
+    var critName = ec.criterion || ec.name || '';
+    var weight = _s141ParseEvalWeight(ec.weight, ec.points);
+    var matchedSections = [];
+    var rule = null;
+    for (var ri = 0; ri < mappingRules.length; ri++) {
+      if (mappingRules[ri].criterion_pattern.test(critName)) { rule = mappingRules[ri]; break; }
+    }
+    if (rule) {
+      normalized.forEach(function(sec) {
+        if (rule.section_patterns.some(function(p) { return p.test(sec.name); })) {
+          if (!matchedSections.find(function(m) { return m.original_name === sec.original_name; })) {
+            matchedSections.push(sec);
+          }
+        }
+      });
+    }
+    var avgPct = matchedSections.length > 0 ?
+      matchedSections.reduce(function(a, b) { return a + b.pct; }, 0) / matchedSections.length : null;
+    var weightedScore = (avgPct !== null && weight !== null) ?
+      Math.round((avgPct / 100) * weight * 100) / 100 : null;
+    return {
+      criterion: critName,
+      criterion_max_points: (typeof ec.points === 'number' ? ec.points : null),
+      criterion_weight_pct: weight,
+      mapped_sections: matchedSections.map(function(s) { return s.original_name; }),
+      mapping_status: matchedSections.length > 0 ? 'matched' : 'unmapped',
+      avg_section_pct: (avgPct !== null) ? Math.round(avgPct * 10) / 10 : null,
+      weighted_score: weightedScore,
+      weighted_max: weight
+    };
+  });
+
+  var totalWeightedScore = perCriterion.reduce(function(a, b) { return a + (b.weighted_score || 0); }, 0);
+  var totalWeightedMax = perCriterion.reduce(function(a, b) { return a + (b.weighted_max || 0); }, 0);
+  var unmappedCount = perCriterion.filter(function(p) { return p.mapping_status === 'unmapped'; }).length;
+
+  return {
+    per_criterion: perCriterion,
+    total_weighted_score: Math.round(totalWeightedScore * 10) / 10,
+    total_weighted_max: totalWeightedMax,
+    overall_pct: totalWeightedMax > 0 ? Math.round((totalWeightedScore / totalWeightedMax) * 1000) / 10 : null,
+    unmapped_criteria_count: unmappedCount,
+    sections_evaluated: normalized.length,
+    schema_version: 's141_v1'
+  };
 }
 
 function selectWeakSections(rtReport, threshold, maxSections) {
