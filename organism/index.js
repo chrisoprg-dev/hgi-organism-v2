@@ -4964,6 +4964,122 @@ if (url.startsWith('/api/l6-test-specialist') && req.method === 'POST') {
   return;
 }
 
+// === S140 Item G: STORED CONTENT SCRUB — /api/scrub-stored-content ===
+// One-time / on-demand scrub for proposal_content fields generated before
+// S125/S133 canon tightening. Auto-replaces deterministic canon drift
+// (1931→1929, "95-year"→"97-year", entity name variants) and flags
+// context-ambiguous violations (Tangipahoa, Geoffrey Brien) for human
+// review. Idempotent — running twice produces the same result.
+//
+// Body: {} (all opps with proposal_content), {id:"opp-id"} (single opp),
+//       {dry_run:true} (no writes, just diff stats)
+if (url.startsWith('/api/scrub-stored-content')) {
+  try {
+    var ssBody = '';
+    await new Promise(function(resolve){ req.on('data', function(d){ ssBody += d; }); req.on('end', resolve); });
+    var ssParams = {};
+    try { ssParams = ssBody ? JSON.parse(ssBody) : {}; } catch(e){}
+    var ssDryRun = !!ssParams.dry_run;
+    var ssTargetId = ssParams.id || null;
+
+    var SCRUB_AUTO = [
+      { name: 'wrong_year_1931',       pattern: /\b1931\b/g,                                replacement: '1929' },
+      { name: 'wrong_year_1930',       pattern: /\b1930\b/g,                                replacement: '1929' },
+      { name: 'age_more_than_95',      pattern: /\bmore\s+than\s+95\s+years\b/gi,           replacement: '97 years' },
+      { name: 'age_more_than_96',      pattern: /\bmore\s+than\s+96\s+years\b/gi,           replacement: '97 years' },
+      { name: 'age_over_95',           pattern: /\bover\s+95\s+years\b/gi,                  replacement: '97 years' },
+      { name: 'age_over_96',           pattern: /\bover\s+96\s+years\b/gi,                  replacement: '97 years' },
+      { name: 'age_nearly_95_96',      pattern: /\bnearly\s+9[56]\s+years\b/gi,             replacement: '97 years' },
+      { name: 'age_approx_95_96',      pattern: /\bapproximately\s+9[56]\s+years\b/gi,      replacement: '97 years' },
+      { name: 'age_95_year_compound',  pattern: /\b95[\s-]year\b/gi,                        replacement: '97-year' },
+      { name: 'age_96_year_compound',  pattern: /\b96[\s-]year\b/gi,                        replacement: '97-year' },
+      { name: 'entity_hg_global',      pattern: /\bHammerman\s*&\s*Gainer\s+Global\b/g,     replacement: 'Hammerman & Gainer LLC d/b/a HGI Global' },
+      { name: 'entity_hgi_llc',        pattern: /\bHGI\s+LLC\b/g,                           replacement: 'Hammerman & Gainer LLC d/b/a HGI Global' },
+      { name: 'entity_hgi_global_llc', pattern: /\bHGI\s+Global\s+LLC\b/g,                  replacement: 'Hammerman & Gainer LLC d/b/a HGI Global' }
+    ];
+    var SCRUB_FLAG_ONLY = [
+      { name: 'tangipahoa',     pattern: /\bTangipahoa\b/gi },
+      { name: 'geoffrey_brien', pattern: /\bGeoffrey\s+Brien\b/gi }
+    ];
+
+    var ssQuery = supabase.from('opportunities').select('id,title,agency,proposal_content');
+    if (ssTargetId) ssQuery = ssQuery.eq('id', ssTargetId);
+    else ssQuery = ssQuery.not('proposal_content', 'is', null);
+    var ssResult = await ssQuery.limit(200);
+    var ssOpps = ssResult.data || [];
+
+    var ssReport = [];
+    var ssTotalReplacements = 0;
+    var ssTotalChanged = 0;
+    var ssTotalFlags = 0;
+
+    for (var ssi = 0; ssi < ssOpps.length; ssi++) {
+      var ssOpp = ssOpps[ssi];
+      var ssText = ssOpp.proposal_content || '';
+      if (!ssText || ssText.length < 50) continue;
+      var ssOriginal = ssText;
+      var ssChanges = {};
+      var ssFlags = {};
+
+      SCRUB_AUTO.forEach(function(rule){
+        var m = ssText.match(rule.pattern);
+        if (m && m.length > 0) {
+          ssChanges[rule.name] = m.length;
+          ssTotalReplacements += m.length;
+          ssText = ssText.replace(rule.pattern, rule.replacement);
+        }
+      });
+      SCRUB_FLAG_ONLY.forEach(function(rule){
+        var m = ssText.match(rule.pattern);
+        if (m && m.length > 0) {
+          ssFlags[rule.name] = m.length;
+          ssTotalFlags += m.length;
+        }
+      });
+
+      var ssOppChanged = (ssText !== ssOriginal);
+      if (ssOppChanged) ssTotalChanged++;
+
+      ssReport.push({
+        id: ssOpp.id,
+        title: (ssOpp.title||'').slice(0, 80),
+        agency: (ssOpp.agency||'').slice(0, 60),
+        original_chars: ssOriginal.length,
+        new_chars: ssText.length,
+        replacements: ssChanges,
+        flags_for_review: ssFlags,
+        changed: ssOppChanged
+      });
+
+      if (ssOppChanged && !ssDryRun) {
+        await supabase.from('opportunities').update({ proposal_content: ssText }).eq('id', ssOpp.id);
+        await supabase.from('organism_memory').insert({
+          agent: 's140_content_scrubber',
+          opportunity_id: ssOpp.id,
+          observation: 'S140 SCRUB: ' + (ssOpp.title||'').slice(0,50) + ' — ' + Object.keys(ssChanges).length + ' rules fired, ' + ssTotalReplacements + ' total replacements; flags=' + JSON.stringify(ssFlags),
+          memory_type: 'scrub_event'
+        });
+      }
+    }
+
+    res.end(JSON.stringify({
+      ok: true,
+      dry_run: ssDryRun,
+      target: ssTargetId || 'all',
+      scanned: ssOpps.length,
+      changed: ssTotalChanged,
+      total_replacements: ssTotalReplacements,
+      total_flags_for_review: ssTotalFlags,
+      report: ssReport
+    }));
+  } catch (e) {
+    log('SCRUB: error ' + (e.message||'').slice(0,200));
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: e.message, stack: (e.stack||'').slice(0, 500) }));
+  }
+  return;
+}
+
 // S139: PNG aspect-ratio fitter. Reads native dimensions from the PNG IHDR
 // chunk and returns {width, height} that preserves aspect ratio at the
 // caller-provided maxWidth. Falls back to a safe 5:3 default if the header
@@ -6430,7 +6546,8 @@ if (url.startsWith('/api/org-chart')) {
       'Use subgraphs for functional areas.\n' +
       'Keep it clean — max 15 nodes.\n\n' +
       'Also create a second Mermaid diagram showing the methodology/approach flow.\n' +
-      'This should be a left-to-right flowchart showing the key phases and steps.\n\n' +
+      'PREFER top-down (graph TD) for methodology flows. Use left-to-right (graph LR) ONLY if 8 nodes or fewer.\n' +
+      'If a left-to-right flow would exceed 8 nodes, use graph TD OR break into multiple top-down rows using subgraphs.\n\n' +
       'Return as JSON:\n' +
       '{"org_chart":"graph TD\\n  ...","methodology_flow":"graph LR\\n  ...","description":"Brief description of the team structure"}' +
       '\n\nReturn ONLY valid JSON. Use \\n for newlines in the Mermaid code.';
@@ -8921,7 +9038,11 @@ function createL6Specialist(config) {
     var sectionText = parsed.section_text;
     var evidenceAnchors = Array.isArray(parsed.evidence_anchors) ? parsed.evidence_anchors : [];
     var wordCount = (sectionText.match(/\b\w+\b/g) || []).length;
-    var per3kFactor = wordCount / 3000;
+    // S140 Item A: cap per-3K multiplier at 1.5×. Prevents floors from scaling
+    // past what long sections realistically produce. Tech Approach (5071w) and
+    // QA Compliance (3907w) tripped 0/5 floors despite healthy absolute anchor
+    // counts. Cap protects density signal without punishing length.
+    var per3kFactor = Math.min(wordCount / 3000, 1.5);
 
     // --- Evidence anchor counting (config-driven types + floors) ---
     var counts = {};
@@ -8954,6 +9075,55 @@ function createL6Specialist(config) {
         if (rule && rule.pattern && rule.pattern.test(sectionText)) canonViolations.push(rule.name);
       });
     }
+
+    // --- S140 Item B: Tab/Exhibit/Attachment enclosure assertion guardrail ---
+    // Specialist outputs sometimes assert "Exhibit D — DBE Certification enclosed"
+    // when no exhibit is actually in the proposal package. Caller must pass an
+    // explicit specialistInputBag.enclosed_exhibits: [...] array; any enclosure
+    // assertion not matched against that list is logged as canon_violation.
+    var enclosedExhibits = Array.isArray(specialistInputBag.enclosed_exhibits) ? specialistInputBag.enclosed_exhibits : [];
+    var enclosureRegex = /\b(Exhibit|Attachment|Tab)\s+([A-Z0-9][A-Z0-9-]{0,10})[^.]{0,200}\b(enclosed|attached|appended|provided herein|included herein)\b/gi;
+    var encMatch;
+    var encSeen = {};
+    while ((encMatch = enclosureRegex.exec(sectionText)) !== null) {
+      var encKind = encMatch[1];
+      var encId = encMatch[2];
+      var encKey = (encKind + ' ' + encId).toLowerCase();
+      if (encSeen[encKey]) continue;
+      encSeen[encKey] = true;
+      var encMatched = enclosedExhibits.some(function(e){
+        if (typeof e !== 'string') return false;
+        var el = e.toLowerCase();
+        return el.indexOf(encKey) !== -1 || el.indexOf(encId.toLowerCase()) !== -1;
+      });
+      if (!encMatched) {
+        canonViolations.push('tab_enclosure_unverified:' + encKind + ' ' + encId);
+      }
+    }
+
+    // --- S140 Item C: Voice/jargon enforcer post-generation sweep ---
+    // Beyond the L6_UNIVERSAL_CANON_REGEX_SET which catches identity/age/exclusion
+    // bugs, this catches consulting jargon and hedge phrases that drift past the
+    // S125 prompt-discipline canon. Pure logging — no auto-substitution.
+    var L6_VOICE_JARGON_PATTERNS = [
+      { name: 'leverage_synergies',  pattern: /\bleverage\s+synergies\b/i },
+      { name: 'best_in_class',       pattern: /\bbest[\s-]in[\s-]class\b/i },
+      { name: 'cutting_edge',        pattern: /\bcutting[\s-]edge\b/i },
+      { name: 'world_class',         pattern: /\bworld[\s-]class\b/i },
+      { name: 'innovative_solutions',pattern: /\binnovative\s+solutions?\b/i },
+      { name: 'paradigm_shift',      pattern: /\bparadigm\s+shift\b/i },
+      { name: 'next_generation',     pattern: /\bnext[\s-]generation\b/i },
+      { name: 'turn_key_solution',   pattern: /\bturn[\s-]?key\s+solution\b/i },
+      { name: 'robust_framework',    pattern: /\brobust\s+framework\b/i },
+      { name: 'we_believe',          pattern: /\bwe\s+believe\b/i },
+      { name: 'we_feel',             pattern: /\bwe\s+feel\b/i },
+      { name: 'we_are_pleased_to',   pattern: /\bwe\s+are\s+pleased\s+to\b/i },
+      { name: 'rest_assured',        pattern: /\brest\s+assured\b/i }
+    ];
+    L6_VOICE_JARGON_PATTERNS.forEach(function(rule){
+      var jm = sectionText.match(rule.pattern);
+      if (jm) canonViolations.push('voice_jargon:' + rule.name);
+    });
 
     // --- Status decision ---
     var minFloorsRequired = (typeof config.min_floors_required_for_published === 'number') ? config.min_floors_required_for_published : Math.max(1, floorsTotal - 1);
