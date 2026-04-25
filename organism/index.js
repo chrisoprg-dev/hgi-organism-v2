@@ -3246,22 +3246,29 @@ if (url.startsWith('/api/analytics')) {
 // Read-only; safe to call any time. Used to decide whether OCR fallback is buildable
 // inline (~50-100 LOC) or whether it requires a Docker image change (multi-session).
 if (url === '/api/_diag-tooling' && req.method === 'GET') {
-  var _diagTools = ['tesseract','pdftoppm','pdftocairo','pdftotext','gs','mutool','convert','python3','poppler-utils'];
-  var _diagExec = require('child_process').execSync;
+  var _diagTools = ['tesseract','pdftoppm','pdftocairo','pdftotext','gs','mutool','convert','python3'];
   var _diagResults = {};
-  _diagTools.forEach(function(t) {
-    try {
-      var _w = _diagExec('which ' + t + ' 2>/dev/null', { encoding: 'utf8', timeout: 2000 });
-      _diagResults[t] = (_w || '').trim() || null;
-    } catch (e) { _diagResults[t] = null; }
-  });
   var _diagVersions = {};
-  ['tesseract --version','pdftoppm -v','pdftocairo -v','gs --version'].forEach(function(cmd) {
-    try {
-      var _v = _diagExec(cmd + ' 2>&1 | head -1', { encoding: 'utf8', timeout: 2000 });
-      _diagVersions[cmd.split(' ')[0]] = (_v || '').trim() || null;
-    } catch (e) { _diagVersions[cmd.split(' ')[0]] = null; }
-  });
+  try {
+    var _diagCp = await import('child_process');
+    var _diagExec = _diagCp.execSync;
+    _diagTools.forEach(function(t) {
+      try {
+        var _w = _diagExec('which ' + t + ' 2>/dev/null', { encoding: 'utf8', timeout: 2000 });
+        _diagResults[t] = (_w || '').trim() || null;
+      } catch (e) { _diagResults[t] = null; }
+    });
+    ['tesseract --version','pdftoppm -v','pdftocairo -v','gs --version'].forEach(function(cmd) {
+      try {
+        var _v = _diagExec(cmd + ' 2>&1 | head -1', { encoding: 'utf8', timeout: 2000 });
+        _diagVersions[cmd.split(' ')[0]] = (_v || '').trim() || null;
+      } catch (e) { _diagVersions[cmd.split(' ')[0]] = null; }
+    });
+  } catch (_diagImpErr) {
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'child_process import failed', detail: (_diagImpErr.message||'').slice(0,200) }));
+    return;
+  }
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({
     tools: _diagResults,
