@@ -3709,68 +3709,6 @@ if (url === '/api/exec-brief') {
 }
 
 
-// === RECORD OUTCOME + AUTO-ANALYSIS — /api/record-outcome ===
-if (url === '/api/record-outcome' && req.method === 'POST') {
-  var body = '';
-  req.on('data', function(c) { body += c; });
-  req.on('end', async function() {
-    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-    try {
-      var params = JSON.parse(body);
-      if (!params.id || !params.outcome) { res.end(JSON.stringify({ error: 'id and outcome required (won/lost/no_bid/cancelled)' })); return; }
-      var validOutcomes = ['won', 'lost', 'no_bid', 'cancelled'];
-      if (validOutcomes.indexOf(params.outcome) < 0) { res.end(JSON.stringify({ error: 'outcome must be: ' + validOutcomes.join(', ') })); return; }
-      
-      // Record outcome
-      var upd = { outcome: params.outcome, outcome_notes: params.notes || null, last_updated: new Date().toISOString() };
-      if (params.outcome === 'won' || params.outcome === 'lost') upd.stage = params.outcome;
-      if (params.outcome === 'no_bid') upd.stage = 'no_bid';
-      await supabase.from('opportunities').update(upd).eq('id', params.id);
-      log('OUTCOME: ' + params.id.slice(0,40) + ' → ' + params.outcome);
-      
-      // Auto-analyze: get the opp data for analysis
-      var oppData = await supabase.from('opportunities').select('*').eq('id', params.id).single();
-      var opp = oppData.data;
-      
-      if (opp && (params.outcome === 'won' || params.outcome === 'lost')) {
-        // Get all memories for this opp to understand what we predicted
-        var oppMems = await supabase.from('organism_memory').select('agent,observation').eq('opportunity_id', params.id).order('created_at', { ascending: false }).limit(20);
-        var memSummary = (oppMems.data || []).map(function(m) { return m.agent + ': ' + (m.observation || '').slice(0, 200); }).join('\n');
-        
-        // Run loss/win analysis
-        var analysisPrompt = 'OUTCOME ANALYSIS: HGI ' + params.outcome.toUpperCase() + ' on "' + (opp.title || '') + '"\n' +
-          'Agency: ' + (opp.agency || '') + ' | Vertical: ' + (opp.vertical || '') + ' | OPI: ' + (opp.opi_score || '?') + '\n' +
-          'Notes: ' + (params.notes || 'none') + '\n\n' +
-          'AGENT PREDICTIONS:\n' + memSummary.slice(0, 3000) + '\n\n' +
-          'TASK: Analyze this outcome. What did the organism predict correctly? What did it miss? ' +
-          'What patterns should inform future OPI scoring and pursuit decisions? ' +
-          'Specific lessons for: (1) OPI calibration, (2) competitive positioning, (3) proposal strategy, (4) pricing. ' +
-          'Be brutally honest about prediction accuracy.';
-        
-        var analysis = await claudeCall('outcome analysis', analysisPrompt, 2000, { model: 'claude-haiku-4-5-20251001' });
-        if (analysis && analysis.length > 100) {
-          await storeMemory('loss_analysis', params.id, (opp.agency || '') + ',outcome,' + params.outcome, analysis, 'analysis', null, 'high');
-          log('OUTCOME ANALYSIS: ' + analysis.length + ' chars generated for ' + params.outcome);
-        }
-        
-        // Update OPI calibration data
-        await supabase.from('pipeline_analytics').insert({
-          id: 'outcome-' + Date.now(),
-          metric_name: 'outcome_' + params.outcome,
-          metric_value: opp.opi_score || 0,
-          context: JSON.stringify({ title: opp.title, agency: opp.agency, vertical: opp.vertical, opi: opp.opi_score }),
-          source_agent: 'outcome_recorder',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        });
-      }
-      
-      res.end(JSON.stringify({ success: true, outcome: params.outcome, analysis_generated: params.outcome === 'won' || params.outcome === 'lost' }));
-    } catch (e) { res.end(JSON.stringify({ error: e.message })); }
-  });
-  return;
-}
-
 // === MANUAL INTAKE — /api/intake ===
 if (url === '/api/intake' && req.method === 'POST') {
   var body = '';
