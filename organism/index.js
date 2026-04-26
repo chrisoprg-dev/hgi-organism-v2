@@ -814,7 +814,26 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       log('COST CIRCUIT BREAKER (produce-proposal): query failed (' + (ppBreakerErr.message||ppBreakerErr) + '). Proceeding without block.');
     }
   } else {
-    log('COST CIRCUIT BREAKER (produce-proposal): bypassed via force flag on ' + ppId);
+    // S143: passive audit log when force=true bypasses the breaker. No behavior change —
+    // breaker still bypassed normally — but every bypass now writes a memory entry with
+    // optional reason text, so Christopher can grep "every time the breaker was bypassed."
+    var _ppForceReason = '';
+    try { _ppForceReason = String(JSON.parse(body || '{}').force_reason || ''); } catch(_e) {}
+    log('COST CIRCUIT BREAKER (produce-proposal): bypassed via force flag on ' + ppId + (_ppForceReason ? ' | reason: ' + _ppForceReason.slice(0,200) : ''));
+    try {
+      await supabase.from('organism_memory').insert({
+        id: 'cost_breaker_bypass-' + Date.now() + '-' + Math.random().toString(36).slice(2,6),
+        agent: 'cost_circuit_breaker_bypass',
+        opportunity_id: ppId,
+        entity_tags: 'cost_control,bypass,produce_proposal',
+        observation: 'BYPASS produce-proposal: force=true on ' + ppId +
+          ' | reason: ' + (_ppForceReason || '(none provided)') +
+          ' | url: ' + (req.url || '').slice(0,300),
+        memory_type: 'cost_control',
+        source_url: null, confidence: 'high', status: 'scratch',
+        created_at: new Date().toISOString()
+      });
+    } catch(_ppBypLog) {}
   }
 
   try {
@@ -1952,7 +1971,9 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         (complianceBlueprint.evaluation_criteria||[]).length + ' eval criteria, ' +
         (complianceBlueprint.scope_items||[]).length + ' scope items, ' +
         'contract template ' + (complianceBlueprint.contract_template && complianceBlueprint.contract_template.provided_by_rfp ? 'PROVIDED by RFP' : 'NOT provided') + '.' : ' No blueprint (no RFP text).';
+      // S143 fix: id field was missing → silent NOT NULL violation (Supabase JS returns {error,data}, doesn't throw)
       await supabase.from('organism_memory').insert({
+        id: 'l7_proposal_engine_' + (ppId||'').slice(0,20) + '_' + Date.now(),
         agent: 'proposal_engine',
         opportunity_id: ppId,
         observation: 'PROPOSAL PRODUCED: ' + (opp.title||'').slice(0,50) + ' — ' + proposalText.length + ' chars generated.' + blueprintSummary + ' Stored in proposal_content field. Ready for President review.',
@@ -2064,57 +2085,19 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
 
         // Store review — structured JSON if available, text fallback otherwise
         // S141 Item D: per-criterion weighted scoring enrichment.
-        // Pull eval_criteria from opp.compliance_blueprint_json or opp.rfp_requirements;
-        // if neither has it, fetch the latest compliance_matrix observation from
-        // organism_memory. Map criteria to scoring_matrix sections and add
-        // rtReport.per_criterion_scoring as a sibling field. Existing scoring_matrix
-        // is preserved verbatim. Runs BEFORE reviewStorage is built so per-criterion
-        // data lands in the persisted JSON automatically.
+        // S143 refactor: delegated to enrichReviewWithPerCriterion helper so refinement_loop's
+        // runSingleRedTeamPass can also call it (otherwise iterations wipe per_criterion_scoring).
+        // Fallback chain: rfp_requirements.evaluation_criteria → rfp_requirements.eval_criteria →
+        // organism_memory compliance_matrix observation. Modifies rtReport in place.
         try {
-          if (rtReport && Array.isArray(rtReport.scoring_matrix) && rtReport.scoring_matrix.length > 0) {
-            var _evalCriteria = null;
-            var _ecSource = 'none';
-            if (opp.compliance_blueprint_json && Array.isArray(opp.compliance_blueprint_json.eval_criteria) && opp.compliance_blueprint_json.eval_criteria.length > 0) {
-              _evalCriteria = opp.compliance_blueprint_json.eval_criteria;
-              _ecSource = 'compliance_blueprint_json';
-            } else if (opp.rfp_requirements && Array.isArray(opp.rfp_requirements.eval_criteria) && opp.rfp_requirements.eval_criteria.length > 0) {
-              _evalCriteria = opp.rfp_requirements.eval_criteria;
-              _ecSource = 'rfp_requirements';
-            } else {
-              try {
-                var _cmMem = await supabase.from('organism_memory')
-                  .select('observation,created_at')
-                  .eq('opportunity_id', ppId)
-                  .eq('agent', 'compliance_matrix')
-                  .order('created_at', { ascending: false })
-                  .limit(1);
-                var _cmObs = _cmMem.data && _cmMem.data[0] && _cmMem.data[0].observation;
-                if (_cmObs) {
-                  var _firstBrace = _cmObs.indexOf('{');
-                  var _lastBrace = _cmObs.lastIndexOf('}');
-                  if (_firstBrace >= 0 && _lastBrace > _firstBrace) {
-                    var _cmJson = JSON.parse(_cmObs.slice(_firstBrace, _lastBrace + 1));
-                    if (Array.isArray(_cmJson.eval_criteria) && _cmJson.eval_criteria.length > 0) {
-                      _evalCriteria = _cmJson.eval_criteria;
-                      _ecSource = 'organism_memory.compliance_matrix';
-                    }
-                  }
-                }
-              } catch (_ecMemErr) { log('PER-CRITERION: eval_criteria mem fetch failed: ' + (_ecMemErr.message||'').slice(0,150)); }
-            }
-            if (_evalCriteria && _evalCriteria.length > 0) {
-              var _perCrit = computePerCriterionScores(rtReport, _evalCriteria);
-              if (_perCrit) {
-                _perCrit.eval_criteria_source = _ecSource;
-                rtReport.per_criterion_scoring = _perCrit;
-                log('PER-CRITERION: ' + _perCrit.per_criterion.length + ' criteria scored, ' +
-                    _perCrit.unmapped_criteria_count + ' unmapped, overall=' +
-                    (_perCrit.overall_pct !== null ? _perCrit.overall_pct + '%' : 'n/a') +
-                    ' (source=' + _ecSource + ')');
-              }
-            } else {
-              log('PER-CRITERION: no eval_criteria available for ' + ppId + ' — skipping (compliance_matrix may not have run yet)');
-            }
+          var _itemDStatus = await enrichReviewWithPerCriterion(rtReport, opp, ppId, supabase);
+          if (_itemDStatus.applied) {
+            log('PER-CRITERION: ' + _itemDStatus.mapped + ' mapped, ' +
+                _itemDStatus.unmapped + ' unmapped, overall=' +
+                (_itemDStatus.overall_pct !== null ? _itemDStatus.overall_pct + '%' : 'n/a') +
+                ' (source=' + _itemDStatus.source + ')');
+          } else {
+            log('PER-CRITERION: skipped — ' + _itemDStatus.reason);
           }
         } catch (_perCritErr) {
           log('PER-CRITERION: error (non-fatal): ' + (_perCritErr.message||'').slice(0, 200));
@@ -2257,7 +2240,9 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
           memObs += '\n\nTop issues:\n' + reviewResp.slice(0, 2000);
         }
 
+        // S143 fix: id field was missing → silent NOT NULL violation
         await supabase.from('organism_memory').insert({
+          id: 'l8_red_team_' + (ppId||'').slice(0,20) + '_' + Date.now(),
           agent: 'red_team_reviewer',
           opportunity_id: ppId,
           observation: memObs.slice(0, 4000),
@@ -5580,51 +5565,78 @@ if (url.startsWith('/api/proposal-doc')) {
     var borders = { top: border, bottom: border, left: border, right: border };
 
     try {
-      // Call endpoints directly to get appendix data (bypasses memory storage)
+      // S143 Defect § 3.5 fix: cache-aware appendix lookup.
+      // Previously each /api/proposal-doc call unconditionally re-fetched compliance-matrix,
+      // rate-table, org-chart — each a fresh Sonnet call (~$0.30/each). The S142 DNS-overflow
+      // retries triggered 8 cycles in 7 minutes ($8 wasted). Now: read latest organism_memory
+      // entry within 24h. Refetch only if missing, expired, or opp edited after the entry.
       var localPort = process.env.PORT || 8080;
       var localBase = 'http://localhost:' + localPort;
       var cmData = null, rtData = null, ocData = null;
+      var _appendixCacheMaxHours = 24;
+      var _oppLastUpdatedAt = opp.last_updated ? new Date(opp.last_updated).getTime() : 0;
+
+      async function _getAppendixCached(memAgent, endpoint, extractKey) {
+        // Try memory cache first
+        try {
+          var _cutoff = new Date(Date.now() - _appendixCacheMaxHours*60*60*1000).toISOString();
+          var _recent = await supabase.from('organism_memory')
+            .select('observation,created_at')
+            .eq('opportunity_id', docId)
+            .eq('agent', memAgent)
+            .gte('created_at', _cutoff)
+            .order('created_at', { ascending: false })
+            .limit(1);
+          var _hit = _recent.data && _recent.data[0];
+          if (_hit && _hit.observation) {
+            var _entryAt = new Date(_hit.created_at).getTime();
+            // If opp was edited after this entry, treat as stale.
+            if (_oppLastUpdatedAt <= _entryAt) {
+              try {
+                var _parsed = JSON.parse(_hit.observation);
+                log('PROPOSAL DOC: ' + memAgent + ' cache HIT (age=' + Math.round((Date.now()-_entryAt)/60000) + 'min)');
+                return _parsed;
+              } catch(_pe) { /* parse fail, fall through to fresh fetch */ }
+            } else {
+              log('PROPOSAL DOC: ' + memAgent + ' cache STALE (opp updated after entry, refetching)');
+            }
+          }
+        } catch(_qe) { /* query fail, fall through */ }
+        // Fresh fetch fallback
+        try {
+          var _resp = await fetch(localBase + endpoint + '?id=' + docId);
+          if (!_resp.ok) return null;
+          var _json = await _resp.json();
+          log('PROPOSAL DOC: ' + memAgent + ' fresh fetch (cache miss/stale)');
+          return extractKey ? _json[extractKey] : _json;
+        } catch(_fe) {
+          log('PROPOSAL DOC: ' + memAgent + ' fetch failed — ' + (_fe.message||''));
+          return null;
+        }
+      }
 
       // Check if this opp has an actual RFP (determines which appendices to generate)
       var oppHasRfp = opp.rfp_document_retrieved === true && opp.rfp_text && opp.rfp_text.trim().length > 200;
 
       // Compliance Matrix (only for solicited opps)
       if (oppHasRfp) {
-        try {
-          var cmResp = await fetch(localBase + '/api/compliance-matrix?id=' + docId);
-          if (cmResp.ok) {
-            var cmJson = await cmResp.json();
-            cmData = cmJson.matrix || null;
-            log('PROPOSAL DOC: Compliance matrix loaded — ' + (cmData && cmData.requirements ? cmData.requirements.length : 0) + ' requirements');
-          }
-        } catch(cmErr) { log('PROPOSAL DOC: Compliance matrix call failed — ' + cmErr.message); }
+        cmData = await _getAppendixCached('compliance_matrix', '/api/compliance-matrix', 'matrix');
+        if (cmData) log('PROPOSAL DOC: Compliance matrix loaded — ' + (cmData.requirements ? cmData.requirements.length : 0) + ' requirements');
       } else {
         log('PROPOSAL DOC: Skipping compliance matrix — unsolicited opportunity');
       }
 
       // Rate Table (only for solicited opps)
       if (oppHasRfp) {
-        try {
-          var rtResp = await fetch(localBase + '/api/rate-table?id=' + docId);
-          if (rtResp.ok) {
-            var rtJson = await rtResp.json();
-            rtData = rtJson.rate_table || null;
-            log('PROPOSAL DOC: Rate table loaded — ' + (rtData && rtData.positions ? rtData.positions.length : 0) + ' positions');
-          }
-        } catch(rtErr) { log('PROPOSAL DOC: Rate table call failed — ' + rtErr.message); }
+        rtData = await _getAppendixCached('rate_table_engine', '/api/rate-table', 'rate_table');
+        if (rtData) log('PROPOSAL DOC: Rate table loaded — ' + (rtData.positions ? rtData.positions.length : 0) + ' positions');
       } else {
         log('PROPOSAL DOC: Skipping rate table — unsolicited opportunity');
       }
 
       // Org Chart (always — team structure is useful for any proposal)
-      try {
-        var ocResp = await fetch(localBase + '/api/org-chart?id=' + docId);
-        if (ocResp.ok) {
-          var ocJson = await ocResp.json();
-          ocData = ocJson.diagrams || null;
-          log('PROPOSAL DOC: Org chart loaded — ' + (ocData ? 'org_chart + methodology_flow' : 'none'));
-        }
-      } catch(ocErr) { log('PROPOSAL DOC: Org chart call failed — ' + ocErr.message); }
+      ocData = await _getAppendixCached('graphics_engine', '/api/org-chart', 'diagrams');
+      if (ocData) log('PROPOSAL DOC: Org chart loaded — ' + (ocData.org_chart ? 'org_chart + methodology_flow' : 'none'));
 
       // APPENDIX A: ORGANIZATIONAL CHART (embedded PNG from Kroki)
       if (ocData && ocData.org_chart) {
@@ -6505,17 +6517,27 @@ if (url.startsWith('/api/compliance-matrix')) {
     }
 
     var rfpSource = opp.rfp_text;
+    // S143 Defect § 3.4: pass proposal_content so Sonnet can cross-reference
+    // each requirement against the actual response. Without this, Sonnet has no way to
+    // verify compliance and rationally defaults to ACTION_REQUIRED for everything.
+    var cmProposalText = (opp.proposal_content || '').slice(0, 30000);
+    var cmHasProposal = cmProposalText.length > 1000;
 
     var D = String.fromCharCode(36);
     var cmPrompt = 'Extract EVERY requirement from this RFP/SOQ and produce a compliance matrix.\n\n' +
-      '## RFP TEXT\n' + rfpSource.slice(0, 40000) + '\n\n' +
+      '## RFP TEXT\n' + rfpSource.slice(0, 30000) + '\n\n' +
+      (cmHasProposal
+        ? '## CURRENT PROPOSAL TEXT\n' +
+          'Cross-reference each requirement against this proposal. Mark COMPLIANT only if the proposal addresses the requirement concretely (cite a literal phrase or section heading from the proposal). Mark PARTIAL if addressed but incomplete. Mark ACTION_REQUIRED if not addressed.\n\n' +
+          cmProposalText + '\n\n'
+        : '## CURRENT PROPOSAL TEXT\n(none — proposal not yet generated; mark all status as ACTION_REQUIRED)\n\n') +
       '## INSTRUCTIONS\n' +
       'For each requirement found in the RFP:\n' +
       '1. Requirement ID (RFP section number if available, otherwise sequential R-001, R-002)\n' +
       '2. Requirement description (exact text or close paraphrase)\n' +
       '3. Category: MANDATORY | DESIRABLE | INFORMATIONAL\n' +
-      '4. Response location: which section of the proposal addresses it\n' +
-      '5. Compliance status: COMPLIANT | PARTIAL | ACTION_REQUIRED\n' +
+      '4. Response location: cite the literal proposal section heading or phrase that addresses it (use "n/a" if not addressed)\n' +
+      '5. Compliance status: COMPLIANT (proposal directly addresses) | PARTIAL (proposal partially addresses) | ACTION_REQUIRED (proposal does not address or proposal not yet generated)\n' +
       '6. Notes: what HGI needs to do or provide\n\n' +
       'Also extract:\n' +
       '- All required exhibits, attachments, and forms\n' +
@@ -6802,7 +6824,21 @@ if (url.startsWith('/api/proposal-bundle')) {
       log('COST CIRCUIT BREAKER (proposal-bundle): query failed (' + (pbBreakerErr.message||pbBreakerErr) + '). Proceeding without block.');
     }
   } else {
+    // S143: passive audit log on bundle force bypass.
     log('COST CIRCUIT BREAKER (proposal-bundle): bypassed via ?force=true on ' + pbId);
+    try {
+      await supabase.from('organism_memory').insert({
+        id: 'cost_breaker_bypass-' + Date.now() + '-' + Math.random().toString(36).slice(2,6),
+        agent: 'cost_circuit_breaker_bypass',
+        opportunity_id: pbId,
+        entity_tags: 'cost_control,bypass,proposal_bundle',
+        observation: 'BYPASS proposal-bundle: ?force=true on ' + pbId +
+          ' | url: ' + (req.url || '').slice(0,300),
+        memory_type: 'cost_control',
+        source_url: null, confidence: 'high', status: 'scratch',
+        created_at: new Date().toISOString()
+      });
+    } catch(_pbBypLog) {}
   }
 
   log('PROPOSAL BUNDLE: Starting full pipeline for ' + pbId);
@@ -9362,6 +9398,28 @@ function createL6Specialist(config) {
         if (parsed[extraKey] !== undefined) payload[extraKey] = parsed[extraKey];
       });
     }
+
+    // S143 fix: L6 specialists previously did not write organism_memory at all (factory was payload-return only).
+    // Without this, run audit trails skip L6 entirely (Defect § 3.3 sub-cause 1). Non-fatal — payload still returns.
+    try {
+      await supabase.from('organism_memory').insert({
+        id: 'l6_' + config.name + '_' + (oppId||'').slice(0,20) + '_' + Date.now(),
+        agent: 'l6_' + config.name,
+        opportunity_id: oppId,
+        entity_tags: 'l6,specialist,' + config.name,
+        observation: 'L6 ' + config.name.toUpperCase() + ' ' + sectionStatus.toUpperCase() +
+          ' for ' + (opp.title||'').slice(0,50) +
+          ' | model=' + payload.model + ' v=' + payload.version +
+          ' | words=' + wordCount + ' floors=' + floorsMetCount + '/' + floorsTotal +
+          ' | quality=' + qualityScore + ' | wall=' + wallTime + 's $' + runCost.toFixed(4) +
+          ' | floors_met=' + JSON.stringify(floorsMet) +
+          (canonViolations.length > 0 ? ' | canon_viol=' + canonViolations.join(',') : ''),
+        memory_type: 'l6_specialist_run',
+        confidence: sectionStatus === 'published' ? 'high' : 'medium',
+        created_at: new Date().toISOString()
+      });
+    } catch (_l6MemErr) { /* non-fatal — payload still returns */ }
+
     return payload;
   };
 }
@@ -10671,6 +10729,20 @@ async function runSingleRedTeamPass(opp, proposalText) {
     summary = 'RED TEAM REVIEW [TEXT FALLBACK]: parse failed, raw: ' + (reviewResp || '').slice(0, 200);
   }
 
+  // S143 Item D: enrich rtReport with per_criterion_scoring BEFORE building reviewStorage.
+  // Without this call, refinement_loop iterations overwrite proposal_review with output
+  // from this function, wiping any per_criterion_scoring set upstream by the main red team.
+  // Modifies rtReport in place; non-fatal if eval_criteria not found.
+  try {
+    if (rtReport && opp) {
+      var _itemDStatus = await enrichReviewWithPerCriterion(rtReport, opp, opp.id, supabase);
+      if (_itemDStatus.applied) {
+        log('PER-CRITERION (iter-rescore): ' + _itemDStatus.mapped + ' mapped, ' +
+            _itemDStatus.unmapped + ' unmapped, source=' + _itemDStatus.source);
+      }
+    }
+  } catch (_pcRsErr) { /* non-fatal */ }
+
   var reviewStorage = rtReport ? (summary + '\n\n' + JSON.stringify(rtReport, null, 2)) : (summary + '\n\n' + (reviewResp || ''));
   return { reviewStorage: reviewStorage, pwinEstimate: pwinEst, rtReport: rtReport, critCount: critCount, majCount: majCount, summary: summary };
 }
@@ -10874,19 +10946,19 @@ function extractReviewReport(proposalReviewText) {
 }
 
 // S141 Item D: per-criterion weighted scoring helper.
-// Reads eval_criteria (e.g., from compliance_matrix output: [{criterion, points, weight}, ...])
-// and rtReport.scoring_matrix (per-section scores); maps each criterion to one or more
-// sections and computes weighted scores per criterion. Existing scoring_matrix structure
-// is left untouched; output goes into rtReport.per_criterion_scoring as a sibling field.
-// Mapping rules: criterion-keyword regex -> section-name regex set. First match wins.
-// Unmapped criteria carry mapping_status='unmapped' for human review.
-function _s141ParseEvalWeight(weightStr, points) {
-  if (typeof weightStr === 'string') {
-    var m = weightStr.match(/(\d+(?:\.\d+)?)\s*%/);
+// S143 update: parse weight from rfp_requirements.evaluation_criteria's `weight_percent` field
+// (new S115/S116 extractor shape) in addition to compliance_matrix's `weight` string and `points` number.
+function _s141ParseEvalWeight(ec) {
+  if (!ec) return null;
+  // S143: weight_percent (rfp_requirements.evaluation_criteria shape: {id, name, weight_percent})
+  if (typeof ec.weight_percent === 'number') return ec.weight_percent;
+  // weight as string '45%' (compliance_matrix shape: {criterion, weight, points})
+  if (typeof ec.weight === 'string') {
+    var m = ec.weight.match(/(\d+(?:\.\d+)?)\s*%/);
     if (m) return parseFloat(m[1]);
   }
-  if (typeof weightStr === 'number') return weightStr;
-  if (typeof points === 'number') return points;
+  if (typeof ec.weight === 'number') return ec.weight;
+  if (typeof ec.points === 'number') return ec.points;
   return null;
 }
 
@@ -10909,26 +10981,31 @@ function computePerCriterionScores(rtReport, evalCriteria) {
   if (normalized.length === 0) return null;
 
   // Mapping rules: criterion keyword -> section name patterns. Order = priority.
+  // S143 added: audit (for "Auditing History" evaluation criteria) and broader socioeconomic.
   var mappingRules = [
     { criterion_pattern: /qualif|firm.*experience|firm.*capabilit|capabilit.*firm/i,
       section_patterns: [/qualif/i, /firm.*(experience|capabilit)/i, /\bcapabilit/i, /executive\s*summary/i, /cover\s*letter/i] },
     { criterion_pattern: /past\s*performance|track\s*record|references|relevant\s*experience/i,
       section_patterns: [/past\s*performance/i, /reference/i, /relevant\s*experience/i] },
-    { criterion_pattern: /technical|approach|methodology|scope|work\s*plan/i,
-      section_patterns: [/technical\s*approach/i, /methodology/i, /work\s*plan/i, /\bscope\b/i, /\btechnical\b/i] },
+    { criterion_pattern: /technical|approach|methodology|scope|work\s*plan|strategy/i,
+      section_patterns: [/technical\s*approach/i, /methodology/i, /work\s*plan/i, /\bscope\b/i, /\btechnical\b/i, /strategy/i] },
     { criterion_pattern: /staff|personnel|key\s*staff|team|capacity|resume/i,
       section_patterns: [/staffing/i, /personnel/i, /key\s*staff/i, /resume/i, /\bteam\b/i] },
-    { criterion_pattern: /pricing|price|cost|fee|rate|compensation/i,
+    { criterion_pattern: /pricing|price|cost|fee|rate|compensation|proposed\s*pricing/i,
       section_patterns: [/pricing/i, /\bcost\b/i, /\bfee\b/i, /\brate\b/i, /\bprice\b/i, /compensation/i] },
     { criterion_pattern: /quality|qa|compliance|control|process/i,
       section_patterns: [/qa\s*compliance/i, /\bquality\b/i, /\bcompliance\b/i] },
-    { criterion_pattern: /minority|mwbe|dbe|disadvantaged|small\s*business/i,
-      section_patterns: [/minority/i, /\bmwbe\b/i, /\bdbe\b/i, /disadvantaged/i, /small\s*business/i] }
+    // S143: "Auditing History" / audit-defense evaluation criteria — common for grant-mgmt RFPs.
+    { criterion_pattern: /audit|auditing|audit\s*history/i,
+      section_patterns: [/audit/i, /past\s*performance/i, /\bquality\b/i, /\bcompliance\b/i, /qa\s*compliance/i] },
+    // S143: socioeconomic (broader than minority) — common eval criterion label.
+    { criterion_pattern: /socioeconomic|minority|mwbe|dbe|disadvantaged|small\s*business|hub\s*zone|veteran/i,
+      section_patterns: [/socioeconomic/i, /minority/i, /\bmwbe\b/i, /\bdbe\b/i, /disadvantaged/i, /small\s*business/i, /minority\-?owned/i, /\bsbe\b/i] }
   ];
 
   var perCriterion = evalCriteria.map(function(ec) {
     var critName = ec.criterion || ec.name || '';
-    var weight = _s141ParseEvalWeight(ec.weight, ec.points);
+    var weight = _s141ParseEvalWeight(ec);  // S143: pass full ec object (handles weight_percent, weight string, points)
     var matchedSections = [];
     var rule = null;
     for (var ri = 0; ri < mappingRules.length; ri++) {
@@ -10971,6 +11048,75 @@ function computePerCriterionScores(rtReport, evalCriteria) {
     unmapped_criteria_count: unmappedCount,
     sections_evaluated: normalized.length,
     schema_version: 's141_v1'
+  };
+}
+
+// S143 Item D enrichment helper. Encapsulates the eval_criteria fallback chain so
+// BOTH the main produce-proposal red team flow AND runSingleRedTeamPass (used by
+// refinement_loop) can call it. Without this shared helper, refinement iterations
+// overwrite proposal_review without per_criterion_scoring, undoing Item D's work.
+//
+// Fallback chain (S143-corrected):
+//   1. opp.rfp_requirements.evaluation_criteria  (S115/S116 extractor — full word key)
+//   2. opp.rfp_requirements.eval_criteria        (abbreviated key — backward compat)
+//   3. organism_memory compliance_matrix observation, key 'eval_criteria'
+//
+// Modifies rtReport in place: adds rtReport.per_criterion_scoring with eval_criteria_source.
+// Returns a status object for logging. Non-fatal — caller can ignore the return value.
+async function enrichReviewWithPerCriterion(rtReport, opp, oppId, supabaseClient) {
+  if (!rtReport || !Array.isArray(rtReport.scoring_matrix) || rtReport.scoring_matrix.length === 0) {
+    return { applied: false, reason: 'no_scoring_matrix' };
+  }
+  var evalCriteria = null;
+  var ecSource = 'none';
+  // Source 1: opp.rfp_requirements.evaluation_criteria (full word, S115/S116 extractor shape)
+  if (opp && opp.rfp_requirements && Array.isArray(opp.rfp_requirements.evaluation_criteria) && opp.rfp_requirements.evaluation_criteria.length > 0) {
+    evalCriteria = opp.rfp_requirements.evaluation_criteria;
+    ecSource = 'rfp_requirements.evaluation_criteria';
+  }
+  // Source 2: opp.rfp_requirements.eval_criteria (abbreviated key — backward compat)
+  else if (opp && opp.rfp_requirements && Array.isArray(opp.rfp_requirements.eval_criteria) && opp.rfp_requirements.eval_criteria.length > 0) {
+    evalCriteria = opp.rfp_requirements.eval_criteria;
+    ecSource = 'rfp_requirements.eval_criteria';
+  }
+  // Source 3: organism_memory compliance_matrix observation, key 'eval_criteria'
+  else if (oppId && supabaseClient) {
+    try {
+      var cmMem = await supabaseClient.from('organism_memory')
+        .select('observation,created_at')
+        .eq('opportunity_id', oppId)
+        .eq('agent', 'compliance_matrix')
+        .order('created_at', { ascending: false })
+        .limit(1);
+      var cmObs = cmMem.data && cmMem.data[0] && cmMem.data[0].observation;
+      if (cmObs) {
+        var firstBrace = cmObs.indexOf('{');
+        var lastBrace = cmObs.lastIndexOf('}');
+        if (firstBrace >= 0 && lastBrace > firstBrace) {
+          var cmJson = JSON.parse(cmObs.slice(firstBrace, lastBrace + 1));
+          if (Array.isArray(cmJson.eval_criteria) && cmJson.eval_criteria.length > 0) {
+            evalCriteria = cmJson.eval_criteria;
+            ecSource = 'organism_memory.compliance_matrix';
+          }
+        }
+      }
+    } catch (_e) { /* fallthrough */ }
+  }
+  if (!evalCriteria) {
+    return { applied: false, reason: 'no_eval_criteria_found' };
+  }
+  var perCrit = computePerCriterionScores(rtReport, evalCriteria);
+  if (!perCrit) {
+    return { applied: false, reason: 'compute_returned_null' };
+  }
+  perCrit.eval_criteria_source = ecSource;
+  rtReport.per_criterion_scoring = perCrit;
+  return {
+    applied: true,
+    source: ecSource,
+    mapped: perCrit.per_criterion.length - perCrit.unmapped_criteria_count,
+    unmapped: perCrit.unmapped_criteria_count,
+    overall_pct: perCrit.overall_pct
   };
 }
 
