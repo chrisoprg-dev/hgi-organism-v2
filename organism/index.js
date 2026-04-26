@@ -9276,19 +9276,36 @@ function createL6Specialist(config) {
       if (a && a.type && counts.hasOwnProperty(a.type)) counts[a.type]++;
     });
 
-    var floors = {};
+    // S145 Phase 2 (Shape C): Replace fabricated quota floors with two-tier logic.
+    // Tier 1 = >=1 of each floored anchor type (HARD PUBLISH GATE).
+    // Tier 2 = original 15/8/12/6/10 etc, scaled per-3K with S140 1.5x cap, kept
+    // as informational STRETCH TARGETS only -- logged in payload, never blocks.
+    // The fabricated quotas were never benchmarked against real winning proposals;
+    // they produced false negatives (e.g. flagging Tech Approach with 14 reg
+    // citations when 15 was the invented floor). Decision recorded S143 chat,
+    // locked in S144 memory, implemented S145.
     var floorsKeys = Object.keys(config.density_floors_per_3k_words || {});
-    floorsKeys.forEach(function(k){
-      floors[k] = Math.ceil((config.density_floors_per_3k_words[k] || 0) * per3kFactor);
-    });
 
-    var floorsMet = {};
+    // Tier 1 -- hard publish gate (>=1 of each floored anchor type)
+    var tier1Met = {};
     floorsKeys.forEach(function(k){
-      floorsMet[k] = (counts[k] || 0) >= floors[k];
+      tier1Met[k] = (counts[k] || 0) >= 1;
     });
-    var floorsMetCount = floorsKeys.filter(function(k){ return floorsMet[k]; }).length;
-    var floorsTotal = floorsKeys.length;
-    var qualityScore = floorsTotal > 0 ? Math.round((floorsMetCount / floorsTotal) * 100) : 0;
+    var tier1MetCount = floorsKeys.filter(function(k){ return tier1Met[k]; }).length;
+    var tier1Total = floorsKeys.length;
+    var tier1AllMet = (tier1Total > 0) && (tier1MetCount === tier1Total);
+
+    // Tier 2 -- informational stretch targets (preserves prior 15/8/12/6/10
+    // numbers scaled per-3K with S140 1.5x cap already applied via per3kFactor).
+    var stretchTargets = {};
+    var stretchTargetsMet = {};
+    floorsKeys.forEach(function(k){
+      stretchTargets[k] = Math.ceil((config.density_floors_per_3k_words[k] || 0) * per3kFactor);
+      stretchTargetsMet[k] = (counts[k] || 0) >= stretchTargets[k];
+    });
+    var stretchMetCount = floorsKeys.filter(function(k){ return stretchTargetsMet[k]; }).length;
+
+    var qualityScore = tier1Total > 0 ? Math.round((tier1MetCount / tier1Total) * 100) : 0;
 
     // --- Canon violation sweep (universal + specialist extras) ---
     var canonViolations = [];
@@ -9350,25 +9367,44 @@ function createL6Specialist(config) {
       if (jm) canonViolations.push('voice_jargon:' + rule.name);
     });
 
-    // --- Status decision ---
-    var minFloorsRequired = (typeof config.min_floors_required_for_published === 'number') ? config.min_floors_required_for_published : Math.max(1, floorsTotal - 1);
-    var sectionStatus = (canonViolations.length === 0 && floorsMetCount >= minFloorsRequired) ? 'published' : 'flagged';
+    // --- Status decision (S145 Phase 2 Shape C) ---
+    // Published requires: Tier 1 met (>=1 of each anchor type) AND no canon
+    // violations. Min section length is enforced upstream at L9259 as a hard
+    // failure (returns status:'failed', not 'flagged'). Stretch targets are
+    // informational only and never block publish. The legacy
+    // `min_floors_required_for_published` config field is now ignored; left in
+    // configs as dead data for non-Phase-2 cleanup.
+    var sectionStatus = (canonViolations.length === 0 && tier1AllMet) ? 'published' : 'flagged';
+    var statusReason = canonViolations.length > 0 ? 'canon_violations'
+                     : !tier1AllMet ? 'failed_tier1_anchor_gate'
+                     : 'published';
     var wallTime = Math.floor((Date.now() - runStart) / 1000);
 
     var floorsLogParts = floorsKeys.map(function(k){
       var shortKey = k.split('_').map(function(p){ return p.slice(0,3); }).join('');
       return shortKey + ':' + (counts[k]||0);
     }).join(', ');
-    log(log_prefix + ' DONE: status=' + sectionStatus + ', words=' + wordCount + ', floors=' + floorsMetCount + '/' + floorsTotal + ', anchors={' + floorsLogParts + '}, cost=$' + runCost.toFixed(2) + ', wall=' + wallTime + 's');
+    log(log_prefix + ' DONE: status=' + sectionStatus + ' (' + statusReason + '), words=' + wordCount + ', tier1=' + tier1MetCount + '/' + tier1Total + ', stretch=' + stretchMetCount + '/' + tier1Total + ', anchors={' + floorsLogParts + '}, cost=$' + runCost.toFixed(2) + ', wall=' + wallTime + 's');
 
     // --- Return payload ---
+    // S145 Phase 2 Shape C: tier1_* fields are the actual gate. floors_* are
+    // preserved as backward-compat aliases (semantic shift: floors_met now
+    // means >=1 per anchor, floors_required carries stretch targets).
     var payload = {
       status: sectionStatus,
+      status_reason: statusReason,
       section_text: sectionText,
       word_count: wordCount,
-      floors_met: floorsMet,
-      floors_met_count: floorsMetCount,
-      floors_required: floors,
+      tier1_anchor_gate: tier1Met,
+      tier1_all_met: tier1AllMet,
+      tier1_met_count: tier1MetCount,
+      tier1_total: tier1Total,
+      stretch_targets: stretchTargets,
+      stretch_targets_met: stretchTargetsMet,
+      stretch_targets_met_count: stretchMetCount,
+      floors_met: tier1Met,
+      floors_met_count: tier1MetCount,
+      floors_required: stretchTargets,
       quality_score: qualityScore,
       canon_violations: canonViolations,
       evidence_anchors: evidenceAnchors,
@@ -9408,11 +9444,14 @@ function createL6Specialist(config) {
         opportunity_id: oppId,
         entity_tags: 'l6,specialist,' + config.name,
         observation: 'L6 ' + config.name.toUpperCase() + ' ' + sectionStatus.toUpperCase() +
-          ' for ' + (opp.title||'').slice(0,50) +
+          ' (' + statusReason + ') for ' + (opp.title||'').slice(0,50) +
           ' | model=' + payload.model + ' v=' + payload.version +
-          ' | words=' + wordCount + ' floors=' + floorsMetCount + '/' + floorsTotal +
+          ' | words=' + wordCount +
+          ' tier1=' + tier1MetCount + '/' + tier1Total +
+          ' stretch=' + stretchMetCount + '/' + tier1Total +
           ' | quality=' + qualityScore + ' | wall=' + wallTime + 's $' + runCost.toFixed(4) +
-          ' | floors_met=' + JSON.stringify(floorsMet) +
+          ' | tier1_met=' + JSON.stringify(tier1Met) +
+          ' | stretch_met=' + JSON.stringify(stretchTargetsMet) +
           (canonViolations.length > 0 ? ' | canon_viol=' + canonViolations.join(',') : ''),
         memory_type: 'l6_specialist_run',
         confidence: sectionStatus === 'published' ? 'high' : 'medium',
