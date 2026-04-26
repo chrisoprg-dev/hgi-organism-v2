@@ -13067,8 +13067,10 @@ async function agentHunting(state, trigger) {
     });
   }
 
-  function daysAgo(n) { var d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10).replace(/-/g, '/'); }
-  function today() { return new Date().toISOString().slice(0, 10).replace(/-/g, '/'); }
+  // S144: SAM.gov requires MM/DD/YYYY format. Previous yyyy/mm/dd format silently
+  // returned 0 results from SAM despite valid API key. Only used by SAM.gov call below.
+  function daysAgo(n) { var d = new Date(); d.setUTCDate(d.getUTCDate() - n); var mm = String(d.getUTCMonth() + 1).padStart(2, '0'); var dd = String(d.getUTCDate()).padStart(2, '0'); return mm + '/' + dd + '/' + d.getUTCFullYear(); }
+  function today() { var d = new Date(); var mm = String(d.getUTCMonth() + 1).padStart(2, '0'); var dd = String(d.getUTCDate()).padStart(2, '0'); return mm + '/' + dd + '/' + d.getUTCFullYear(); }
 
   // Central Bidding — DIRECT V2 hunting (no V1/Apify dependency)
   try {
@@ -13126,7 +13128,9 @@ async function agentHunting(state, trigger) {
 
 
   // === NEW: OpenFEMA disaster declarations (free, no key) ===
-  var hgiStates = ['Louisiana', 'Texas', 'Florida', 'Mississippi', 'Alabama', 'Georgia'];
+  // S144: OpenFEMA's state field is a 2-letter code (LA, TX, FL, MS, AL, GA), not full
+  // names. Previous full-name array silently returned 0 results from OpenFEMA every run.
+  var hgiStates = ['LA', 'TX', 'FL', 'MS', 'AL', 'GA'];
   for (var fs = 0; fs < hgiStates.length; fs++) {
     try {
       var femaUrl = 'https://www.fema.gov/api/open/v2/DisasterDeclarationsSummaries?' +
