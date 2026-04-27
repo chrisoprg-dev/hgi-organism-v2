@@ -1918,6 +1918,34 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       proposalText = (finalMessage.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
       trackCost('proposal_engine_opus', 'claude-opus-4-6', finalMessage.usage);
       log('PROPOSAL ENGINE: Generated ' + proposalText.length + ' chars');
+      // S149 DIAGNOSTIC: capture stop_reason + usage + last 200 chars BEFORE post-processing.
+      // This is the single source of truth for whether mid-sentence truncation comes from
+      // Opus (stop_reason !== 'end_turn') or from post-processing (regex eats tail).
+      try {
+        var _s149_stopReason = (finalMessage && finalMessage.stop_reason) || 'unknown';
+        var _s149_usage = (finalMessage && finalMessage.usage) || {};
+        var _s149_rawTail = (proposalText || '').slice(-200).replace(/\n/g,'\\n');
+        log('PROPOSAL ENGINE: S149 DIAG — stop_reason=' + _s149_stopReason +
+            ' input_tokens=' + (_s149_usage.input_tokens||'?') +
+            ' output_tokens=' + (_s149_usage.output_tokens||'?') +
+            ' raw_chars=' + (proposalText||'').length +
+            ' raw_tail="' + _s149_rawTail + '"');
+        // Persist to organism_memory so we can grep across runs
+        await supabase.from('organism_memory').insert({
+          id: 's149_diag-' + (ppId||'').slice(0,20) + '-' + Date.now(),
+          agent: 's149_proposal_diag',
+          opportunity_id: ppId,
+          observation: 'S149 DIAG: stop_reason=' + _s149_stopReason +
+            ' | input_tokens=' + (_s149_usage.input_tokens||'?') +
+            ' | output_tokens=' + (_s149_usage.output_tokens||'?') +
+            ' | raw_chars=' + (proposalText||'').length +
+            ' | raw_tail_200="' + _s149_rawTail + '"',
+          memory_type: 'diagnostic',
+          created_at: new Date().toISOString()
+        });
+      } catch(_s149DiagErr) {
+        log('PROPOSAL ENGINE: S149 diag log failed (non-fatal): ' + (_s149DiagErr.message||'').slice(0,150));
+      }
 
       // 5.5 POST-PROCESSING: Auto-fill known ACTION REQUIRED items
       var arBefore = (proposalText.match(/ACTION REQUIRED/gi) || []).length;
