@@ -1486,6 +1486,54 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         topPPText = '(PP selector unavailable — senior_writer must reference HGI_PP canon conservatively and avoid exclusions: PBGC, Orleans Parish School Board, OPSB, LIGA, TPCIGA)';
       }
 
+      // ═══ S150: PP REFERENCES — load reference contacts for the top-3 selected PPs ═══
+      // Christopher dictates references via POST /api/add-reference; they store in
+      // relationship_graph with contact_type='past_performance_reference' and
+      // connected_orgs=<pp_slug>. This block pulls them so Tab 9 (References) renders
+      // real names + emails + phones instead of [PROVIDED UPON REQUEST] placeholders.
+      // Falls back to org-name match when connected_orgs is not populated.
+      var topPPReferencesText = '';
+      try {
+        var _topPPsForRefs = (_ppResult && _ppResult.selected) || [];
+        var _topSlugs = _topPPsForRefs.map(function(p){ return p.id; }).filter(Boolean);
+        var _topClients = _topPPsForRefs.map(function(p){ return (p.client||'').toLowerCase(); }).filter(Boolean);
+        if (_topSlugs.length > 0) {
+          var _refRes = await supabase.from('relationship_graph')
+            .select('id,contact_name,title,organization,email,phone,relationship_strength,notes,connected_orgs,role_in_procurement,hgi_relationship,last_contact')
+            .eq('contact_type', 'past_performance_reference');
+          var _refRows = (_refRes && _refRes.data) || [];
+          var _matchedRefs = _refRows.filter(function(r){
+            if (r.connected_orgs && _topSlugs.indexOf(r.connected_orgs) >= 0) return true;
+            if (r.organization && _topClients.indexOf(String(r.organization).toLowerCase()) >= 0) return true;
+            return false;
+          });
+          if (_matchedRefs.length > 0) {
+            topPPReferencesText = _matchedRefs.map(function(r){
+              var ppMatch = null;
+              for (var _ppi = 0; _ppi < _topPPsForRefs.length; _ppi++) {
+                var _pp = _topPPsForRefs[_ppi];
+                if ((r.connected_orgs && r.connected_orgs === _pp.id) ||
+                    (r.organization && _pp.client && String(r.organization).toLowerCase() === String(_pp.client).toLowerCase())) {
+                  ppMatch = _pp; break;
+                }
+              }
+              return '- For ' + (ppMatch ? (ppMatch.contract_name + ' [' + ppMatch.id + ']') : (r.organization||'unknown')) + ':\n' +
+                     '  Name: ' + (r.contact_name||'TBD') + '\n' +
+                     '  Title: ' + (r.title||'TBD') + '\n' +
+                     '  Organization: ' + (r.organization||'TBD') + '\n' +
+                     '  Email: ' + (r.email||'TBD') + '\n' +
+                     '  Phone: ' + (r.phone||'TBD') + '\n' +
+                     '  Relationship strength: ' + (r.relationship_strength||'unknown') + (r.notes ? '\n  Notes: ' + r.notes : '');
+            }).join('\n\n');
+            log('PP REFERENCES: loaded ' + _matchedRefs.length + ' references for top-3 PPs (' + _topSlugs.join(', ') + ')');
+          } else {
+            log('PP REFERENCES: no references on file for top-3 PPs (' + _topSlugs.join(', ') + ')');
+          }
+        }
+      } catch (_refErr) {
+        log('PP REFERENCES: load failed (non-fatal): ' + (_refErr.message||'').slice(0,150));
+      }
+
       // ═══ S122 LAYER B: PURSUIT RESEARCH FETCH (auto-generate if missing or stale) ═══
       var pursuitResearchText = '';
       try {
@@ -1873,6 +1921,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         '## RFP/SOQ REQUIREMENTS (THE ACTUAL DOCUMENT)\n' + ((opp.rfp_text && opp.rfp_text.trim().length > 200) ? opp.rfp_text.slice(0, 20000) : (opp.scope_analysis || opp.description || 'No RFP text available')) + '\n\n' +
         '## HGI COMPANY PROFILE\n' + HGI + '\n\n' +
         '## TOP-RELEVANT PAST PERFORMANCE FOR THIS RFP (selected by HGI_PP selector; ranks 1-3 based on vertical match, agency-type match, scale, recency)\nFeature these 3 prominently in Past Performance and Experience sections. You may reference other HGI_PP canonical entries as supporting citations, but these 3 must be the primary feature. DO NOT list these exclusions under any circumstances without explicit President confirmation: PBGC, Orleans Parish School Board, OPSB, LIGA, TPCIGA. No current FEMA Public Assistance contract may be claimed.\n\n' + topPPText + '\n\n' +
+        '## PAST PERFORMANCE REFERENCES (S150) — VERIFIED contacts for the 3 selected PPs above. Use ONLY these in the References / Tab 9 section. Render the contact name, title, organization, email, and phone exactly as listed. Do NOT invent, paraphrase, or fabricate contact details. If a PP has no reference in this section, write "[PROVIDED UPON REQUEST]" for that reference\\'s contact info — do NOT make up a name or contact.\n\n' + (topPPReferencesText || 'No verified references on file for the selected PPs. For Tab 9 / References, write "[PROVIDED UPON REQUEST]" against each PP — never invent contact details.') + '\n\n' +
         '## WINNING DISCRIMINATORS FOR THIS SPECIFIC OPPORTUNITY (L4 synthesis)\nThese are the 3-5 specific, evidence-anchored claims that differentiate HGI in this particular pursuit. Each discriminator has an evidence anchor pointing to concrete past performance or research. Weave these throughout Executive Summary, Technical Approach, Past Performance, and Conclusion sections. Do not merely list them — integrate them as thematic throughlines. Cite evidence when stating discriminators; never make unsupported claims. Never name competitor companies by name; cite gap characteristics instead.\n\n' + discriminatorsText + '\n\n' +
         '## SCOPE ANALYSIS (Organism deep analysis of requirements)\n' + (opp.scope_analysis || 'Not yet produced') + '\n\n' +
         '## FINANCIAL ANALYSIS (Pricing strategy, market benchmarks)\n' + (opp.financial_analysis || 'Not yet produced') + '\n\n' +
@@ -4537,6 +4586,123 @@ if (url === '/api/capture-lesson' && req.method === 'POST') {
       res.end(JSON.stringify({ success: true, id: ins.data && ins.data.id, lesson_type: p.lesson_type }));
     } catch (e) { res.end(JSON.stringify({ error: e.message })); }
   });
+  return;
+}
+
+// === S150 PP REFERENCE INTAKE — /api/add-reference ===
+// Christopher dictates a reference contact for a past performance entry.
+// Stores in relationship_graph with contact_type='past_performance_reference'.
+// Loaded by produce-proposal into the mega-prompt so Tab 9 (References) renders
+// real names + emails + phones instead of placeholders.
+//
+// POST body:
+// {
+//   pp_slug: string (HGI_PP id like 'pp-tpsd', 'pp-road-home') — REQUIRED for matching
+//   contact_name: string (REQUIRED),
+//   organization: string (defaults to HGI_PP[].client when pp_slug provided),
+//   title: string,
+//   email: string,
+//   phone: string,
+//   relationship_strength: 'strong' | 'good' | 'unknown' | 'cool',
+//   notes: string,
+//   relationship_to_hgi: string  (e.g. "Worked with HGI 2010-2013 on Road Home")
+// }
+if (url === '/api/add-reference' && req.method === 'POST') {
+  var refBody = '';
+  req.on('data', function(c) { refBody += c; });
+  req.on('end', async function() {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    try {
+      var ar = JSON.parse(refBody || '{}');
+      if (!ar.contact_name) { res.end(JSON.stringify({ error: 'contact_name required' })); return; }
+      // If pp_slug provided, default organization from HGI_PP canonical entry
+      var arOrg = ar.organization || null;
+      if (!arOrg && ar.pp_slug) {
+        for (var _hpi = 0; _hpi < HGI_PP.length; _hpi++) {
+          if (HGI_PP[_hpi].id === ar.pp_slug) { arOrg = HGI_PP[_hpi].client; break; }
+        }
+      }
+      if (!arOrg) { res.end(JSON.stringify({ error: 'organization (or recognized pp_slug) required' })); return; }
+      var arId = 'ref_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+      var arRow = {
+        id: arId,
+        contact_name: ar.contact_name,
+        title: ar.title || null,
+        organization: arOrg,
+        email: ar.email || null,
+        phone: ar.phone || null,
+        relationship_strength: ['strong','good','unknown','cool'].indexOf(ar.relationship_strength) >= 0 ? ar.relationship_strength : 'unknown',
+        notes: ar.notes || null,
+        contact_type: 'past_performance_reference',
+        hgi_relationship: ar.relationship_to_hgi || null,
+        connected_orgs: ar.pp_slug || null,
+        source_agent: 's150_christopher_intake',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      var arRes = await supabase.from('relationship_graph').insert(arRow);
+      if (arRes.error) { res.end(JSON.stringify({ error: 'insert failed: ' + arRes.error.message })); return; }
+      log('PP REFERENCE INTAKE: ' + arId + ' for ' + arOrg + ' (' + ar.contact_name + ')' + (ar.pp_slug ? ' pp=' + ar.pp_slug : ''));
+      await supabase.from('organism_memory').insert({
+        id: 's150_ref_' + arId.slice(-12) + '_' + Date.now(),
+        agent: 's150_reference_intake',
+        observation: 'PP REFERENCE STORED: ' + ar.contact_name + ' (' + (ar.title||'?') + ') at ' + arOrg + ' | ' + (ar.email||'no-email') + ' | ' + (ar.phone||'no-phone') + (ar.pp_slug ? ' | pp:' + ar.pp_slug : ''),
+        memory_type: 'analysis',
+        created_at: new Date().toISOString()
+      });
+      res.end(JSON.stringify({ success: true, id: arId, pp_slug: ar.pp_slug || null, organization: arOrg, contact_name: ar.contact_name }));
+    } catch (refErr) { res.end(JSON.stringify({ error: refErr.message })); }
+  });
+  return;
+}
+
+// === S150 PP REFERENCES LIST — /api/pp-references ===
+// Returns all past_performance_reference contacts grouped by organization + pp_slug.
+// Useful for: confirming what's on file, building UI surfaces, exporting for backup.
+if (url.startsWith('/api/pp-references') && req.method === 'GET') {
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+  try {
+    var lrRes = await supabase.from('relationship_graph')
+      .select('id,contact_name,title,organization,email,phone,relationship_strength,notes,connected_orgs,hgi_relationship,created_at,updated_at')
+      .eq('contact_type', 'past_performance_reference')
+      .order('organization', { ascending: true });
+    var lrRows = (lrRes && lrRes.data) || [];
+    var byOrg = {};
+    var byPp = {};
+    for (var lri = 0; lri < lrRows.length; lri++) {
+      var row = lrRows[lri];
+      var org = row.organization || 'unknown';
+      if (!byOrg[org]) byOrg[org] = [];
+      byOrg[org].push(row);
+      if (row.connected_orgs) {
+        if (!byPp[row.connected_orgs]) byPp[row.connected_orgs] = [];
+        byPp[row.connected_orgs].push(row);
+      }
+    }
+    // Coverage map: which HGI_PP entries have at least one reference
+    var coverage = HGI_PP.map(function(pp){
+      var orgRefs = (byOrg[pp.client]||[]).length;
+      var slugRefs = (byPp[pp.id]||[]).length;
+      return {
+        pp_id: pp.id,
+        contract_name: pp.contract_name,
+        client: pp.client,
+        vertical: pp.vertical,
+        outcome: pp.outcome,
+        reference_count: Math.max(orgRefs, slugRefs),
+        has_reference: (orgRefs + slugRefs) > 0
+      };
+    });
+    var coveredCount = coverage.filter(function(c){ return c.has_reference; }).length;
+    res.end(JSON.stringify({
+      total_references: lrRows.length,
+      pp_coverage: coveredCount + ' of ' + HGI_PP.length + ' canonical PPs have references',
+      coverage_detail: coverage,
+      by_organization: byOrg,
+      by_pp_slug: byPp,
+      all: lrRows
+    }));
+  } catch (lrErr) { res.end(JSON.stringify({ error: lrErr.message })); }
   return;
 }
 
