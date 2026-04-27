@@ -1057,8 +1057,9 @@ function PipelineTracker(p){
               e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}},
                 e(Label,{text:'PROPOSAL'}),
                 e('div',{style:{display:'flex',gap:8}},
-                  e(Btn,{onClick:function(){window.open('/api/proposal-doc?id='+encodeURIComponent(o.id))},small:true,variant:'primary'},'DOWNLOAD DOC'),
-                  e(Btn,{onClick:function(){fetch('/api/produce-proposal?id='+encodeURIComponent(o.id),{method:'POST'}).then(function(){showToast('Proposal regeneration triggered.')})},small:true,variant:'ghost'},'REGENERATE')
+                  e(Btn,{onClick:function(){if(o.proposal_doc_url){window.open(o.proposal_doc_url)}else{fetch('/api/regenerate-doc?id='+encodeURIComponent(o.id),{method:'POST'});showToast('No doc yet — generating now (~35s). Click DOWNLOAD again shortly.')}},small:true,variant:'primary'},o.proposal_doc_url?'DOWNLOAD DOC':'GENERATE DOC'),
+                  e(Btn,{onClick:function(){fetch('/api/regenerate-doc?id='+encodeURIComponent(o.id),{method:'POST'});showToast('Doc regen started (~35s, ~$0).')},small:true,variant:'ghost'},'REGEN DOC'),
+                  e(Btn,{onClick:function(){if(!confirm('Run full proposal pipeline?\n\n~$5-10 cost, ~10 min runtime.\nRe-runs all 19 stages including Opus calls.\n\nProceed?'))return;fetch('/api/produce-proposal?id='+encodeURIComponent(o.id),{method:'POST'}).then(function(){showToast('Proposal pipeline started — ~10 min.')})},small:true,variant:'ghost'},'RUN PROPOSAL')
                 )
               ),
               // ACTION REQUIRED highlighting
@@ -1085,7 +1086,7 @@ function PipelineTracker(p){
               })()
             ):e('div',{style:{textAlign:'center',padding:20,color:TEXT_D}},
               'No proposal generated yet.',
-              e('div',{style:{marginTop:12}},e(Btn,{onClick:function(){fetch('/api/produce-proposal?id='+encodeURIComponent(o.id),{method:'POST'}).then(function(){showToast('Proposal generation triggered.')})}},'PRODUCE PROPOSAL'))
+              e('div',{style:{marginTop:12}},e(Btn,{onClick:function(){if(!confirm('Run full proposal pipeline?\n\n~$5-10 cost, ~10 min runtime.\nRe-runs all 19 stages including Opus calls.\n\nProceed?'))return;fetch('/api/produce-proposal?id='+encodeURIComponent(o.id),{method:'POST'}).then(function(){showToast('Proposal pipeline started — ~10 min.')})}},'RUN PROPOSAL'))
             )
           ):null,
 
@@ -1353,10 +1354,10 @@ function OpportunityDetail(p){
       e(Card,null,
         e(Label,{text:'ACTIONS'}),
         e('div',{style:{display:'flex',gap:8,flexWrap:'wrap'}},
-          e(Btn,{onClick:function(){fetch('/api/produce-proposal?id='+encodeURIComponent(o.id),{method:'POST'})},variant:'primary'},'PRODUCE PROPOSAL'),
+          e(Btn,{onClick:function(){if(!confirm('Run full proposal pipeline?\n\n~$5-10 cost, ~10 min runtime.\nRe-runs all 19 stages including Opus calls.\n\nProceed?'))return;fetch('/api/produce-proposal?id='+encodeURIComponent(o.id),{method:'POST'}).then(function(){detShowToast('Proposal pipeline started — ~10 min.')})},variant:'primary'},'RUN PROPOSAL'),
           e(Btn,{onClick:function(){fetch('/api/compliance-check?id='+encodeURIComponent(o.id),{method:'POST'}).then(function(r){return r.json()}).then(function(d){detShowToast(d.compliance_summary||d.result||'Compliance check complete')}).catch(function(){detShowToast('Compliance check failed')})},variant:'ghost'},'COMPLIANCE CHECK'),
           o.source_url?e(Btn,{onClick:function(){window.open(o.source_url)},variant:'ghost'},'SOURCE'):null,
-          e(Btn,{onClick:function(){window.open('/api/proposal-doc?id='+encodeURIComponent(o.id))},variant:'ghost'},'DOWNLOAD DOC')
+          e(Btn,{onClick:function(){if(o.proposal_doc_url){window.open(o.proposal_doc_url)}else{fetch('/api/regenerate-doc?id='+encodeURIComponent(o.id),{method:'POST'});detShowToast('No doc yet — generating (~35s). Click again shortly.')}},variant:'ghost'},o.proposal_doc_url?'DOWNLOAD DOC':'GENERATE DOC')
         )
       )
     ):
@@ -1379,13 +1380,28 @@ function OpportunityDetail(p){
         e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:8}},
           e(Label,{text:'PROPOSAL'}),
           e('div',{style:{display:'flex',gap:8}},
-            e(Btn,{onClick:function(){window.open('/api/proposal-doc?id='+encodeURIComponent(o.id))},small:true,variant:'primary'},'DOWNLOAD DOC'),
-            e(Btn,{onClick:function(){fetch('/api/produce-proposal?id='+encodeURIComponent(o.id),{method:'POST'})},small:true,variant:'ghost'},'REGENERATE')
+            e(Btn,{onClick:function(){if(o.proposal_doc_url){window.open(o.proposal_doc_url)}else{fetch('/api/regenerate-doc?id='+encodeURIComponent(o.id),{method:'POST'});detShowToast('No doc yet — generating (~35s). Click DOWNLOAD again shortly.')}},small:true,variant:'primary'},o.proposal_doc_url?'DOWNLOAD DOC':'GENERATE DOC'),
+            e(Btn,{onClick:function(){fetch('/api/regenerate-doc?id='+encodeURIComponent(o.id),{method:'POST'});detShowToast('Doc regen started (~35s, ~$0).')},small:true,variant:'ghost'},'REGEN DOC'),
+            e(Btn,{onClick:function(){if(!confirm('Run full proposal pipeline?\n\n~$5-10 cost, ~10 min runtime.\nRe-runs all 19 stages including Opus calls.\n\nProceed?'))return;fetch('/api/produce-proposal?id='+encodeURIComponent(o.id),{method:'POST'}).then(function(){detShowToast('Proposal pipeline started — ~10 min.')})},small:true,variant:'ghost'},'RUN PROPOSAL')
           )
         ),
+        // S150: doc metadata caption
+        (function(){
+          if(!o.proposal_doc_url&&!o.proposal_doc_generated_at)return null;
+          var parts=[];
+          if(o.proposal_doc_generated_at){
+            var ts=new Date(o.proposal_doc_generated_at);
+            var ago=Math.round((Date.now()-ts.getTime())/60000);
+            var agoStr=ago<60?(ago+'m ago'):(ago<1440?(Math.round(ago/60)+'h ago'):(Math.round(ago/1440)+'d ago'));
+            parts.push('Doc updated '+agoStr);
+          }
+          if(o.proposal_doc_size_bytes)parts.push(Math.round(o.proposal_doc_size_bytes/1024)+'KB');
+          if(o.proposal_content)parts.push(Math.round(o.proposal_content.length/1000)+'K chars');
+          return e('div',{style:{fontSize:10,color:TEXT_D,marginBottom:8,fontFamily:'monospace'}},parts.join(' • '));
+        })(),
         e('div',{style:{fontSize:12,whiteSpace:'pre-wrap',maxHeight:800,overflowY:'auto',lineHeight:1.6}},o.proposal_content)
       ):e(Card,null,e('div',{style:{color:TEXT_D,textAlign:'center',padding:20}},'No proposal generated yet.'),
-        e('div',{style:{textAlign:'center'}},e(Btn,{onClick:function(){fetch('/api/produce-proposal?id='+encodeURIComponent(o.id),{method:'POST'})}},'PRODUCE PROPOSAL'))
+        e('div',{style:{textAlign:'center'}},e(Btn,{onClick:function(){if(!confirm('Run full proposal pipeline?\n\n~$5-10 cost, ~10 min runtime.\nRe-runs all 19 stages including Opus calls.\n\nProceed?'))return;fetch('/api/produce-proposal?id='+encodeURIComponent(o.id),{method:'POST'}).then(function(){detShowToast('Proposal pipeline started — ~10 min.')})}},'RUN PROPOSAL'))
       )
     ):
 
@@ -2196,6 +2212,7 @@ function ProposalEngineModule(p){
 
   function produceProposal(){
     if(!pl.selected)return;
+    if(!confirm('Run full proposal pipeline?\n\n~$5-10 cost, ~10 min runtime.\nRe-runs all 19 stages including Opus calls.\n\nProceed?'))return;
     fetch('/api/produce-proposal?id='+encodeURIComponent(pl.selected.id),{method:'POST'});
   }
 
