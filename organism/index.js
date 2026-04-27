@@ -2093,7 +2093,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
           '4. CONTRACT: If the RFP provides a sample contract, did the proposal complete and return it — or did it try to draft a new one from scratch? Drafting a new contract when one is provided is a CRITICAL compliance failure.\n' +
           '5. PAGE LIMITS: Does any section exceed a stated page limit? Flag any section that would exceed its limit when formatted.\n' +
           '6. SCOPE COVERAGE: If scope items are listed in the blueprint, verify each one is addressed in the Technical Approach. Flag any missing scope items.\n' +
-          '7. PERSONNEL: Geoffrey Brien mentioned (MUST NOT be), staff auto-assigned to roles (MUST be [TO BE ASSIGNED]), only Christopher J. Oney on cover letter\n' +
+          '7. PERSONNEL: Geoffrey Brien mentioned (MUST NOT be — flag as violation), staff auto-assigned to roles in Key Personnel sections (MUST be [TO BE ASSIGNED] — flag if pre-named). EXCEPTION: the cover letter signature naming the President (Christopher J. Oney) is CANON and REQUIRED — do NOT flag the President\'s name in the cover letter signature block as a violation. Only flag staff names appearing in body narrative or personnel listings, never the cover letter signer.\n' +
           '8. EVIDENCE: Unsubstantiated claims without specific data (dates, amounts, project names)\n' +
           '9. WIN THEMES: Missing, forced, or excessively repeated\n' +
           '10. FILLER: Vague commitments, generic language, padding with no evaluator value\n' +
@@ -10814,6 +10814,13 @@ async function runSingleRefinementPass(opp, proposalText, reviewText) {
 
 async function runSingleRedTeamPass(opp, proposalText) {
   var reviewPrompt = 'You are a ruthless government proposal red team reviewer and PWIN estimator. Review this proposal against the RFP and return ONLY valid JSON.\n\n' +
+    '=== HGI CANONICAL RULES (DO NOT FLAG THESE AS VIOLATIONS) ===\n' +
+    '- HGI Global was founded in 1929 (97 years ago). "1929" and "97-year" are CORRECT. Do NOT flag.\n' +
+    '- The cover letter is SIGNED by the President, Christopher J. Oney. His name appearing in the cover letter signature block is CANON, sanctioned, REQUIRED. Do NOT flag the President\'s name in the cover letter as a violation. The "no names" rule applies to BODY text and personnel lists — never the cover letter signature.\n' +
+    '- All Key Personnel positions appear as "[TO BE ASSIGNED — role title]" with role qualifications, not pre-assigned names. This is correct, not a defect.\n' +
+    '- Geoffrey Brien must NEVER appear (he is no longer with HGI). Flag any occurrence.\n' +
+    '- HGI is 100% minority-owned. NMSDC certified. ~50 team members across Kenner (HQ), Shreveport, Alexandria, New Orleans offices.\n' +
+    '- HGI never lists OPSB, PBGC, LIGA, or TPCIGA as past performance. They may appear ONLY as the client/agency name when bidding to them.\n\n' +
     '=== RFP ===\n' + ((opp.rfp_text || opp.scope_analysis || opp.description || '').slice(0, 12000)) + '\n\n' +
     '=== PROPOSAL ===\n' + proposalText.slice(0, 30000) + '\n\n' +
     'Return ONLY this JSON schema (no preamble, no markdown, no explanation):\n' +
