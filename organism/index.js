@@ -10894,6 +10894,21 @@ async function runIterationToPlateau(opp, initialProposal, initialReview, initia
   var currentPWIN = trueBaselinePWIN;
   var stopReason = 'max_iterations_reached';
 
+  // S149 GUARDRAILS: track the BEST version seen across all iterations and the baseline.
+  // L7 was previously assigning currentProposal = refinedText even when refinedText was
+  // worse, then storing that worse version. Result on OPSB 26-0108: 130K -> 70K chars,
+  // PWIN 4 -> 2, all mandatory forms truncated. Best-version tracking + char-amputation
+  // veto + proportional regression detection prevent that.
+  var bestProposal = initialProposal;
+  var bestReview = initialReview;
+  var bestPWIN = trueBaselinePWIN;
+  var bestChars = (initialProposal || '').length;
+  var bestSource = 'baseline (iter 0)';
+  // Char-amputation veto: refusal to accept a refinement iteration that removes
+  // more than this fraction of content. 25% threshold is empirical: today's run
+  // was 46% loss (catastrophic). Routine refinement should be -10% to +20%.
+  var CHAR_AMPUTATION_THRESHOLD = 0.25;
+
   log(log_prefix + ' starting. Initial PWIN=' + currentPWIN + ' (apples-to-apples baseline), max_iter=' + MAX_ITER + ', plateau_delta=' + PLATEAU_DELTA);
 
   for (var iter = 1; iter <= MAX_ITER; iter++) {
@@ -10916,15 +10931,34 @@ async function runIterationToPlateau(opp, initialProposal, initialReview, initia
     var refinedText = refResult.refinedText;
     log(log_prefix + ' iter ' + iter + ' refined to ' + refinedText.length + ' chars (was ' + currentProposal.length + ')');
 
-    // Durability: persist refined proposal IMMEDIATELY (before red team can fail/crash)
-    try {
-      await supabase.from('opportunities').update({
-        proposal_content: refinedText,
-        last_updated: new Date().toISOString()
-      }).eq('id', oppId);
-    } catch (pe) {
-      log(log_prefix + ' iter ' + iter + ' proposal_content save error: ' + (pe.message||'').slice(0,150));
+    // S149 CHAR-AMPUTATION VETO: if refinement removed >25% of content, refuse it
+    // outright. Refinement should improve quality of existing text, not delete sections.
+    var charLossFrac = (currentProposal.length > 0)
+      ? (currentProposal.length - refinedText.length) / currentProposal.length
+      : 0;
+    if (charLossFrac > CHAR_AMPUTATION_THRESHOLD) {
+      log(log_prefix + ' iter ' + iter + ' AMPUTATION VETO — refinement removed ' +
+          Math.round(charLossFrac * 100) + '% of content (' +
+          currentProposal.length + ' -> ' + refinedText.length + '). Rejecting iteration.');
+      stopReason = 'amputation_veto_iter_' + iter;
+      try {
+        await supabase.from('organism_memory').insert({
+          id: 'mem_l7_amputation_' + oppId + '_' + iter + '_' + Date.now(),
+          agent: 'refinement_loop',
+          opportunity_id: oppId,
+          observation: 'L7 AMPUTATION VETO at iter ' + iter + ': refinement removed ' +
+            Math.round(charLossFrac * 100) + '% (' + currentProposal.length + ' -> ' +
+            refinedText.length + '). Iteration discarded; keeping prior version.',
+          memory_type: 'refinement_veto',
+          created_at: new Date().toISOString()
+        });
+      } catch (me) { /* non-fatal */ }
+      break;
     }
+
+    // S149: DEFER persistence until we know if the iteration is an improvement.
+    // Previously stored proposal_content here unconditionally — that's how the worse
+    // version overwrote the good one even when red team came back worse.
 
     // Step B: Re-run red team on refined version
     var rtResult;
@@ -10939,11 +10973,31 @@ async function runIterationToPlateau(opp, initialProposal, initialReview, initia
     var delta = newPWIN - currentPWIN;
     log(log_prefix + ' iter ' + iter + ' new PWIN=' + newPWIN + ' (delta=' + delta + ')');
 
-    // Step C: Persist new review (proposal_content already saved above)
-    await supabase.from('opportunities').update({
-      proposal_review: rtResult.reviewStorage,
-      last_updated: new Date().toISOString()
-    }).eq('id', oppId);
+    // S149 BEST-VERSION TRACKING: if this iteration scored better, update the best-seen.
+    // We compare against the running best (not just current), so iterations don't lose
+    // ground to earlier good versions.
+    if (newPWIN > bestPWIN) {
+      bestProposal = refinedText;
+      bestReview = rtResult.reviewStorage;
+      bestPWIN = newPWIN;
+      bestChars = refinedText.length;
+      bestSource = 'iter ' + iter;
+      log(log_prefix + ' iter ' + iter + ' is new best (PWIN ' + bestPWIN + ', ' + bestChars + ' chars)');
+    } else {
+      log(log_prefix + ' iter ' + iter + ' did not improve on best PWIN ' + bestPWIN + ' (from ' + bestSource + ')');
+    }
+
+    // Step C: persist the BEST version we've seen so far. Even if this iteration was
+    // worse, this update keeps the row consistent with our best knowledge.
+    try {
+      await supabase.from('opportunities').update({
+        proposal_content: bestProposal,
+        proposal_review: bestReview,
+        last_updated: new Date().toISOString()
+      }).eq('id', oppId);
+    } catch (pe) {
+      log(log_prefix + ' iter ' + iter + ' best-version save error: ' + (pe.message||'').slice(0,150));
+    }
 
     // Step D: Log iteration to memory
     try {
@@ -10971,29 +11025,48 @@ async function runIterationToPlateau(opp, initialProposal, initialReview, initia
       timestamp: new Date().toISOString()
     });
 
-    // Step E: Plateau check
+    // Step E: Plateau check (small absolute delta — improvement has flattened)
     if (Math.abs(delta) < PLATEAU_DELTA) {
       log(log_prefix + ' plateau reached at iter ' + iter + ' (delta ' + delta + ' < ' + PLATEAU_DELTA + ')');
       stopReason = 'plateau';
-      currentProposal = refinedText;
-      currentReview = rtResult.reviewStorage;
-      currentPWIN = newPWIN;
+      // S149: do NOT assign currentProposal = refinedText here. The bestProposal
+      // tracker already holds the best version we've seen. Restoration happens
+      // after the loop exits.
       break;
     }
 
-    // Step F: Regression check — if PWIN drops materially, stop
-    if (delta < -5) {
-      log(log_prefix + ' regression detected (delta ' + delta + '), stopping');
+    // Step F: Regression check — absolute (delta < -3) OR proportional (>30% PWIN drop)
+    // S149: previous threshold of -5 missed today's case (PWIN 4 -> 2 = -2 absolute,
+    // but a 50% proportional drop). Use both thresholds; trigger on either.
+    var proportionalDrop = (currentPWIN > 0) ? (1 - (newPWIN / currentPWIN)) : 0;
+    if (delta < -3 || proportionalDrop > 0.30) {
+      log(log_prefix + ' regression detected — abs delta=' + delta +
+          ', proportional drop=' + Math.round(proportionalDrop * 100) + '%. Stopping.');
       stopReason = 'regression';
-      currentProposal = refinedText;
-      currentReview = rtResult.reviewStorage;
-      currentPWIN = newPWIN;
       break;
     }
 
+    // Iteration was a real improvement. Adopt it as the new currentProposal so the
+    // NEXT iteration refines from this version. The best-tracker already holds it.
     currentProposal = refinedText;
     currentReview = rtResult.reviewStorage;
     currentPWIN = newPWIN;
+  }
+
+  // S149 RESTORE-BEST: write the best version we ever saw back to the row, so the
+  // database state reflects the best result rather than the last result. If every
+  // iteration was worse than baseline, this restores the baseline. If iter 2 was
+  // best and iter 3 regressed, this restores iter 2's output.
+  try {
+    await supabase.from('opportunities').update({
+      proposal_content: bestProposal,
+      proposal_review: bestReview,
+      last_updated: new Date().toISOString()
+    }).eq('id', oppId);
+    log(log_prefix + ' RESTORED BEST: source="' + bestSource + '", PWIN=' + bestPWIN +
+        ', chars=' + bestChars + '. (current loop variable PWIN=' + currentPWIN + ')');
+  } catch (rsErr) {
+    log(log_prefix + ' restore-best save error: ' + (rsErr.message||'').slice(0,150));
   }
 
   // Final summary memory
@@ -11003,7 +11076,7 @@ async function runIterationToPlateau(opp, initialProposal, initialReview, initia
       agent: 'refinement_loop_summary',
       opportunity_id: oppId,
       observation: 'L7 COMPLETE: ' + (trajectory.length - 1) + ' iterations ran. ' +
-        'Initial PWIN ' + (initialPWIN||0) + ' -> final PWIN ' + currentPWIN + '. ' +
+        'Initial PWIN ' + (initialPWIN||0) + ' -> best PWIN ' + bestPWIN + ' (from ' + bestSource + '). ' +
         'Stop reason: ' + stopReason + '. ' +
         'Trajectory: ' + trajectory.map(function(t){ return 'i'+t.iteration+'=PWIN'+t.pwin; }).join(' -> '),
       memory_type: 'analysis',
@@ -11011,8 +11084,8 @@ async function runIterationToPlateau(opp, initialProposal, initialReview, initia
     });
   } catch (se) { /* non-fatal */ }
 
-  log(log_prefix + ' complete. ' + (trajectory.length - 1) + ' iterations. PWIN ' + (initialPWIN||0) + ' -> ' + currentPWIN + '. Stop: ' + stopReason);
-  return { iterations: trajectory.length - 1, initialPWIN: initialPWIN || 0, finalPWIN: currentPWIN, stopReason: stopReason, trajectory: trajectory };
+  log(log_prefix + ' complete. ' + (trajectory.length - 1) + ' iterations. PWIN ' + (initialPWIN||0) + ' -> best ' + bestPWIN + ' (' + bestSource + '). Stop: ' + stopReason);
+  return { iterations: trajectory.length - 1, initialPWIN: initialPWIN || 0, finalPWIN: bestPWIN, bestSource: bestSource, stopReason: stopReason, trajectory: trajectory };
 }
 
 
