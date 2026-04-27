@@ -1391,6 +1391,79 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         log('PROPOSAL ENGINE STAGE 1: No RFP text available — skipping compliance parse');
       }
 
+      // S150 PAGE LIMIT DETECTION (deterministic regex pre-pass).
+      // Runs against the FULL rfp_text (not the 80K-truncated blueprint slice) to
+      // catch page limits buried deep in the document. OPSB 20-page limit is at
+      // char 68,508 — within the 80K window for THIS extractor but missed because
+      // the LLM schema only captures per-section page_limit, not a total.
+      // Also persists to opp.rfp_requirements.total_page_limit for downstream.
+      var totalPageLimit = null;
+      var pageLimitContext = '';
+      try {
+        var fullRfpForPL = opp.rfp_text || rfpText || '';
+        // First check if orchestrator already extracted it
+        if (opp.rfp_requirements && opp.rfp_requirements.total_page_limit) {
+          totalPageLimit = opp.rfp_requirements.total_page_limit;
+          pageLimitContext = opp.rfp_requirements.total_page_limit_context || '';
+          log('PROPOSAL ENGINE: page limit ' + totalPageLimit + ' inherited from rfp_requirements (orchestrator).');
+        } else if (fullRfpForPL && fullRfpForPL.length >= 500) {
+          var pl_patterns = [
+            /(?:not\s+to\s+exceed|shall\s+not\s+exceed|may\s+not\s+exceed|limited\s+to|maximum\s+of)\s+(\d{1,3})\s+pages?/i,
+            /(\d{1,3})\s+pages?\s+maximum/i,
+            /page\s+limit(?:\s+of)?\s+(\d{1,3})/i,
+            /(\d{1,3})[-\s]+page\s+(?:limit|maximum)/i,
+            /response\s+(?:not\s+to\s+exceed|limited\s+to)\s+(\d{1,3})\s+pages?/i
+          ];
+          for (var _pli = 0; _pli < pl_patterns.length; _pli++) {
+            var _plM = fullRfpForPL.match(pl_patterns[_pli]);
+            if (_plM && parseInt(_plM[1]) > 0 && parseInt(_plM[1]) <= 500) {
+              totalPageLimit = parseInt(_plM[1]);
+              var _plPos = fullRfpForPL.indexOf(_plM[0]);
+              pageLimitContext = fullRfpForPL.slice(Math.max(0, _plPos - 100), _plPos + _plM[0].length + 200).replace(/\s+/g, ' ').trim();
+              break;
+            }
+          }
+          if (totalPageLimit) {
+            log('PROPOSAL ENGINE: PAGE LIMIT DETECTED — ' + totalPageLimit + ' pages (regex). Context: ' + pageLimitContext.slice(0, 150));
+            // Persist for next time
+            try {
+              var _pdReqs = opp.rfp_requirements || {};
+              _pdReqs.total_page_limit = totalPageLimit;
+              _pdReqs.total_page_limit_context = pageLimitContext.slice(0, 400);
+              await supabase.from('opportunities').update({ rfp_requirements: _pdReqs }).eq('id', opp.id);
+            } catch(_pdErr) {/* non-fatal */}
+          }
+        }
+      } catch(_plBigErr) {
+        log('PROPOSAL ENGINE: page limit pre-pass error (non-fatal): ' + (_plBigErr.message||'').slice(0,150));
+      }
+      // Build the page-limit constraint block that gets injected at the TOP of the L7 prompt.
+      // Math: assume ~3,200 chars/page at proposal density (Arial 11pt, 1in margins, modest
+      // whitespace). 20 pages → ~64K chars. 25 pages → ~80K. 35 pages → ~112K. We tell the
+      // L7 writer the EXACT char budget so length stays in scope.
+      var pageLimitBlock = '';
+      if (totalPageLimit) {
+        var charBudget = totalPageLimit * 3200;
+        pageLimitBlock = '\n\n## ⚠️ HARD PAGE LIMIT — DISQUALIFICATION RISK ⚠️\n' +
+          'The RFP imposes a TOTAL PAGE LIMIT of ' + totalPageLimit + ' PAGES on the qualifications response.\n' +
+          'Verbatim from RFP: "' + pageLimitContext.slice(0, 250) + '"\n\n' +
+          'YOUR PROPOSAL MUST NOT EXCEED ~' + charBudget.toLocaleString() + ' CHARACTERS TOTAL across all qualifications-narrative tabs.\n' +
+          '(Page-density math: 3,200 chars/page × ' + totalPageLimit + ' pages = ' + charBudget.toLocaleString() + ' chars.)\n\n' +
+          'NOLA-PS-furnished forms (cover sheet, certifications, lobbying form, debarment, non-collusion, conflict of interest, vendor registration, EDGAR addendum, DBE forms, references form, cost form) are typically excluded from the page count when filed as separate exhibits — but the qualifications NARRATIVE in Tabs 1 through 10 (cover letter, firm background, experience/qualifications, methodology/approach, financial standing, timeline, project staff, scope-of-work response, references, cost narrative) MUST fit within the ' + totalPageLimit + '-page envelope.\n\n' +
+          'PER-TAB CHAR BUDGETS (suggested allocation across ' + totalPageLimit + ' pages):\n' +
+          '- Tab 1 (cover letter): 1 page = 3,200 chars\n' +
+          '- Tab 2 (firm background): 1 page = 3,200 chars\n' +
+          '- Tab 3 (experience): ' + Math.floor(totalPageLimit*0.20) + ' pages = ' + (Math.floor(totalPageLimit*0.20)*3200).toLocaleString() + ' chars\n' +
+          '- Tab 4 (methodology): ' + Math.floor(totalPageLimit*0.30) + ' pages = ' + (Math.floor(totalPageLimit*0.30)*3200).toLocaleString() + ' chars (largest section)\n' +
+          '- Tab 5 (financial standing): 1 page = 3,200 chars\n' +
+          '- Tab 6 (timeline): 1 page = 3,200 chars\n' +
+          '- Tab 7 (project staff): ' + Math.floor(totalPageLimit*0.15) + ' pages = ' + (Math.floor(totalPageLimit*0.15)*3200).toLocaleString() + ' chars (named personnel + roles)\n' +
+          '- Tab 8 (scope response): ' + Math.max(1, Math.floor(totalPageLimit*0.08)) + ' pages\n' +
+          '- Tab 9 (references): 1 page = 3,200 chars\n' +
+          '- Tab 10 (cost narrative): 1 page = 3,200 chars\n\n' +
+          'COMPRESSION DIRECTIVE: Write tight prose. Eliminate transitional throat-clearing. No section may have more than 2 paragraphs of narrative before moving to bulleted/structured content. Cut every "HGI is pleased to..." opener. State conclusions, support with one example, move on.\n\n';
+      }
+
       // ═══ STAGE 2: BUILD THE COMPLIANCE-DRIVEN PROMPT ═══
       var blueprintSection = '';
       if (complianceBlueprint) {
@@ -1983,6 +2056,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         (lessonsText ? '## LESSONS LEARNED — DURABLE INSIGHTS THAT MUST INFLUENCE THIS PROPOSAL\nThese lessons come from prior sessions, postmortems, red team findings, and President directives. They are HIGHER PRIORITY than generic past performance — apply them. Each lesson has been validated and is an active rule for proposals matching this opportunity.\n\n' + lessonsText + '\n\n' : '') +
         '## PARALLEL PURSUIT INTELLIGENCE\n' + (siblingText || 'No parallel pursuits') + '\n\n' +
         '## KNOWLEDGE BASE — HGI INSTITUTIONAL EXPERTISE\n' + kbChunks.slice(0,12000) + '\n\n' +
+        (pageLimitBlock || '') +
         (blueprintSection || '') + '\n\n' +
         '## INSTRUCTIONS\n' +
         (complianceBlueprint ?
@@ -2398,6 +2472,38 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
           }
         } catch(_b2err) {
           log('S150 FACT-CHECK (b2) error (non-fatal): ' + (_b2err.message||'').slice(0,200));
+        }
+
+        // (b3) S150: Page-limit overage check. RFPs frequently impose total-page limits
+        // (OPSB: 20 pages on Tabs 1-10). When the system has detected total_page_limit
+        // upstream (orchestrator regex pre-pass or proposal-engine pre-pass), this check
+        // estimates pages from char count at proposal density (3,200 chars/page) and
+        // flags critical when overage exceeds 25%. Auto-correction is NOT attempted —
+        // compression requires re-generation, not regex. The flag surfaces in fact-check
+        // memory so Christopher / red team see it before document hand-off.
+        try {
+          var pageCheckLimit = null;
+          if (opp.rfp_requirements && opp.rfp_requirements.total_page_limit) {
+            pageCheckLimit = opp.rfp_requirements.total_page_limit;
+          }
+          if (pageCheckLimit) {
+            var charsPerPage = 3200; // empirical proposal-density baseline
+            var estimatedPages = Math.round(proposalText.length / charsPerPage);
+            var overagePct = ((estimatedPages - pageCheckLimit) / pageCheckLimit) * 100;
+            if (estimatedPages > pageCheckLimit) {
+              var sev = overagePct > 25 ? 'critical' : 'major';
+              s150_findings.push({
+                sev: sev,
+                type: 'page_limit_overage',
+                detail: 'Proposal estimated at ' + estimatedPages + ' pages — exceeds ' + pageCheckLimit + '-page RFP limit by ' + overagePct.toFixed(0) + '%. Char count: ' + proposalText.length.toLocaleString() + ' (budget: ' + (pageCheckLimit * charsPerPage).toLocaleString() + '). NOT auto-correctable — compression requires regeneration with stricter L7 prompt budget.'
+              });
+              log('S150 FACT-CHECK (b3): PAGE LIMIT OVERAGE — ' + estimatedPages + ' pages vs ' + pageCheckLimit + ' limit (' + overagePct.toFixed(0) + '% over).');
+            } else {
+              log('S150 FACT-CHECK (b3): page count OK — ' + estimatedPages + ' pages within ' + pageCheckLimit + '-page limit.');
+            }
+          }
+        } catch(_b3err) {
+          log('S150 FACT-CHECK (b3) error (non-fatal): ' + (_b3err.message||'').slice(0,200));
         }
 
         // (b1) Cover-letter date staleness — top ~5K chars cover the cover-letter section.
@@ -15520,13 +15626,77 @@ async function orchestrateOpp(opp) {
   // Parses the RFP into a structured requirements list for D.gap-detector (S119)
   // and E.compliance-audit (S125). This step produces and persists; downstream
   // consumers are not yet wired.
+  // S150 PAGE LIMIT FIX: Pass FULL opp.rfp_text — extractor has its own 180K cap.
+  // Previous code passed pre-truncated rfpContent (40K) which silently capped the
+  // extractor's window. Discovered when OPSB 20-page limit at char 68,508 was
+  // entirely missed by extraction, leaving downstream proposal engine blind to
+  // a hard compliance constraint that disqualifies on overage.
   try {
-    if (rfpContent && rfpContent.length >= 500) {
-      var reqs = await extractRFPRequirements(rfpContent, opp);
+    var fullRfpForExtraction = opp.rfp_text || rfpContent || '';
+    if (fullRfpForExtraction && fullRfpForExtraction.length >= 500) {
+      var reqs = await extractRFPRequirements(fullRfpForExtraction, opp);
+      // S150: Deterministic regex pre-pass to catch page limits the LLM may miss
+      // when buried deep in the RFP. Patterns: "Not to exceed N pages",
+      // "shall not exceed N pages", "limited to N pages", "maximum of N pages",
+      // "N pages maximum", "page limit of N". Case-insensitive. Records first
+      // numeric match as top-level total_page_limit AND folds into
+      // submission_requirements as a page_count constraint.
+      try {
+        var pageLimitPatterns = [
+          /(?:not\s+to\s+exceed|shall\s+not\s+exceed|may\s+not\s+exceed|limited\s+to|maximum\s+of)\s+(\d{1,3})\s+pages?/i,
+          /(\d{1,3})\s+pages?\s+maximum/i,
+          /page\s+limit(?:\s+of)?\s+(\d{1,3})/i,
+          /(\d{1,3})[-\s]*page\s+(?:limit|maximum)/i,
+          /response\s+(?:not\s+to\s+exceed|limited\s+to)\s+(\d{1,3})\s+pages?/i
+        ];
+        var detectedPageLimit = null;
+        var pageLimitContext = '';
+        for (var _pli = 0; _pli < pageLimitPatterns.length; _pli++) {
+          var _plMatch = fullRfpForExtraction.match(pageLimitPatterns[_pli]);
+          if (_plMatch && parseInt(_plMatch[1]) > 0 && parseInt(_plMatch[1]) <= 500) {
+            detectedPageLimit = parseInt(_plMatch[1]);
+            // Capture surrounding context (200 chars) to disambiguate
+            var _plPos = fullRfpForExtraction.indexOf(_plMatch[0]);
+            pageLimitContext = fullRfpForExtraction.slice(Math.max(0, _plPos - 100), _plPos + _plMatch[0].length + 200).replace(/\s+/g, ' ').trim();
+            break;
+          }
+        }
+        if (detectedPageLimit && reqs) {
+          reqs.total_page_limit = detectedPageLimit;
+          reqs.total_page_limit_context = pageLimitContext.slice(0, 400);
+          // Inject into submission_requirements if not already present
+          var hasPageReq = (reqs.submission_requirements || []).some(function(s) {
+            return (s.type === 'page_count') || /\d+\s*page/i.test(s.constraint || '');
+          });
+          if (!hasPageReq) {
+            reqs.submission_requirements = reqs.submission_requirements || [];
+            reqs.submission_requirements.unshift({
+              type: 'page_count',
+              constraint: 'Response not to exceed ' + detectedPageLimit + ' pages (deterministic regex match: "' + pageLimitContext.slice(0, 150) + '...")'
+            });
+          }
+          // Inject as fatal flaw if not already there
+          var hasFatalPageFlaw = (reqs.fatal_flaws || []).some(function(f) {
+            return /page/i.test((f.pattern || '') + ' ' + (f.penalty || ''));
+          });
+          if (!hasFatalPageFlaw) {
+            reqs.fatal_flaws = reqs.fatal_flaws || [];
+            reqs.fatal_flaws.push({
+              pattern: 'Response exceeds ' + detectedPageLimit + '-page limit',
+              penalty: 'Disqualification / non-responsive determination — RFP explicitly caps response length'
+            });
+          }
+          log('ORCHESTRATE: PAGE LIMIT DETECTED — ' + detectedPageLimit + ' pages (regex deterministic). Injected into rfp_requirements.');
+        } else {
+          log('ORCHESTRATE: No page limit pattern detected in full RFP text (' + fullRfpForExtraction.length + ' chars scanned).');
+        }
+      } catch(_plErr) {
+        log('ORCHESTRATE: Page limit regex pre-pass error (non-fatal): ' + (_plErr.message||'').slice(0,150));
+      }
       if (reqs) {
         await supabase.from('opportunities').update({ rfp_requirements: reqs, last_updated: new Date().toISOString() }).eq('id', oppId);
         results.steps.push('rfp_requirements');
-        log('ORCHESTRATE: RFP requirements extracted (' + (reqs.requirements || []).length + ' reqs, ' + (reqs.evaluation_criteria || []).length + ' criteria, ' + (reqs.submission_requirements || []).length + ' submission rules, ' + (reqs.fatal_flaws || []).length + ' fatal flaws)');
+        log('ORCHESTRATE: RFP requirements extracted (' + (reqs.requirements || []).length + ' reqs, ' + (reqs.evaluation_criteria || []).length + ' criteria, ' + (reqs.submission_requirements || []).length + ' submission rules, ' + (reqs.fatal_flaws || []).length + ' fatal flaws, total_page_limit=' + (reqs.total_page_limit || 'none') + ')');
       } else {
         log('ORCHESTRATE: RFP requirement extraction returned null');
       }
