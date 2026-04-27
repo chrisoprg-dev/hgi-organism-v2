@@ -2250,6 +2250,94 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
           }
         }
 
+        // (a9-a14) S150 EXPANSION: silent scrub of competitor-reference patterns.
+        // These are the 5 COMPARATIVE_LANGUAGE patterns + COMPETITOR_REFERENCE that
+        // currently trigger auto-regen ($5-10/run) when Opus emits them. The bracket
+        // killer at L2139 already handles VISIBLE_BRACKET_PLACEHOLDER; the canon checks
+        // at L2585+ define these patterns as CRITICAL. Each pattern below was lifted
+        // from the canon-sweep regex set and paired with a deterministic replacement
+        // that preserves the surrounding sentence by stripping only the comparative
+        // clause. Where structural rewriting would distort meaning, the entire
+        // sentence is sentence-replaced with the noun phrase only (without the
+        // comparison). Logged + flagged so red team still sees a record, but the
+        // proposal text is canon-clean before red team / canon sweep / auto-regen.
+
+        // (a9) "unlike <competitor-flag>" → strip the unlike-clause
+        var s150_unlikePattern = /,?\s*unlike\s+(?:other|single-state|recently-formed|national|regional|engineering-first|construction-first|larger|smaller|multi-parish|out-of-state|big[ -]?4)\s+(?:firms?|consultanc(?:y|ies)|providers?|consultants?|companies|organizations?|operations?)?[,\.]?/gi;
+        var s150_unlikeHits = (proposalText.match(s150_unlikePattern) || []).length;
+        if (s150_unlikeHits > 0) {
+          proposalText = proposalText.replace(s150_unlikePattern, function(m){
+            // preserve trailing punctuation if present
+            var trail = /[,\.]$/.test(m) ? m.charAt(m.length - 1) : '';
+            return trail;
+          });
+          s150_findings.push({sev:'critical', type:'comparative_unlike', detail:'Comparative "unlike X firms" pattern ' + s150_unlikeHits + 'x — silent-scrubbed'});
+          s150_corrections += s150_unlikeHits;
+        }
+
+        // (a10) "while/whereas other firms" → strip the clause
+        var s150_whilePattern = /[,\.;]?\s*(?:while|whereas)\s+other(?:s|\s+firms?)\s+[^.;]*?(?=[\.;]|$)/gi;
+        var s150_whileHits = (proposalText.match(s150_whilePattern) || []).length;
+        if (s150_whileHits > 0) {
+          proposalText = proposalText.replace(s150_whilePattern, '');
+          s150_findings.push({sev:'critical', type:'comparative_while', detail:'Comparative "while/whereas other firms" pattern ' + s150_whileHits + 'x — silent-scrubbed'});
+          s150_corrections += s150_whileHits;
+        }
+
+        // (a11) "no other/competing firm" → "HGI" (preserves capability claim, drops superlative)
+        var s150_noOtherPattern = /\bno\s+(?:other|competing|competitor)\s+(?:firm|competitor|provider|consultant)\b/gi;
+        var s150_noOtherHits = (proposalText.match(s150_noOtherPattern) || []).length;
+        if (s150_noOtherHits > 0) {
+          proposalText = proposalText.replace(s150_noOtherPattern, 'HGI');
+          s150_findings.push({sev:'critical', type:'comparative_no_other', detail:'Comparative "no other firm" pattern ' + s150_noOtherHits + 'x — silent-scrubbed to "HGI"'});
+          s150_corrections += s150_noOtherHits;
+        }
+
+        // (a12) "we are the only" → "HGI" (drops superlative)
+        var s150_weOnlyPattern = /\bwe\s+are\s+the\s+only\b/gi;
+        var s150_weOnlyHits = (proposalText.match(s150_weOnlyPattern) || []).length;
+        if (s150_weOnlyHits > 0) {
+          proposalText = proposalText.replace(s150_weOnlyPattern, 'HGI is');
+          s150_findings.push({sev:'critical', type:'comparative_we_only', detail:'Superlative "we are the only" pattern ' + s150_weOnlyHits + 'x — silent-scrubbed'});
+          s150_corrections += s150_weOnlyHits;
+        }
+
+        // (a13) "compared to other/competing X" → strip the clause
+        var s150_comparedPattern = /[,\.;]?\s*(?:compared\s+to|vs\.?\s+|versus)\s+(?:other|competing|competitor)\s+\w+/gi;
+        var s150_comparedHits = (proposalText.match(s150_comparedPattern) || []).length;
+        if (s150_comparedHits > 0) {
+          proposalText = proposalText.replace(s150_comparedPattern, '');
+          s150_findings.push({sev:'critical', type:'comparative_compared_to', detail:'Comparative "compared to/vs other" pattern ' + s150_comparedHits + 'x — silent-scrubbed'});
+          s150_corrections += s150_comparedHits;
+        }
+
+        // (a14) Targeted competitor-phrase scrubs. The canon sweep flags ANY "competitor"
+        // word as critical, but a blanket replacement (competitor → "the field") produces
+        // broken sentences ("Past the field include..."). Instead, scrub only specific
+        // multi-word patterns Opus reliably emits in proposal text. Anything else is
+        // left to auto-regen ($5-10) which can rewrite the sentence properly.
+        var s150_phrases = [
+          { re: /\bunlike\s+competitors?\b/gi, replace: '' },
+          { re: /\bversus\s+competitors?\b/gi, replace: '' },
+          { re: /\bother\s+competitors?\b/gi, replace: 'others' },
+          { re: /\bour\s+competitors?\b/gi, replace: '' },
+          { re: /\bcompetitor\s+landscape\b/gi, replace: 'market' },
+          { re: /\bcompetitor\s+analysis\b/gi, replace: 'market analysis' }
+        ];
+        var s150_phraseHitsTotal = 0;
+        for (var s150_phi = 0; s150_phi < s150_phrases.length; s150_phi++) {
+          var s150_ph = s150_phrases[s150_phi];
+          var s150_phHits = (proposalText.match(s150_ph.re) || []).length;
+          if (s150_phHits > 0) {
+            proposalText = proposalText.replace(s150_ph.re, s150_ph.replace);
+            s150_phraseHitsTotal += s150_phHits;
+            s150_corrections += s150_phHits;
+          }
+        }
+        if (s150_phraseHitsTotal > 0) {
+          s150_findings.push({sev:'critical', type:'competitor_phrase', detail:'Targeted competitor-phrase scrubs ' + s150_phraseHitsTotal + 'x — silent-scrubbed (bare "competitor" word still flaggable for auto-regen)'});
+        }
+
         // (b1) Cover-letter date staleness — top ~5K chars cover the cover-letter section.
         // Compare the first 1-3 dates against opp.due_date; if >60 days off, auto-correct
         // the first stale date (the cover letter dateline) to the submission deadline.
@@ -2285,6 +2373,19 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
           } catch (s150_dErr) {
             log('PROPOSAL ENGINE: S150 date check failed (non-fatal): ' + (s150_dErr.message||'').slice(0,150));
           }
+        }
+
+        // (c1) S150 cleanup: scrubs above can leave double-spaces, orphaned commas,
+        // or stranded "  ." sequences. Tidy without altering semantic content.
+        if (s150_corrections > 0) {
+          // collapse 2+ consecutive spaces to single space (preserves \n)
+          proposalText = proposalText.replace(/[ \t]{2,}/g, ' ');
+          // remove space-before-period/comma artifacts ("text ." → "text.")
+          proposalText = proposalText.replace(/\s+([,.;!?])/g, '$1');
+          // collapse leading-comma artifacts at sentence start (". , Word" → ". Word")
+          proposalText = proposalText.replace(/([\.!?])\s*[,;]\s*/g, '$1 ');
+          // collapse 3+ consecutive newlines to double newline
+          proposalText = proposalText.replace(/\n{3,}/g, '\n\n');
         }
 
         // Summarize + persist
