@@ -4624,6 +4624,15 @@ if (url === '/api/add-reference' && req.method === 'POST') {
       }
       if (!arOrg) { res.end(JSON.stringify({ error: 'organization (or recognized pp_slug) required' })); return; }
       var arId = 'ref_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+      // S150 schema fix: hgi_relationship is enum-restricted to warm|cold|unknown.
+      // The freeform relationship_to_hgi text belongs in notes; the strength signal
+      // populates hgi_relationship enum (strong/good → warm, cool → cold, else unknown).
+      var arHgiRelEnum = 'unknown';
+      if (ar.relationship_strength === 'strong' || ar.relationship_strength === 'good') arHgiRelEnum = 'warm';
+      else if (ar.relationship_strength === 'cool') arHgiRelEnum = 'cold';
+      var arNotesParts = [];
+      if (ar.notes) arNotesParts.push(String(ar.notes));
+      if (ar.relationship_to_hgi) arNotesParts.push('HGI relationship: ' + String(ar.relationship_to_hgi));
       var arRow = {
         id: arId,
         contact_name: ar.contact_name,
@@ -4632,9 +4641,9 @@ if (url === '/api/add-reference' && req.method === 'POST') {
         email: ar.email || null,
         phone: ar.phone || null,
         relationship_strength: ['strong','good','unknown','cool'].indexOf(ar.relationship_strength) >= 0 ? ar.relationship_strength : 'unknown',
-        notes: ar.notes || null,
+        notes: arNotesParts.length > 0 ? arNotesParts.join(' | ') : null,
         contact_type: 'past_performance_reference',
-        hgi_relationship: ar.relationship_to_hgi || null,
+        hgi_relationship: arHgiRelEnum,
         connected_orgs: ar.pp_slug || null,
         source_agent: 's150_christopher_intake',
         created_at: new Date().toISOString(),
