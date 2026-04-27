@@ -640,7 +640,7 @@ function PipelineTracker(p){
 
   function winPathStep(o){
     if(o.stage==='won')return 8;if(o.stage==='submitted')return 7;
-    if(o.has_proposal||o.proposal_content)return 5;if(o.has_financial||o.financial_analysis)return 4;
+    if(o.proposal_complete===true)return 5;if(o.has_financial||o.financial_analysis)return 4;
     if(o.has_intel||o.research_brief)return 3;if(o.has_scope||o.scope_analysis)return 2;return 1;
   }
 
@@ -959,12 +959,29 @@ function PipelineTracker(p){
 
         // ===== EXPANDED CONTENT =====
         isExpanded?e('div',{style:{marginTop:12,borderTop:'1px solid '+BORDER,paddingTop:12}},
-          // Completeness indicators
-          e('div',{style:{display:'flex',gap:12,marginBottom:12}},
+          // Completeness indicators (S149: PROP truth-checks proposal_complete, not just IS NOT NULL)
+          e('div',{style:{display:'flex',gap:12,marginBottom:12,alignItems:'center',flexWrap:'wrap'}},
             [{k:'has_scope',l:'SCOPE'},{k:'has_intel',l:'INTEL'},{k:'has_financial',l:'FIN'},{k:'has_staffing',l:'STAFF'},{k:'has_proposal',l:'PROP'}].map(function(f){
-              var has=o[f.k]||(f.k==='has_scope'&&(o.scope_analysis||det.scope_analysis))||(f.k==='has_proposal'&&(o.proposal_content||det.proposal_content))||(f.k==='has_intel'&&(o.research_brief||det.research_brief))||(f.k==='has_financial'&&(o.financial_analysis||det.financial_analysis));
+              if(f.k==='has_proposal'){
+                // S149: tri-state — green ✓ if proposal_complete is TRUE; orange ⚠ if content exists but is incomplete or unvalidated; gray — if no content at all
+                var hasContent=o.proposal_content||det.proposal_content;
+                var pc=(typeof det.proposal_complete!=='undefined')?det.proposal_complete:o.proposal_complete;
+                var mark='—',color=TEXT_D;
+                if(pc===true){mark='✓';color=GREEN;}
+                else if(hasContent){mark='⚠';color=ORANGE;}
+                return e('span',{key:f.k,style:{fontSize:10,color:color,fontWeight:'bold',letterSpacing:1}},mark+' '+f.l);
+              }
+              var has=o[f.k]||(f.k==='has_scope'&&(o.scope_analysis||det.scope_analysis))||(f.k==='has_intel'&&(o.research_brief||det.research_brief))||(f.k==='has_financial'&&(o.financial_analysis||det.financial_analysis));
               return e('span',{key:f.k,style:{fontSize:10,color:has?GREEN:TEXT_D,fontWeight:'bold',letterSpacing:1}},(has?'✓':'—')+' '+f.l);
-            })
+            }),
+            // S149 status pill: only show if a status exists and is not 'complete'
+            (function(){
+              var ps=det.proposal_status||o.proposal_status;
+              if(!ps)return null;
+              var isComp=String(ps).toLowerCase().indexOf('complete')===0&&String(ps).toLowerCase().indexOf('incomplete')!==0;
+              if(isComp)return null;
+              return e('span',{key:'pstatus',style:{fontSize:10,color:ORANGE,fontWeight:'bold',padding:'2px 8px',border:'1px solid '+ORANGE,borderRadius:3,background:ORANGE+'15'}},String(ps).slice(0,140));
+            })()
           ),
 
           // Sub-tabs: OVERVIEW | INTEL | PROPOSAL | ACTIVITY
@@ -1251,7 +1268,7 @@ function OpportunityDetail(p){
     {name:'PURSUIT RESEARCH',done:prStepDone,data:prStepData,action:{label:prGenerating?'Running...':(prStepDone?'Refresh':'Generate'),fn:generatePursuitResearch,disabled:prGenerating}},
     {name:'DISCRIMINATORS',done:discriminators&&discriminators.length>0,data:discStepData,action:{label:discGenerating?'Generating...':'Generate',fn:generateDiscriminators,disabled:discGenerating}},
     {name:'WINNABILITY',done:!!(o.capture_action||o.winnability_score),data:o.capture_action},
-    {name:'PROPOSAL',done:!!(o.proposal_content||o.has_proposal),data:o.proposal_content},
+    {name:'PROPOSAL',done:o.proposal_complete===true,data:o.proposal_content},
     {name:'REFINEMENT',done:refStepDone,data:refStepData},
     {name:'RED TEAM',done:false,data:null}
   ];
@@ -1835,6 +1852,15 @@ function OpportunityBriefModule(p){
       // Completeness indicators
       e('div',{style:{display:'flex',gap:12,marginTop:12,paddingTop:8,borderTop:'1px solid '+BORDER}},
         [{k:'scope_analysis',l:'SCOPE'},{k:'research_brief',l:'INTEL'},{k:'financial_analysis',l:'FIN'},{k:'staffing_plan',l:'STAFF'},{k:'proposal_content',l:'PROP'}].map(function(f){
+          if(f.k==='proposal_content'){
+            // S149: green ✓ only when proposal_complete; orange ⚠ if content exists but incomplete; gray — if missing
+            var hasContent=det.proposal_content&&det.proposal_content.length>50;
+            var pc=det.proposal_complete;
+            var mark='—',color=TEXT_D;
+            if(pc===true){mark='✓';color=GREEN;}
+            else if(hasContent){mark='⚠';color=ORANGE;}
+            return e('span',{key:f.k,style:{fontSize:10,color:color,fontWeight:'bold',letterSpacing:1}},mark+' '+f.l);
+          }
           var has=det[f.k]&&det[f.k].length>50;
           return e('span',{key:f.k,style:{fontSize:10,color:has?GREEN:TEXT_D,fontWeight:'bold',letterSpacing:1}},(has?'✓':'—')+' '+f.l);
         })
