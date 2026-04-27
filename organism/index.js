@@ -14383,14 +14383,14 @@ async function generateStrategicThesis(opp, scope, financial, research, kbContex
     'OUTPUT REQUIREMENTS:\n' +
     'Produce 3-5 strategic theses. Output ONLY valid JSON. No prose. No markdown fencing.\n\n' +
     'CONSTRAINTS PER THESIS:\n' +
-    '- SPECIFICITY: must name a specific HGI capability, project, dollar figure, regulation, or failure mode. ' +
-    'Forbidden generic words in the claim text: "experience", "capability", "expertise", "commitment", ' +
-    '"dedication", "partnership", "comprehensive", "robust", "deep", "extensive", "proven", ' +
-    '"leading", "innovative", "best-in-class". ' +
-    'EXCEPTION: "trusted" is permitted when anchored to specific named relationships, e.g. ' +
-    '"the firm that NOLA agencies trust to administer their hardest programs (TPA for OPSB, RTA, City, SWBNO; ' +
-    'Property Tax Appeals for City; Billing Appeals for SWBNO)" is acceptable because each clause ' +
-    'names a verifiable engagement. "trusted partner" with no named relationships is forbidden.\n' +
+    '- SPECIFICITY: must name a specific HGI capability, project, dollar figure, regulation, ' +
+    'failure mode, named agency relationship, or comparable concrete anchor. The test is whether ' +
+    'an evaluator could verify the claim from public records or HGI references — not whether ' +
+    'the claim avoids any particular words. Use the strongest, plainest English. ' +
+    '"The firm New Orleans agencies trust to administer their hardest programs (TPA for OPSB, ' +
+    'RTA, City, and SWBNO; Property Tax Appeals for City; Billing Appeals for SWBNO)" is strong ' +
+    'because every clause names a verifiable engagement. "We have deep partnership experience" ' +
+    'is weak because nothing is named. Optimize for verifiable specifics, not for vocabulary.\n' +
     '- TESTABILITY: an evaluator must be able to verify the underlying claim. ' +
     '"$67.0M direct contract on Road Home managing 185,000+ applications with zero misappropriation findings" ' +
     'passes (verifiable). "We deeply understand local needs" fails (not testable).\n' +
