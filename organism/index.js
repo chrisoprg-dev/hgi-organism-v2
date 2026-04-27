@@ -170,7 +170,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url === '/api/pipeline') {
-      const r = await supabase.from('opportunities').select('id,title,agency,vertical,opi_score,stage,status,due_date,estimated_value,source_url,outcome,rfp_document_retrieved').eq('status','active').order('opi_score', { ascending: false }).limit(20);
+      const r = await supabase.from('opportunities').select('id,title,agency,vertical,opi_score,stage,status,due_date,estimated_value,source_url,outcome,rfp_document_retrieved,proposal_complete,proposal_status').eq('status','active').order('opi_score', { ascending: false }).limit(20);
       // Add lightweight flags for completeness indicators without sending full text
       if (r.data) {
         var fullR = await supabase.from('opportunities').select('id,capture_action,scope_analysis,research_brief,staffing_plan,financial_analysis,proposal_content').eq('status','active');
@@ -182,7 +182,10 @@ const server = http.createServer(async (req, res) => {
           o.has_intel = !!(f.research_brief && f.research_brief.length > 100);
           o.has_financial = !!(f.financial_analysis && f.financial_analysis.length > 100);
           o.has_staffing = !!(f.staffing_plan && f.staffing_plan.length > 100);
-          o.has_proposal = !!(f.proposal_content && f.proposal_content.length > 100);
+          // S149: has_proposal becomes the validated state — TRUE only when proposal_complete=true.
+          // The UI tri-state (✓/⚠/—) reads proposal_complete + proposal_content directly via det,
+          // but legacy callers of has_proposal (WIN PATH bar, summary counts) now reflect truth.
+          o.has_proposal = (o.proposal_complete === true);
           o.has_capture = !!(f.capture_action && f.capture_action.length > 100);
         });
       }
@@ -513,7 +516,7 @@ if (url === '/' || url === '/dashboard' || url === '/interface' || url === '/int
 if (url.startsWith('/api/opportunity-detail')) {
   var oId = (req.url.split('?id=')[1]||'').split('&')[0];
   if (!oId) { res.writeHead(400); res.end(JSON.stringify({error:'id required'})); return; }
-  var dr = await supabase.from('opportunities').select('id,title,agency,vertical,opi_score,stage,status,due_date,estimated_value,scope_analysis,financial_analysis,research_brief,staffing_plan,capture_action,source_url,outcome,outcome_notes,rfp_text,proposal_content,rfp_document_retrieved,description,oral_presentation_date,award_notification_date,rfp_document_url,incumbent,why_hgi_wins,key_requirements').eq('id',oId).single();
+  var dr = await supabase.from('opportunities').select('id,title,agency,vertical,opi_score,stage,status,due_date,estimated_value,scope_analysis,financial_analysis,research_brief,staffing_plan,capture_action,source_url,outcome,outcome_notes,rfp_text,proposal_content,proposal_complete,proposal_status,proposal_validated_at,rfp_document_retrieved,description,oral_presentation_date,award_notification_date,rfp_document_url,incumbent,why_hgi_wins,key_requirements').eq('id',oId).single();
   res.writeHead(200, {'Content-Type':'application/json'});
   res.end(JSON.stringify(dr.data || {}));
   return;
