@@ -9593,11 +9593,17 @@ function createL6Specialist(config) {
 
     // --- Canon violation sweep (universal + specialist extras) ---
     var canonViolations = [];
+    // S149: capture the opportunity's normalized agency for clientException matching.
+    // If a canon rule has a clientException string and the opp's agency matches it,
+    // the rule is skipped — that mention is legitimate (we're bidding to that client).
+    var _l6OppAgencyNorm = (opp && opp.agency ? String(opp.agency).toLowerCase() : '');
     L6_UNIVERSAL_CANON_REGEX_SET.forEach(function(rule){
+      if (rule.clientException && _l6OppAgencyNorm.indexOf(rule.clientException) >= 0) return;
       if (rule.pattern.test(sectionText)) canonViolations.push(rule.name);
     });
     if (Array.isArray(config.canon_violation_regex_set)) {
       config.canon_violation_regex_set.forEach(function(rule){
+        if (rule && rule.clientException && _l6OppAgencyNorm.indexOf(rule.clientException) >= 0) return;
         if (rule && rule.pattern && rule.pattern.test(sectionText)) canonViolations.push(rule.name);
       });
     }
@@ -9897,13 +9903,13 @@ var L6_PAST_PERFORMANCE_CONFIG = {
   // S133 guardrail blocks produce-proposal entry anyway, so the specialist
   // never runs in that configuration without forceExclusionOverride.)
   canon_violation_regex_set: [
-    { name: 'pp_exclusion_pbgc', pattern: /\bPBGC\b/ },
-    { name: 'pp_exclusion_opsb', pattern: /\b(Orleans\s+Parish\s+School\s+Board|OPSB)\b/i },
-    { name: 'pp_exclusion_liga', pattern: /\bLIGA\b/ },
-    { name: 'pp_exclusion_tpciga', pattern: /\bTPCIGA\b/ },
+    { name: 'pp_exclusion_pbgc',   pattern: /\bPBGC\b/,                                         clientException: 'pbgc' },
+    { name: 'pp_exclusion_opsb',   pattern: /\b(Orleans\s+Parish\s+School\s+Board|OPSB)\b/i,    clientException: 'orleans parish school board' },
+    { name: 'pp_exclusion_liga',   pattern: /\bLIGA\b/,                                         clientException: 'liga' },
+    { name: 'pp_exclusion_tpciga', pattern: /\bTPCIGA\b/,                                       clientException: 'tpciga' },
     { name: 'pp_wrong_legal_entity', pattern: /Hammerman\s*&\s*Gainer\s+Global|\bHGI\s+LLC\b|\bHGI\s+Global\s+LLC\b/i },
-    { name: 'pp_wrong_uei', pattern: /(?:UEI[^A-Z0-9]{0,5})(?!DL4SJEVKZ6H4)[A-Z0-9]{12}/ },
-    { name: 'pp_wrong_cage', pattern: /\b47G60\b/ }
+    { name: 'pp_wrong_uei',         pattern: /(?:UEI[^A-Z0-9]{0,5})(?!DL4SJEVKZ6H4)[A-Z0-9]{12}/ },
+    { name: 'pp_wrong_cage',        pattern: /\b47G60\b/ }
   ],
   user_message_include: ['opp_meta','rfp_requirements','thesis_spine','scope_of_work','hgi_pp_entries','discriminators'],
   output_schema_extras: ['pp_entries_cited','thesis_alignment'],
