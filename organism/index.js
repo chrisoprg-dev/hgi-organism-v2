@@ -2059,6 +2059,168 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       var bkAfter = (proposalText.match(/\[(?:ACTION\s*REQUIRED|Correction|CORRECTION|Note|NOTE|TBD|TBC|To be determined|TO BE DETERMINED|To be completed|TO BE COMPLETED|Insert|INSERT|Confirm|CONFIRM|Verify|VERIFY|Placeholder|PLACEHOLDER|Pending|PENDING)/gi) || []).length;
       log('PROPOSAL ENGINE: Universal bracket killer — preserved ' + _permitHits + ' [TO BE ASSIGNED] markers, removed other brackets, ' + bkAfter + ' residuals remain, char delta ' + (proposalText.length - bkBefore));
 
+      // === S150 FACT-CHECK HARD-GATE — canon validation on raw proposalText ===
+      // Two-phase pass:
+      //   (a) AUTO-CORRECT mechanically-verifiable canon violations the system promises
+      //       won't appear (founding year != 1929, age != 97, wrong UEI/CAGE, Geoffrey
+      //       Brien, placeholder phone/email, deprecated staff counts).
+      //   (b) DETECT semantic violations the system can't auto-fix (stale cover-letter
+      //       date relative to submission deadline) and auto-correct to canonical date
+      //       when possible. Flag to organism_memory for red team / L7 / lessons.
+      //
+      // Why here: the existing canon fixes at L5709 only run inside /api/proposal-doc
+      // (doc-generation), so DB-stored proposal_content kept the dirty text and red
+      // team reviewed dirty text. This pass runs the same fixes BEFORE storage so
+      // proposal_content is canon-clean the moment it's persisted.
+      //
+      // Origin: S150 — caught a cover-letter date 10 months stale on the OPSB S149
+      // submission-ready output. Red team did not flag because no rule existed to
+      // compare cover-letter date against the submission window.
+      //
+      // Cost: $0 (pure regex, no LLM). Fast (single pass).
+      try {
+        var s150_findings = [];
+        var s150_corrections = 0;
+        var s150_textBefore = proposalText;
+
+        // (a1) Founding year — only rewrite in HGI-context phrasing
+        proposalText = proposalText.replace(/\b((?:founded|established|incorporated|formed|since|in operation since|of operation since)\s+(?:in\s+)?)(\d{4})\b/gi, function(m, prefix, year) {
+          if (year !== '1929' && parseInt(year) >= 1920 && parseInt(year) <= 1940) {
+            s150_findings.push({sev:'critical', type:'canon_founding_year', detail:'Wrong founding year ' + year + ' (canon 1929) — auto-corrected'});
+            s150_corrections++;
+            return prefix + '1929';
+          }
+          return m;
+        });
+
+        // (a2) Years-of-operation — normalize "9[3-8]-year" to "97-year"
+        proposalText = proposalText.replace(/\b(9[3-8])([- ]?year(?:-?old)?)/gi, function(m, n, suffix) {
+          if (n !== '97') {
+            s150_findings.push({sev:'critical', type:'canon_age', detail:'Wrong age ' + n + suffix + ' (canon 97-year) — auto-corrected'});
+            s150_corrections++;
+            return '97' + suffix;
+          }
+          return m;
+        });
+
+        // (a3) CAGE code — canon 47C60, common Opus error 47G60
+        proposalText = proposalText.replace(/\b47[A-Z]60\b/g, function(m) {
+          if (m !== '47C60') {
+            s150_findings.push({sev:'critical', type:'canon_cage', detail:'Wrong CAGE ' + m + ' (canon 47C60) — auto-corrected'});
+            s150_corrections++;
+            return '47C60';
+          }
+          return m;
+        });
+
+        // (a4) UEI — canon DL4SJEVKZ6H4 (Opus sometimes scrambles trailing chars)
+        proposalText = proposalText.replace(/\bDL4S[A-Z0-9]{8}\b/g, function(m) {
+          if (m !== 'DL4SJEVKZ6H4') {
+            s150_findings.push({sev:'critical', type:'canon_uei', detail:'Wrong UEI ' + m + ' (canon DL4SJEVKZ6H4) — auto-corrected'});
+            s150_corrections++;
+            return 'DL4SJEVKZ6H4';
+          }
+          return m;
+        });
+
+        // (a5) Geoffrey Brien — never appears
+        var s150_gbHits = (proposalText.match(/Geoffrey\s+Brien/gi) || []).length;
+        if (s150_gbHits > 0) {
+          proposalText = proposalText.replace(/Geoffrey\s+Brien/gi, '[TO BE ASSIGNED]');
+          s150_findings.push({sev:'critical', type:'canon_ex_employee', detail:'Geoffrey Brien mentioned ' + s150_gbHits + 'x — auto-corrected to [TO BE ASSIGNED]'});
+          s150_corrections += s150_gbHits;
+        }
+
+        // (a6) Placeholder phone
+        if (/\(504\)\s*000-0000/.test(proposalText)) {
+          var s150_phHits = (proposalText.match(/\(504\)\s*000-0000/g) || []).length;
+          proposalText = proposalText.replace(/\(504\)\s*000-0000/g, '(504) 681-6135');
+          s150_findings.push({sev:'critical', type:'canon_phone', detail:'Placeholder phone ' + s150_phHits + 'x — auto-corrected to (504) 681-6135'});
+          s150_corrections += s150_phHits;
+        }
+
+        // (a7) Wrong email domain
+        if (/info@hgi\.com/i.test(proposalText)) {
+          var s150_emHits = (proposalText.match(/info@hgi\.com/gi) || []).length;
+          proposalText = proposalText.replace(/info@hgi\.com/gi, 'info@hgi-global.com');
+          s150_findings.push({sev:'critical', type:'canon_email', detail:'Wrong email domain ' + s150_emHits + 'x — auto-corrected'});
+          s150_corrections += s150_emHits;
+        }
+
+        // (a8) Deprecated staff counts (S125 canon)
+        var s150_staffPatterns = [
+          /67\s+full[- ]time\s+(?:employees|staff)/gi,
+          /67\s+FT\s*\+?\s*43\s+contract/gi,
+          /110\s+professionals/gi
+        ];
+        for (var s150_sp = 0; s150_sp < s150_staffPatterns.length; s150_sp++) {
+          var s150_spHits = (proposalText.match(s150_staffPatterns[s150_sp]) || []).length;
+          if (s150_spHits > 0) {
+            proposalText = proposalText.replace(s150_staffPatterns[s150_sp], 'approximately 50 team members');
+            s150_findings.push({sev:'critical', type:'canon_staff_count', detail:'Deprecated staff count pattern ' + s150_sp + ' (' + s150_spHits + 'x) — auto-corrected'});
+            s150_corrections += s150_spHits;
+          }
+        }
+
+        // (b1) Cover-letter date staleness — top ~5K chars cover the cover-letter section.
+        // Compare the first 1-3 dates against opp.due_date; if >60 days off, auto-correct
+        // the first stale date (the cover letter dateline) to the submission deadline.
+        if (opp.due_date) {
+          try {
+            var s150_deadline = new Date(opp.due_date);
+            if (!isNaN(s150_deadline.getTime())) {
+              var s150_coverSection = proposalText.slice(0, 5000);
+              var s150_dateRe = /(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{4}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}/g;
+              var s150_dateMatches = s150_coverSection.match(s150_dateRe) || [];
+              var s150_months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+              var s150_canonDate = s150_months[s150_deadline.getUTCMonth()] + ' ' + s150_deadline.getUTCDate() + ', ' + s150_deadline.getUTCFullYear();
+              var s150_corrected = false;
+              for (var s150_di = 0; s150_di < Math.min(s150_dateMatches.length, 3); s150_di++) {
+                var s150_dm = s150_dateMatches[s150_di];
+                var s150_parsed = new Date(s150_dm);
+                if (!isNaN(s150_parsed.getTime())) {
+                  var s150_daysOff = Math.abs((s150_deadline.getTime() - s150_parsed.getTime()) / 86400000);
+                  if (s150_daysOff > 60) {
+                    if (!s150_corrected) {
+                      // auto-correct first stale date only (the dateline)
+                      proposalText = proposalText.replace(s150_dm, s150_canonDate);
+                      s150_findings.push({sev:'critical', type:'cover_letter_date_stale', detail:'Cover letter date "' + s150_dm + '" was ' + Math.round(s150_daysOff) + ' days off deadline — auto-corrected to "' + s150_canonDate + '"'});
+                      s150_corrections++;
+                      s150_corrected = true;
+                    } else {
+                      s150_findings.push({sev:'major', type:'cover_letter_date_stale', detail:'Additional stale date "' + s150_dm + '" (' + Math.round(s150_daysOff) + ' days off) — flagged only'});
+                    }
+                  }
+                }
+              }
+            }
+          } catch (s150_dErr) {
+            log('PROPOSAL ENGINE: S150 date check failed (non-fatal): ' + (s150_dErr.message||'').slice(0,150));
+          }
+        }
+
+        // Summarize + persist
+        if (s150_findings.length > 0) {
+          log('PROPOSAL ENGINE: S150 fact-check — ' + s150_findings.length + ' findings, ' + s150_corrections + ' auto-corrections, char delta ' + (proposalText.length - s150_textBefore.length));
+          for (var s150_fi = 0; s150_fi < s150_findings.length; s150_fi++) {
+            log('  [' + s150_findings[s150_fi].sev + '] ' + s150_findings[s150_fi].type + ': ' + s150_findings[s150_fi].detail);
+          }
+          await supabase.from('organism_memory').insert({
+            id: 's150_factcheck_' + (ppId||'').slice(0,20) + '_' + Date.now(),
+            agent: 's150_proposal_factcheck',
+            opportunity_id: ppId,
+            observation: 'S150 FACT-CHECK: ' + s150_findings.length + ' findings, ' + s150_corrections + ' auto-corrections | ' +
+              s150_findings.map(function(f){return f.sev + ':' + f.type;}).join(', '),
+            memory_type: 'analysis',
+            created_at: new Date().toISOString()
+          });
+        } else {
+          log('PROPOSAL ENGINE: S150 fact-check — CLEAN (0 findings)');
+        }
+      } catch (s150Err) {
+        log('PROPOSAL ENGINE: S150 fact-check error (non-fatal): ' + (s150Err.message||'').slice(0,200));
+      }
+
       // === S149: PROPOSAL COMPLETENESS GATE ===
       // Validate before storing. The "✓PROP" checkmark in the UI was checking IS NOT NULL,
       // which let truncated and section-incomplete proposals pass as "ready". This gate
