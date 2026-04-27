@@ -1959,9 +1959,53 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       var bkAfter = (proposalText.match(/\[(?:ACTION\s*REQUIRED|Correction|CORRECTION|Note|NOTE|TBD|TBC|To be determined|TO BE DETERMINED|To be completed|TO BE COMPLETED|Insert|INSERT|Confirm|CONFIRM|Verify|VERIFY|Placeholder|PLACEHOLDER|Pending|PENDING)/gi) || []).length;
       log('PROPOSAL ENGINE: Universal bracket killer — preserved ' + _permitHits + ' [TO BE ASSIGNED] markers, removed other brackets, ' + bkAfter + ' residuals remain, char delta ' + (proposalText.length - bkBefore));
 
+      // === S149: PROPOSAL COMPLETENESS GATE ===
+      // Validate before storing. The "✓PROP" checkmark in the UI was checking IS NOT NULL,
+      // which let truncated and section-incomplete proposals pass as "ready". This gate
+      // sets proposal_complete (boolean) + proposal_status (human-readable) so the UI can
+      // surface the truth and downstream agents can refuse to operate on incomplete drafts.
+      // Required sections come from the parsed compliance blueprint when available; otherwise
+      // we apply a default set covering the standard government services proposal shape.
+      var _s149_required = (complianceBlueprint && Array.isArray(complianceBlueprint.sections_required) && complianceBlueprint.sections_required.length > 0)
+        ? complianceBlueprint.sections_required.map(function(s){ return String((s.title||s.section_number||'')).toLowerCase(); }).filter(function(t){ return t.length > 0; })
+        : ['executive summary', 'technical approach', 'management', 'staffing', 'past performance', 'pricing'];
+      var _s149_lowerProp = (proposalText || '').toLowerCase();
+      var _s149_missing = _s149_required.filter(function(s){
+        // tolerant match: present if any meaningful word from section title appears
+        var key = s.replace(/\b(section|tab|appendix|exhibit)\b\s*\d*[:\.\-]?\s*/gi, '').trim();
+        if (!key) return false;
+        // try the full section title first; then fall back to first significant word
+        if (_s149_lowerProp.indexOf(key) >= 0) return false;
+        var firstWord = key.split(/\s+/)[0];
+        if (firstWord && firstWord.length > 3 && _s149_lowerProp.indexOf(firstWord) >= 0) return false;
+        return true;
+      });
+      var _s149_tail = (proposalText || '').trim().slice(-80);
+      // Ends cleanly = last non-whitespace char is sentence/clause terminator
+      // and is NOT an em-dash, hyphen, comma, semicolon, or pipe (all signs of
+      // mid-thought truncation observed in S149 audit). Markdown asterisks and
+      // brackets/quotes are allowed because legitimate proposal endings often
+      // close with a citation or italic phrase. DR-4900 case caught here:
+      // tail ended with "Non-Collusion Affidavit —" which the previous regex
+      // would have passed via the table-cell exception.
+      var _s149_lastChar = _s149_tail.replace(/\s+$/, '').slice(-1);
+      var _s149_endsCleanly = /[.!?\)\]"'*]/.test(_s149_lastChar) &&
+                              !/[—–\-,;|:]$/.test(_s149_tail.replace(/\s+$/, ''));
+      var _s149_lengthOK = (proposalText || '').length >= 5000;
+      var _s149_problems = [];
+      if (_s149_missing.length > 0) _s149_problems.push('missing=' + _s149_missing.join(','));
+      if (!_s149_endsCleanly) _s149_problems.push('truncated_ending');
+      if (!_s149_lengthOK) _s149_problems.push('too_short(' + (proposalText||'').length + ')');
+      var _s149_isComplete = _s149_problems.length === 0;
+      var _s149_status = _s149_isComplete ? 'complete' : ('incomplete: ' + _s149_problems.join('; '));
+      log('PROPOSAL ENGINE: S149 completeness gate — ' + _s149_status + ' | required=' + _s149_required.length + ', missing=' + _s149_missing.length + ', endsCleanly=' + _s149_endsCleanly + ', length=' + (proposalText||'').length + ', tail="' + _s149_tail.replace(/\n/g,' ').slice(-50) + '"');
+
       // 6. Store the proposal in dedicated column (NOT capture_action — that's the organism's internal analysis)
       await supabase.from('opportunities').update({
         proposal_content: proposalText,
+        proposal_complete: _s149_isComplete,
+        proposal_status: _s149_status,
+        proposal_validated_at: new Date().toISOString(),
         last_updated: new Date().toISOString()
       }).eq('id', ppId);
 
