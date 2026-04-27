@@ -2336,6 +2336,70 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
           s150_findings.push({sev:'critical', type:'competitor_phrase', detail:'Targeted competitor-phrase scrubs ' + s150_phraseHitsTotal + 'x — silent-scrubbed (bare "competitor" word still flaggable for auto-regen)'});
         }
 
+        // (b2) S150: Client-address consistency check. Root cause discovered on OPSB run:
+        // proposal had both "Suite 5055" (correct, from RFP cover) AND "Suite 2200" (Opus
+        // hallucinated/leaked from another OPSB context). For evaluators verifying mailing
+        // addresses, mixed suite numbers are an immediate competence-failure signal.
+        // This check extracts the canonical client address from rfp_text (looking for the
+        // "Submitted to" pattern or the agency's address line near the top of the RFP),
+        // then scans proposal_content for any other address with the same street + different
+        // suite, and auto-corrects to the canonical suite. Generic — works for any RFP
+        // that has a clear "submitted to" address with a Suite number.
+        try {
+          var s150_rfpHead = String(opp.rfp_text || '').slice(0, 8000);
+          // Look for "Suite NNNN" patterns in the RFP head
+          var s150_rfpSuiteMatches = s150_rfpHead.match(/Suite\s+(\d{3,4})/gi) || [];
+          if (s150_rfpSuiteMatches.length > 0) {
+            // Use the first Suite NNNN found in the RFP head as canonical
+            var s150_canonSuite = s150_rfpSuiteMatches[0].replace(/Suite\s+/i, 'Suite ');
+            var s150_canonSuiteNum = s150_canonSuite.replace(/Suite\s+/i, '');
+            // Find all Suite numbers in the proposal that aren't the canonical one
+            var s150_propSuites = (proposalText.match(/Suite\s+(\d{3,4})/gi) || []).map(function(m){ return m.replace(/Suite\s+/i, 'Suite '); });
+            var s150_uniqueSuites = {};
+            s150_propSuites.forEach(function(s){ s150_uniqueSuites[s] = (s150_uniqueSuites[s]||0) + 1; });
+            // For each Suite number that appears in the proposal but is NOT canonical,
+            // check whether HGI's own canonical Suite 510 (Kenner HQ) — that one stays.
+            // Scrub other non-canonical suites to the canonical client suite ONLY when
+            // they appear near the client agency name (within 300 chars).
+            var s150_clientNameLower = (opp.agency || '').toLowerCase();
+            var s150_addrFixes = 0;
+            for (var s150_suiteKey in s150_uniqueSuites) {
+              if (!s150_uniqueSuites.hasOwnProperty(s150_suiteKey)) continue;
+              var s150_suiteVal = s150_suiteKey.replace(/Suite\s+/i, '');
+              if (s150_suiteVal === s150_canonSuiteNum) continue; // canonical, skip
+              if (s150_suiteVal === '510') continue; // HGI's own HQ suite, never touch
+              // Is this non-canonical suite appearing near the client agency name?
+              var s150_re = new RegExp('Suite\\s+' + s150_suiteVal, 'g');
+              var s150_match;
+              var s150_nearClient = false;
+              while ((s150_match = s150_re.exec(proposalText)) !== null) {
+                var s150_window = proposalText.slice(Math.max(0, s150_match.index - 300), s150_match.index + 300).toLowerCase();
+                if (s150_clientNameLower && s150_window.indexOf(s150_clientNameLower.slice(0, 30)) >= 0) {
+                  s150_nearClient = true;
+                  break;
+                }
+                // Also catch generic patterns like "Westbend Parkway, Suite N" that match the RFP street
+                var s150_streetMatch = s150_rfpHead.match(/\d+\s+[A-Z][a-zA-Z]*\s+(?:Parkway|Street|Avenue|Road|Boulevard|Blvd)/);
+                if (s150_streetMatch && s150_window.indexOf(s150_streetMatch[0].toLowerCase()) >= 0) {
+                  s150_nearClient = true;
+                  break;
+                }
+              }
+              if (s150_nearClient) {
+                proposalText = proposalText.replace(s150_re, 'Suite ' + s150_canonSuiteNum);
+                s150_addrFixes += s150_uniqueSuites[s150_suiteKey];
+                s150_findings.push({sev:'critical', type:'client_address_drift', detail:'Wrong client suite number Suite ' + s150_suiteVal + ' (canonical from RFP: Suite ' + s150_canonSuiteNum + ') — auto-corrected ' + s150_uniqueSuites[s150_suiteKey] + 'x'});
+                s150_corrections += s150_uniqueSuites[s150_suiteKey];
+              }
+            }
+            if (s150_addrFixes > 0) {
+              log('S150 FACT-CHECK (b2): client address drift — auto-corrected ' + s150_addrFixes + ' suite mismatches to canonical Suite ' + s150_canonSuiteNum);
+            }
+          }
+        } catch(_b2err) {
+          log('S150 FACT-CHECK (b2) error (non-fatal): ' + (_b2err.message||'').slice(0,200));
+        }
+
         // (b1) Cover-letter date staleness — top ~5K chars cover the cover-letter section.
         // Compare the first 1-3 dates against opp.due_date; if >60 days off, auto-correct
         // the first stale date (the cover letter dateline) to the submission deadline.
@@ -2564,6 +2628,47 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
             return '- ' + c.competitor_name + ': Strengths=' + (c.strengths||'unknown').slice(0,150) + ' | Weaknesses=' + (c.weaknesses||'unknown').slice(0,150);
           }).join('\n') : '';
 
+        // S150 RED TEAM BLIND SPOT FIX: Build a deterministic tab-presence audit
+        // BEFORE invoking the red team. This stops the red team from claiming sections
+        // are "absent" when they exist past the slice cutoff. Root cause was discovered
+        // on OPSB run lapac-654321-26-0108: 119K-char proposal sliced to 60K meant
+        // Tabs 5-11 + Appendix B were invisible, all flagged as "absent" — false
+        // positives that dropped PWIN to 22% and triggered amputation veto downstream.
+        var tabPresenceAudit = '';
+        try {
+          if (complianceBlueprint && Array.isArray(complianceBlueprint.sections_required) && complianceBlueprint.sections_required.length > 0) {
+            var auditLines = [];
+            for (var _tpi = 0; _tpi < complianceBlueprint.sections_required.length; _tpi++) {
+              var _bpSection = complianceBlueprint.sections_required[_tpi];
+              var _searchToken = String(_bpSection.tab_number || _bpSection.title || '').trim();
+              if (!_searchToken) continue;
+              // Try tab number first (e.g. "Tab 5"), then fall back to title
+              var _pos = proposalText.indexOf(_searchToken);
+              if (_pos < 0 && _bpSection.title) _pos = proposalText.indexOf(_bpSection.title);
+              if (_pos >= 0) {
+                // Find the next section start to compute this section's length
+                var _nextPos = proposalText.length;
+                for (var _tpj = _tpi + 1; _tpj < complianceBlueprint.sections_required.length; _tpj++) {
+                  var _nextToken = String(complianceBlueprint.sections_required[_tpj].tab_number || complianceBlueprint.sections_required[_tpj].title || '').trim();
+                  if (!_nextToken) continue;
+                  var _np = proposalText.indexOf(_nextToken, _pos + _searchToken.length);
+                  if (_np > _pos) { _nextPos = _np; break; }
+                }
+                var _len = _nextPos - _pos;
+                auditLines.push((_bpSection.tab_number || _bpSection.title) + ': PRESENT at char ' + _pos + ', ' + _len + ' chars of content');
+              } else {
+                auditLines.push((_bpSection.tab_number || _bpSection.title) + ': NOT FOUND in proposal');
+              }
+            }
+            // Also report Appendix B since OPSB-style proposals often have it as separate
+            var _appBPos = proposalText.indexOf('Appendix B');
+            if (_appBPos >= 0) auditLines.push('Appendix B: PRESENT at char ' + _appBPos + ', ' + (proposalText.length - _appBPos) + ' chars of content');
+            tabPresenceAudit = '\n\n## TAB PRESENCE AUDIT (DETERMINISTIC — TREAT AS GROUND TRUTH)\nThis audit was computed by exact-string-match against proposal_content (length: ' + proposalText.length + ' chars). Do NOT flag any tab marked PRESENT below as "absent" or "missing" — those tabs exist in the document past your slice cutoff. Focus your review on QUALITY of the content within each present tab, not on existence.\n\n' + auditLines.map(function(l){ return '- ' + l; }).join('\n') + '\n\n';
+          }
+        } catch(_tpAuditErr) {
+          log('TAB PRESENCE AUDIT error (non-fatal): ' + (_tpAuditErr.message||'').slice(0,150));
+        }
+
         var reviewPrompt = 'You are a ruthless government proposal red team reviewer and PWIN estimator. Review this proposal against the RFP and return ONLY valid JSON.\n\n' +
           '## RFP/SOQ REQUIREMENTS\n' + rfpRef.slice(0, 20000) + '\n\n' +
           (complianceBlueprint ? '## COMPLIANCE BLUEPRINT (parsed from RFP — check proposal against EVERY item)\n' +
@@ -2572,7 +2677,8 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
             'Contract template provided: ' + (complianceBlueprint.contract_template?complianceBlueprint.contract_template.provided_by_rfp:'unknown') + '\n' +
             'Scope items to address: ' + JSON.stringify(complianceBlueprint.scope_items) + '\n' +
             'Eval criteria: ' + JSON.stringify(complianceBlueprint.evaluation_criteria) + '\n\n' : '') +
-          '## PROPOSAL TEXT\n' + proposalText.slice(0, 60000) + competitorContext + '\n\n' +
+          tabPresenceAudit +
+          '## PROPOSAL TEXT (' + proposalText.length + ' chars total — ' + (proposalText.length > 130000 ? 'TRUNCATED to first 130K chars; reference TAB PRESENCE AUDIT above for sections beyond cutoff' : 'COMPLETE document below') + ')\n' + proposalText.slice(0, 130000) + competitorContext + '\n\n' +
           '## REVIEW CHECKLIST:\n' +
           '1. COMPLIANCE: Missing required sections, exhibits, forms, certifications. If a COMPLIANCE BLUEPRINT is provided above, check the proposal against EVERY section and scope item — flag any that are missing or incomplete.\n' +
           '2. STRUCTURE: Does the proposal follow the EXACT section order specified in the RFP? Are tab numbers correct? Are section headings matching the RFP language?\n' +
@@ -11684,7 +11790,7 @@ async function runSingleRedTeamPass(opp, proposalText) {
     '- HGI is 100% minority-owned. NMSDC certified. ~50 team members across Kenner (HQ), Shreveport, Alexandria, New Orleans offices.\n' +
     '- HGI has multiple legitimate active engagements. The PP selector returns canonically-verified top-3; treat any unrecognized client as needing verification, not as automatic exclusion.\n\n' +
     '=== RFP ===\n' + ((opp.rfp_text || opp.scope_analysis || opp.description || '').slice(0, 12000)) + '\n\n' +
-    '=== PROPOSAL ===\n' + proposalText.slice(0, 30000) + '\n\n' +
+    '=== PROPOSAL (' + proposalText.length + ' chars total — ' + (proposalText.length > 100000 ? 'TRUNCATED to first 100K' : 'COMPLETE') + ') ===\n' + proposalText.slice(0, 100000) + '\n\n' +
     'Return ONLY this JSON schema (no preamble, no markdown, no explanation):\n' +
     '{\n' +
     '  "overall_status": "SUBMISSION_READY" | "NEEDS_MAJOR_REVISION" | "NEEDS_MINOR_REVISION" | "DO_NOT_SUBMIT",\n' +
