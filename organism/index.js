@@ -1291,6 +1291,73 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         }).join('\n\n').slice(0, 4000);
       }
 
+      // === S149 Tier 3: LESSONS LEARNED ===
+      // Pull durable lessons from prior sessions/runs that apply to this opportunity.
+      // Filter by vertical, agency, geography. This is the all-into-all integration —
+      // every relevant insight from prior conversations and red team findings now
+      // shapes every future relevant proposal automatically.
+      var lessonsText = '';
+      try {
+        var _oppVertical = (opp.vertical || '').toLowerCase();
+        var _oppAgency = (opp.agency || '').toLowerCase();
+        // Geography heuristic: pull from agency string. New Orleans agencies tend to mention
+        // either "new orleans", "orleans parish", "swbno", "rta", or "nola".
+        var _oppGeography = null;
+        if (/new orleans|orleans parish|swbno|rta|nola/.test(_oppAgency)) _oppGeography = 'new orleans';
+        else if (/louisiana|la dotd/.test(_oppAgency) || (opp.state||'').toUpperCase() === 'LA') _oppGeography = 'louisiana';
+
+        var _lessonQuery = supabase.from('lessons_learned')
+          .select('lesson_type, lesson_text, detail, applies_to_vertical, applies_to_agency_name, applies_to_geography, confidence')
+          .eq('status', 'active')
+          .order('confidence', { ascending: false })
+          .limit(40);
+        var _lessonResult = await _lessonQuery;
+        var _allLessons = _lessonResult.data || [];
+        // Filter to applicable lessons: lesson applies if its filter is NULL (universal)
+        // or matches this opp's vertical/agency/geography.
+        var _applicable = _allLessons.filter(function(l) {
+          var verticalMatch = !l.applies_to_vertical || (_oppVertical.indexOf(l.applies_to_vertical) >= 0);
+          var agencyMatch = !l.applies_to_agency_name || (_oppAgency.indexOf(l.applies_to_agency_name) >= 0);
+          var geoMatch = !l.applies_to_geography || (l.applies_to_geography === _oppGeography);
+          return verticalMatch && agencyMatch && geoMatch;
+        });
+        if (_applicable.length > 0) {
+          // Group by type for readability
+          var _byType = {};
+          _applicable.forEach(function(l) {
+            if (!_byType[l.lesson_type]) _byType[l.lesson_type] = [];
+            _byType[l.lesson_type].push(l);
+          });
+          var _typeOrder = ['agency_history', 'pp_canon_gap', 'compliance_rule', 'language_pattern', 'visual_requirement', 'red_team_calibration', 'submission_failure', 'win_pattern', 'general'];
+          var _sections = [];
+          _typeOrder.forEach(function(t) {
+            if (_byType[t]) {
+              _sections.push('### ' + t.replace(/_/g,' ').toUpperCase() + '\n' +
+                _byType[t].map(function(l) {
+                  return '- ' + l.lesson_text + (l.detail ? '\n    ' + l.detail.slice(0, 400) : '');
+                }).join('\n'));
+            }
+          });
+          lessonsText = _sections.join('\n\n').slice(0, 6000);
+          log('LESSONS LEARNED: ' + _applicable.length + ' applicable lessons loaded for ' + ppId + ' (vertical=' + _oppVertical + ', geo=' + _oppGeography + ')');
+
+          // Mark these lessons as applied (touch last_applied_at + counter) so we can
+          // measure which lessons drive value and prune stale ones over time.
+          try {
+            var _lessonIds = _applicable.map(function(l){ return l.id; }).filter(Boolean);
+            if (_lessonIds.length > 0) {
+              await supabase.rpc('exec_sql', {
+                query: "UPDATE lessons_learned SET last_applied_at = NOW(), applied_count = applied_count + 1 WHERE id = ANY($1)"
+              }).catch(function(){});
+            }
+          } catch (_lle) { /* non-fatal */ }
+        } else {
+          log('LESSONS LEARNED: no applicable lessons matched for ' + ppId);
+        }
+      } catch (_lessonsErr) {
+        log('LESSONS LEARNED ERROR (non-fatal): ' + (_lessonsErr.message||'').slice(0,200));
+      }
+
       // Sibling opps — what we're learning from parallel pursuits
       var siblingText = '';
       if (siblingRelevant.length > 0) {
@@ -1826,6 +1893,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         '## POTENTIAL TEAMING PARTNERS\n' + (teamingText || 'No teaming partners identified') + '\n\n' +
         '## PIPELINE ANALYTICS & PATTERNS\n' + (analyticsText || 'No pipeline patterns') + '\n\n' +
         '## OUTCOME LESSONS — WHAT WE LEARNED FROM WINS/LOSSES\n' + (outcomeText || 'No outcomes recorded yet') + '\n\n' +
+        (lessonsText ? '## LESSONS LEARNED — DURABLE INSIGHTS THAT MUST INFLUENCE THIS PROPOSAL\nThese lessons come from prior sessions, postmortems, red team findings, and President directives. They are HIGHER PRIORITY than generic past performance — apply them. Each lesson has been validated and is an active rule for proposals matching this opportunity.\n\n' + lessonsText + '\n\n' : '') +
         '## PARALLEL PURSUIT INTELLIGENCE\n' + (siblingText || 'No parallel pursuits') + '\n\n' +
         '## KNOWLEDGE BASE — HGI INSTITUTIONAL EXPERTISE\n' + kbChunks.slice(0,12000) + '\n\n' +
         (blueprintSection || '') + '\n\n' +
@@ -4175,6 +4243,65 @@ if (url === '/api/update-stage' && req.method === 'POST') {
       }
 
       res.end(JSON.stringify({ success: true, stage: params.stage }));
+    } catch (e) { res.end(JSON.stringify({ error: e.message })); }
+  });
+  return;
+}
+
+// === S149 Tier 3: CAPTURE LESSON ENDPOINT ===
+// Lets sessions write durable lessons to the lessons_learned table without direct DB access.
+// Lessons surface in every relevant future produce-proposal run via the mega-prompt.
+//
+// POST /api/capture-lesson
+// Body: {
+//   lesson_type: 'agency_history' | 'pp_canon_gap' | 'red_team_calibration' | 'visual_requirement'
+//                | 'submission_failure' | 'win_pattern' | 'compliance_rule' | 'language_pattern' | 'general',
+//   lesson_text: string (required, 1-3 sentences),
+//   detail: string (optional, longer explanation),
+//   applies_to_vertical: string | null,
+//   applies_to_agency_type: string | null,
+//   applies_to_agency_name: string | null,
+//   applies_to_geography: string | null,
+//   source_session: string (e.g. 'S150'),
+//   source_opportunity_id: string | null,
+//   source_type: 'christopher_directive' | 'red_team_finding' | 'submission_outcome' | 'session_postmortem',
+//   confidence: 'high' | 'medium' | 'low'
+// }
+if (url === '/api/capture-lesson' && req.method === 'POST') {
+  var body = '';
+  req.on('data', function(c) { body += c; });
+  req.on('end', async function() {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    try {
+      var p = JSON.parse(body || '{}');
+      if (!p.lesson_type || !p.lesson_text) {
+        res.end(JSON.stringify({ error: 'lesson_type and lesson_text required' }));
+        return;
+      }
+      var validTypes = ['agency_history','pp_canon_gap','red_team_calibration','visual_requirement','submission_failure','win_pattern','compliance_rule','language_pattern','general'];
+      if (validTypes.indexOf(p.lesson_type) < 0) {
+        res.end(JSON.stringify({ error: 'lesson_type must be one of: ' + validTypes.join(', ') }));
+        return;
+      }
+      var insertRow = {
+        lesson_type: p.lesson_type,
+        lesson_text: String(p.lesson_text).slice(0, 1000),
+        detail: p.detail ? String(p.detail).slice(0, 4000) : null,
+        applies_to_vertical: p.applies_to_vertical || null,
+        applies_to_agency_type: p.applies_to_agency_type || null,
+        applies_to_agency_name: p.applies_to_agency_name ? String(p.applies_to_agency_name).toLowerCase() : null,
+        applies_to_geography: p.applies_to_geography || null,
+        source_session: p.source_session || null,
+        source_opportunity_id: p.source_opportunity_id || null,
+        source_type: p.source_type || 'session_postmortem',
+        confidence: ['high','medium','low'].indexOf(p.confidence) >= 0 ? p.confidence : 'medium',
+        status: 'active',
+        created_at: new Date().toISOString()
+      };
+      var ins = await supabase.from('lessons_learned').insert(insertRow).select('id').single();
+      if (ins.error) { res.end(JSON.stringify({ error: ins.error.message })); return; }
+      log('LESSON CAPTURED: type=' + p.lesson_type + ', applies_to=' + (p.applies_to_agency_name||p.applies_to_vertical||p.applies_to_geography||'all') + ', source=' + (p.source_session||'?'));
+      res.end(JSON.stringify({ success: true, id: ins.data && ins.data.id, lesson_type: p.lesson_type }));
     } catch (e) { res.end(JSON.stringify({ error: e.message })); }
   });
   return;
