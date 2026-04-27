@@ -2740,6 +2740,76 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         log('L7 ERROR: ' + (l7Err.message||'').slice(0,300));
       }
 
+      // === S149 FIX #10 — POST-L7 WORD DOC AUTO-GENERATION ===
+      // Now that proposal_content is finalized (post-L7) and visuals are cached
+      // (compliance-matrix, rate-table, org-chart from S149 fix #8), generate the
+      // Word doc and upload it to Supabase Storage so the UI can surface a download
+      // button via opportunities.proposal_doc_url. Closes the "system produces the
+      // deliverable" workflow loop. Non-fatal — failure logs but doesn't break the run.
+      try {
+        var _docStart = Date.now();
+        var _localPort = process.env.PORT || 8080;
+        log('DOC PIPELINE: Generating Word doc for ' + ppId + '...');
+
+        var _docResp = await fetch('http://localhost:' + _localPort + '/api/proposal-doc?id=' + encodeURIComponent(ppId));
+        if (!_docResp.ok) {
+          log('DOC PIPELINE: /api/proposal-doc returned http ' + _docResp.status + ' — skipping upload');
+        } else {
+          var _docArrayBuf = await _docResp.arrayBuffer();
+          var _docBuf = Buffer.from(_docArrayBuf);
+          var _docSizeBytes = _docBuf.length;
+          var _docWallSec = Math.round((Date.now() - _docStart) / 1000);
+          log('DOC PIPELINE: Word doc generated — ' + _docSizeBytes + ' bytes in ' + _docWallSec + 's');
+
+          // Upload to Supabase Storage. Filename includes timestamp so each generation
+          // creates a new artifact rather than overwriting; the URL stored in
+          // opportunities.proposal_doc_url always points at the latest version.
+          var _ts = new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+          var _docFilename = ppId.slice(0,40) + '_' + _ts + '.docx';
+          var _docPath = ppId.slice(0,40) + '/' + _docFilename;
+
+          try {
+            var _upload = await supabase.storage
+              .from('proposal-docs')
+              .upload(_docPath, _docBuf, {
+                contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                upsert: false
+              });
+            if (_upload.error) {
+              log('DOC PIPELINE: upload error — ' + (_upload.error.message||'').slice(0,200));
+            } else {
+              // Build public URL (bucket is public). Pattern matches Supabase public-URL convention.
+              var _publicUrlData = supabase.storage.from('proposal-docs').getPublicUrl(_docPath);
+              var _publicUrl = (_publicUrlData && _publicUrlData.data && _publicUrlData.data.publicUrl) || null;
+              if (_publicUrl) {
+                await supabase.from('opportunities').update({
+                  proposal_doc_url: _publicUrl,
+                  proposal_doc_generated_at: new Date().toISOString(),
+                  proposal_doc_size_bytes: _docSizeBytes,
+                  last_updated: new Date().toISOString()
+                }).eq('id', ppId);
+                log('DOC PIPELINE: Upload OK — ' + _publicUrl);
+
+                await supabase.from('organism_memory').insert({
+                  id: 'mem_doc_' + ppId.slice(0,20) + '_' + Date.now(),
+                  agent: 'doc_pipeline',
+                  opportunity_id: ppId,
+                  observation: 'WORD DOC GENERATED: ' + _docSizeBytes + ' bytes in ' + _docWallSec + 's. URL: ' + _publicUrl,
+                  memory_type: 'analysis',
+                  created_at: new Date().toISOString()
+                });
+              } else {
+                log('DOC PIPELINE: getPublicUrl returned no URL — upload succeeded but URL not captured');
+              }
+            }
+          } catch(_upErr) {
+            log('DOC PIPELINE: upload exception — ' + (_upErr.message||'').slice(0,200));
+          }
+        }
+      } catch(_docErr) {
+        log('DOC PIPELINE ERROR (non-fatal): ' + (_docErr.message||'').slice(0,300));
+      }
+
       log('PROPOSAL ENGINE: Complete for ' + (opp.title||'').slice(0,40));
 
     } catch(e) {
