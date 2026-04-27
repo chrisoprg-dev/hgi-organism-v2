@@ -2056,6 +2056,75 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         created_at: new Date().toISOString()
       });
 
+      // === S149 FIX #8 — VISUAL PIPELINE INTEGRATION ===
+      // Fire org-chart, rate-table, compliance-matrix generators in parallel.
+      // Each is a ~$0.05 Sonnet call (~$0.15 total) and saves to organism_memory for caching.
+      // /api/proposal-doc later picks these up from cache when assembling the Word document.
+      // Without this step, every previously-completed produce-proposal run had ZERO visuals
+      // because nothing invoked these generators (today's OPSB confirmed: 0 graphics_engine
+      // memories despite the 7 L6 specialists + auto-regen + L7 all running).
+      // The block is non-fatal — generator failures are logged but do not break the run.
+      try {
+        var _ppHasRfp = opp.rfp_document_retrieved === true && opp.rfp_text && opp.rfp_text.trim().length > 200;
+        var _localPort = process.env.PORT || 8080;
+        var _localBase = 'http://localhost:' + _localPort;
+
+        log('VISUAL PIPELINE: Starting parallel generation (org-chart' +
+          (_ppHasRfp ? ', rate-table, compliance-matrix' : ' only — unsolicited opp)') +
+          ') for ' + ppId);
+
+        // Build the list of generators to fire in parallel. Org chart fires for every opp.
+        // Rate table and compliance matrix only fire when there's an actual RFP (matches
+        // the gating in /api/proposal-doc to avoid wasted Sonnet calls on unsolicited).
+        var _visualPromises = [
+          fetch(_localBase + '/api/org-chart?id=' + encodeURIComponent(ppId))
+            .then(function(r){ return r.ok ? r.json().then(function(j){return {gen:'org_chart', ok:true, data:j};}) : Promise.resolve({gen:'org_chart', ok:false, status:r.status}); })
+            .catch(function(e){ return {gen:'org_chart', ok:false, err:(e.message||'').slice(0,200)}; })
+        ];
+        if (_ppHasRfp) {
+          _visualPromises.push(
+            fetch(_localBase + '/api/rate-table?id=' + encodeURIComponent(ppId))
+              .then(function(r){ return r.ok ? r.json().then(function(j){return {gen:'rate_table', ok:true, data:j};}) : Promise.resolve({gen:'rate_table', ok:false, status:r.status}); })
+              .catch(function(e){ return {gen:'rate_table', ok:false, err:(e.message||'').slice(0,200)}; })
+          );
+          _visualPromises.push(
+            fetch(_localBase + '/api/compliance-matrix?id=' + encodeURIComponent(ppId))
+              .then(function(r){ return r.ok ? r.json().then(function(j){return {gen:'compliance_matrix', ok:true, data:j};}) : Promise.resolve({gen:'compliance_matrix', ok:false, status:r.status}); })
+              .catch(function(e){ return {gen:'compliance_matrix', ok:false, err:(e.message||'').slice(0,200)}; })
+          );
+        }
+
+        var _visualStart = Date.now();
+        var _visualResults = await Promise.all(_visualPromises);
+        var _visualWallSec = Math.round((Date.now() - _visualStart) / 1000);
+
+        // Log per-generator results
+        var _visualSummary = [];
+        _visualResults.forEach(function(r) {
+          if (r.ok) {
+            log('VISUAL PIPELINE: ' + r.gen + ' OK');
+            _visualSummary.push(r.gen + '=ok');
+          } else {
+            log('VISUAL PIPELINE: ' + r.gen + ' FAILED — ' + (r.err || ('http ' + r.status)));
+            _visualSummary.push(r.gen + '=fail');
+          }
+        });
+        log('VISUAL PIPELINE: Complete in ' + _visualWallSec + 's — ' + _visualSummary.join(', '));
+
+        // Persist a memory entry for diagnostics + future visibility
+        await supabase.from('organism_memory').insert({
+          id: 'mem_visual_' + ppId.slice(0,20) + '_' + Date.now(),
+          agent: 'visual_pipeline',
+          opportunity_id: ppId,
+          observation: 'VISUAL PIPELINE complete in ' + _visualWallSec + 's. Generators: ' +
+            _visualSummary.join(', ') + '. Cached to organism_memory for /api/proposal-doc to render.',
+          memory_type: 'analysis',
+          created_at: new Date().toISOString()
+        });
+      } catch (_visualErr) {
+        log('VISUAL PIPELINE ERROR (non-fatal): ' + (_visualErr.message||'').slice(0,300));
+      }
+
       // 8. RED TEAM AUTO-REVIEW — Structured JSON with PWIN, scoring matrix, replacement text
       // Upgraded Session 95: port from V1 quality-gate.js structured output + enhanced
       try {
