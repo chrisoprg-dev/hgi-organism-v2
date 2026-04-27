@@ -1684,7 +1684,8 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
           (typeof kbContext !== 'undefined' ? kbContext : '') || '',
           topPPText || '',
           discriminatorsText || '',
-          methodologyCorpusText || ''
+          methodologyCorpusText || '',
+          lessonsText || ''
         );
         if (strategicThesis) {
           await supabase.from('opportunities').update({
@@ -14347,7 +14348,7 @@ async function refetchRFPCorpus(opp) {
 // opportunities.strategic_thesis and injected as a "## STRATEGIC THESIS" block at
 // the top of the senior_writer user message.
 // ─────────────────────────────────────────────────────────────────────────────
-async function generateStrategicThesis(opp, scope, financial, research, kbContext, topPPText, discriminatorsText, methodologyCorpusText) {
+async function generateStrategicThesis(opp, scope, financial, research, kbContext, topPPText, discriminatorsText, methodologyCorpusText, lessonsText) {
   if (!opp) return null;
   var oppTitle = (opp.title||'').slice(0,150);
   var oppAgency = (opp.agency||'').slice(0,80);
@@ -14371,13 +14372,25 @@ async function generateStrategicThesis(opp, scope, financial, research, kbContex
     'TOP-RELEVANT PAST PERFORMANCE:\n' + (topPPText||'').slice(0, 2500) + '\n\n' +
     'DISCRIMINATORS (internal-only, never name competitors):\n' + (discriminatorsText||'').slice(0, 1500) + '\n\n' +
     'KB METHODOLOGY (sample):\n' + (methodologyCorpusText||'').slice(0, 1500) + '\n\n' +
+    (lessonsText ?
+      '═══ LESSONS LEARNED — HIGHEST PRIORITY THESIS INPUTS ═══\n' +
+      'These lessons come from prior sessions, postmortems, red team findings, and President directives.\n' +
+      'They take PRIORITY over generic past performance when designing themes. If a lesson identifies a\n' +
+      'positioning frame (e.g., "trusted partner of New Orleans"), one of your themes MUST use that frame.\n' +
+      'If a lesson identifies an agency-history fact (e.g., HGI is TPA for the agency you\'re bidding to),\n' +
+      'that fact MUST become evidence_anchor for one of the themes. Do NOT ignore lessons.\n\n' +
+      lessonsText.slice(0, 4000) + '\n\n' : '') +
     'OUTPUT REQUIREMENTS:\n' +
     'Produce 3-5 strategic theses. Output ONLY valid JSON. No prose. No markdown fencing.\n\n' +
     'CONSTRAINTS PER THESIS:\n' +
     '- SPECIFICITY: must name a specific HGI capability, project, dollar figure, regulation, or failure mode. ' +
     'Forbidden generic words in the claim text: "experience", "capability", "expertise", "commitment", ' +
-    '"dedication", "partnership", "comprehensive", "robust", "deep", "extensive", "proven", "trusted", ' +
-    '"leading", "innovative", "best-in-class".\n' +
+    '"dedication", "partnership", "comprehensive", "robust", "deep", "extensive", "proven", ' +
+    '"leading", "innovative", "best-in-class". ' +
+    'EXCEPTION: "trusted" is permitted when anchored to specific named relationships, e.g. ' +
+    '"the firm that NOLA agencies trust to administer their hardest programs (TPA for OPSB, RTA, City, SWBNO; ' +
+    'Property Tax Appeals for City; Billing Appeals for SWBNO)" is acceptable because each clause ' +
+    'names a verifiable engagement. "trusted partner" with no named relationships is forbidden.\n' +
     '- TESTABILITY: an evaluator must be able to verify the underlying claim. ' +
     '"$67.0M direct contract on Road Home managing 185,000+ applications with zero misappropriation findings" ' +
     'passes (verifiable). "We deeply understand local needs" fails (not testable).\n' +
@@ -14389,7 +14402,12 @@ async function generateStrategicThesis(opp, scope, financial, research, kbContex
     'Reference an RFP section number, a specific named project the agency has run, a specific regulation cited ' +
     'in the RFP, or a specific failure mode this evaluator type has encountered.\n' +
     '- SECTION DISCIPLINE: assign each thesis to 1-2 sections where it will be LOAD-BEARING. ' +
-    'No thesis can be load-bearing in more than 2 sections.\n\n' +
+    'No thesis can be load-bearing in more than 2 sections.\n' +
+    (lessonsText ? '- LESSON-DRIVEN THEMES: at minimum 1 of your 3-5 themes must originate from a LESSONS LEARNED entry. ' +
+      'When a lesson provides a positioning frame or named relationship (e.g. agency_history, language_pattern), ' +
+      'lift that frame directly into a theme rather than producing a generic alternative. The lessons exist precisely ' +
+      'so this run starts smarter than prior runs.\n' : '') +
+    '\n' +
     'OUTPUT JSON STRUCTURE:\n' +
     '{\n' +
     '  "themes": [\n' +
@@ -14399,7 +14417,8 @@ async function generateStrategicThesis(opp, scope, financial, research, kbContex
     '      "evidence_anchor": "<the specific HGI fact, project, methodology, or capability that proves this — must be cited verbatim from the inputs above, never invented>",\n' +
     '      "tradeoff": "<what HGI is NOT optimizing for in service of this thesis>",\n' +
     '      "load_bearing_sections": ["<section name from RFP table of contents>", "<optional second section>"],\n' +
-    '      "evaluator_concern_addressed": "<which eval criterion this thesis serves>"\n' +
+    '      "evaluator_concern_addressed": "<which eval criterion this thesis serves>",\n' +
+    '      "lesson_source": "<id or short text of the lesson that drove this theme, or null if none>"\n' +
     '    }\n' +
     '  ],\n' +
     '  "facts_budget": [\n' +
