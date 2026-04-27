@@ -1634,13 +1634,40 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
           'workforce_wioa': 'workforce', 'workforce_services': 'workforce', 'wioa': 'workforce'
         };
         var _mbVertical = _MB_VERTICAL_NORM[_mbVerticalRaw] || _mbVerticalRaw;
+        // S150 (S148 #34 bridge starve fix): pull outcome correlation fields and
+        // re-rank briefs so high-track-record briefs surface first. Without this,
+        // every recordOpportunityOutcome call writes wins_associated/losses_associated/
+        // outcome_correlation into methodology_briefs, but produce-proposal never reads
+        // them — calibration data flows in but never flows back out into proposal generation.
+        // Fetch 12 then composite-sort and take top 6.
         var _mbResp = await supabase.from('methodology_briefs')
-          .select('id,vertical,work_area,title,brief_text,word_count,citation_count,quality_score,last_researched')
+          .select('id,vertical,work_area,title,brief_text,word_count,citation_count,quality_score,last_researched,outcome_correlation,wins_associated,losses_associated,usage_count')
           .eq('vertical', _mbVertical)
           .eq('status', 'published')
           .order('quality_score', { ascending: false })
-          .limit(6);
-        var _mbRows = _mbResp.data || [];
+          .limit(12);
+        var _mbRowsRaw = _mbResp.data || [];
+        // Composite ranking: briefs with statistically-meaningful track record (sample >= 3)
+        // sort by outcome_correlation DESC; quality_score is tiebreaker. Briefs without
+        // meaningful sample fall back to pure quality_score order.
+        _mbRowsRaw.sort(function(a, b) {
+          var aSample = (a.wins_associated || 0) + (a.losses_associated || 0);
+          var bSample = (b.wins_associated || 0) + (b.losses_associated || 0);
+          var aMeaningful = aSample >= 3;
+          var bMeaningful = bSample >= 3;
+          if (aMeaningful && bMeaningful) {
+            // both have track record — outcome_correlation primary
+            var aCorr = a.outcome_correlation == null ? 0 : a.outcome_correlation;
+            var bCorr = b.outcome_correlation == null ? 0 : b.outcome_correlation;
+            if (Math.abs(aCorr - bCorr) > 0.01) return bCorr - aCorr;
+            return (b.quality_score||0) - (a.quality_score||0);
+          }
+          if (aMeaningful && !bMeaningful) return -1; // a wins — has track record
+          if (!aMeaningful && bMeaningful) return 1;  // b wins — has track record
+          // neither has meaningful sample — pure quality
+          return (b.quality_score||0) - (a.quality_score||0);
+        });
+        var _mbRows = _mbRowsRaw.slice(0, 6);
         if (_mbRows.length > 0) {
           // Cap total chars to ~30K (prevent mega-prompt bloat when many briefs exist per vertical)
           var _mbTotalChars = 0;
@@ -1648,8 +1675,18 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
           var _mbParts = [];
           for (var _mbi = 0; _mbi < _mbRows.length; _mbi++) {
             var _mb = _mbRows[_mbi];
+            // S150: surface track record so Opus knows which briefs have won/lost in production
+            var _mbTrackRecord = '';
+            var _mbWins = _mb.wins_associated || 0;
+            var _mbLosses = _mb.losses_associated || 0;
+            var _mbSample = _mbWins + _mbLosses;
+            if (_mbSample > 0) {
+              var _mbCorr = _mb.outcome_correlation == null ? null : Math.round(_mb.outcome_correlation * 100);
+              _mbTrackRecord = ' | track record: ' + _mbWins + 'W/' + _mbLosses + 'L' +
+                (_mbCorr != null ? ' (' + _mbCorr + '% win rate)' : '');
+            }
             var _mbHdr = '### ' + (_mb.title || (_mb.vertical + ' — ' + _mb.work_area)) +
-              '  (quality ' + (_mb.quality_score||0) + ' | ' + (_mb.word_count||0) + ' words | ' + (_mb.citation_count||0) + ' citations)';
+              '  (quality ' + (_mb.quality_score||0) + ' | ' + (_mb.word_count||0) + ' words | ' + (_mb.citation_count||0) + ' citations' + _mbTrackRecord + ')';
             var _mbBody = String(_mb.brief_text || '');
             var _mbBlock = _mbHdr + '\n\n' + _mbBody;
             if (_mbTotalChars + _mbBlock.length > _mbMAX) {
@@ -1662,7 +1699,9 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
             _mbTotalChars += _mbBlock.length;
           }
           methodologyCorpusText = _mbParts.join('\n\n---\n\n');
-          log('L3 METHODOLOGY: injected ' + _mbRows.length + ' briefs (' + _mbTotalChars + ' chars) for vertical=' + _mbVertical);
+          // Audit log so we can see when track-record signal is actually flowing
+          var _mbWithTrack = _mbRows.filter(function(b){ return ((b.wins_associated||0) + (b.losses_associated||0)) > 0; }).length;
+          log('L3 METHODOLOGY: injected ' + _mbRows.length + ' briefs (' + _mbTotalChars + ' chars) for vertical=' + _mbVertical + ', ' + _mbWithTrack + ' with outcome track record (S148 #34 bridge)');
         } else {
           methodologyCorpusText = '(no methodology briefs available for vertical=' + _mbVertical + ' — senior writer should rely on pursuit research + KB chunks for methodology substance)';
           log('L3 METHODOLOGY: no published briefs for vertical=' + _mbVertical);
@@ -2706,7 +2745,45 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
             if ((_recentRegen.data || []).length > 0) {
               log('AUTO-REGEN: skipped — recent auto-regen exists for ' + ppId + ' within last 30 min');
             } else {
-              log('AUTO-REGEN: triggered — ' + _canonCritCount + ' canon critical violations (red team criticals=' + critCount + ' deferred to L7)');
+              // S148 #14b: Multi-tier rate cap. The 30-min guard above stops back-to-back
+              // regens from a single produce-proposal run, but does nothing across days.
+              // S150 adds:
+              //   - 24h cap: max 2 regen attempts in any 24-hour window
+              //   - Lifetime cap: max 5 regen attempts ever per opp
+              // Rationale: with the S150 fact-check hard-gate auto-correcting 8 canon classes
+              // upstream of the sweep, legitimate regen needs are rare. Repeated regen on the
+              // same opp is almost always sign of a violation Opus can't fix (e.g. comparative
+              // language baked into the model's voice for that vertical) — burning $5-10/call
+              // chasing it is waste. Surface to lessons rather than retry indefinitely.
+              var _capCutoff24h = new Date(Date.now() - 24*60*60*1000).toISOString();
+              var _regen24hCount = await supabase.from('organism_memory')
+                .select('id', { count: 'exact', head: true })
+                .eq('opportunity_id', ppId)
+                .eq('agent', 'proposal_auto_regen')
+                .gte('created_at', _capCutoff24h);
+              var _regen24h = (_regen24hCount && _regen24hCount.count) || 0;
+              var _regenLifetimeCount = await supabase.from('organism_memory')
+                .select('id', { count: 'exact', head: true })
+                .eq('opportunity_id', ppId)
+                .eq('agent', 'proposal_auto_regen');
+              var _regenLifetime = (_regenLifetimeCount && _regenLifetimeCount.count) || 0;
+              if (_regen24h >= 2 || _regenLifetime >= 5) {
+                log('AUTO-REGEN: skipped — rate cap hit on ' + ppId + ' (24h=' + _regen24h + '/2, lifetime=' + _regenLifetime + '/5). Canon violations remain (' + _canonCritCount + ') — Christopher review needed.');
+                await supabase.from('organism_memory').insert({
+                  id: 'ar-cap-' + ppId.slice(0,20) + '-' + Date.now(),
+                  agent: 'proposal_auto_regen_capped',
+                  opportunity_id: ppId,
+                  observation: 'AUTO-REGEN CAPPED for ' + (opp.title||'').slice(0,60) +
+                    ' | Cap hit: 24h=' + _regen24h + '/2, lifetime=' + _regenLifetime + '/5' +
+                    ' | Canon criticals remaining: ' + _canonCritCount +
+                    ' | Violations: ' + _cs.filter(function(c){return c.severity==='CRITICAL';}).map(function(c){return c.label+'x'+c.count;}).join(', ') +
+                    ' | Action: pattern needs lesson capture or upstream patch — Opus retry is not converging.',
+                  memory_type: 'analysis',
+                  created_at: new Date().toISOString()
+                });
+                return;
+              }
+              log('AUTO-REGEN: triggered — ' + _canonCritCount + ' canon critical violations (red team criticals=' + critCount + ' deferred to L7) | regen-budget: 24h=' + _regen24h + '/2, lifetime=' + _regenLifetime + '/5');
               try {
                 // Build compact corrective prompt focused on canon violations only.
                 var _canonFindingsList = _cs.filter(function(c){ return c.severity==='CRITICAL'; }).map(function(c) {
