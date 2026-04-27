@@ -2333,12 +2333,18 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         // and by checking for a recent proposal_auto_regen memory for this opp.
         // Applies universally — every future proposal across every vertical gets this
         // feedback loop without operator intervention.
+        //
+        // S149 SCOPE NARROWING: auto-regen now fires ONLY when canon critical violations
+        // exist (Geoffrey Brien named, "1931" instead of "1929", OPSB/PBGC listed as PP, etc.).
+        // Red team critical findings are L7's job — L7 has best-version tracking,
+        // amputation veto, and proportional regression detection. Auto-regen on red team
+        // criticals was firing without those safeguards and producing $5-10 Opus calls
+        // that fixed nothing (today's OPSB run: 11 red team criticals → 0 defects fixed).
         try {
           var _isRetryCall = false;
           try { _isRetryCall = !!JSON.parse(body || '{}').retry; } catch(e) {}
-          var _needsRegen = (_canonCritCount > 0) ||
-                            (critCount > 0) ||
-                            (rtReport && rtReport.overall_status === 'FAIL');
+          // S149: only canon criticals trigger auto-regen. Red team criticals are L7's domain.
+          var _needsRegen = (_canonCritCount > 0);
           if (_needsRegen && !_isRetryCall) {
             // Second-layer loop guard: check for recent auto-regen memory (within 30 min)
             var _loopGuardCutoff = new Date(Date.now() - 30*60*1000).toISOString();
@@ -2351,29 +2357,20 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
             if ((_recentRegen.data || []).length > 0) {
               log('AUTO-REGEN: skipped — recent auto-regen exists for ' + ppId + ' within last 30 min');
             } else {
-              log('AUTO-REGEN: triggered — ' + _canonCritCount + ' canon critical + ' + critCount + ' red-team critical findings, regenerating once');
+              log('AUTO-REGEN: triggered — ' + _canonCritCount + ' canon critical violations (red team criticals=' + critCount + ' deferred to L7)');
               try {
-                // Build compact corrective prompt. Reuse the same senior_writer system prompt
-                // via another model call; pass the old proposal + findings + RFP excerpt.
-                var _rtFindingsList = [];
-                if (rtReport && rtReport.findings) {
-                  rtReport.findings.filter(function(f){ return f.severity==='DISQUALIFYING'||f.severity==='CRITICAL'; })
-                    .slice(0, 20).forEach(function(f) {
-                      _rtFindingsList.push('- [' + (f.category||'') + '] ' + (f.issue||'') + ' (' + (f.section||'') + '): ' + (f.fix||'') + (f.replacement_text ? '\n    Replacement: ' + f.replacement_text.slice(0,400) : ''));
-                    });
-                }
+                // Build compact corrective prompt focused on canon violations only.
                 var _canonFindingsList = _cs.filter(function(c){ return c.severity==='CRITICAL'; }).map(function(c) {
                   return '- ' + c.label + ' (' + c.count + ' occurrences): ' + c.note + ' | Samples: ' + JSON.stringify(c.samples);
                 });
-                var _correctivePrompt = 'You previously generated a government proposal. Automated red-team and canon review identified CRITICAL defects. Fix every one and re-emit the COMPLETE proposal text. Emit ONLY the corrected proposal — no preamble, no commentary, no bracketed meta-commentary, no explanation of changes.\n\n' +
-                  '## CRITICAL RED-TEAM FINDINGS TO FIX\n' + (_rtFindingsList.join('\n') || '(none)') + '\n\n' +
+                var _correctivePrompt = 'You previously generated a government proposal. Automated canon review identified hard rule violations (incorrect founding year, banned names, banned past performance entries, etc.). Fix EVERY canon violation listed below. Re-emit the COMPLETE proposal text. Emit ONLY the corrected proposal — no preamble, no commentary, no bracketed meta-commentary, no explanation of changes. Do NOT change anything other than what is needed to fix the canon violations.\n\n' +
                   '## CRITICAL CANON VIOLATIONS TO FIX\n' + (_canonFindingsList.join('\n') || '(none)') + '\n\n' +
                   '## RFP REQUIREMENTS (for grounding)\n' + ((opp.rfp_text || opp.scope_analysis || '').slice(0, 8000)) + '\n\n' +
-                  '## PREVIOUS PROPOSAL (revise this to fix every defect above)\n' + proposalText;
+                  '## PREVIOUS PROPOSAL (revise to fix canon violations only)\n' + proposalText;
                 var _retryStream = await anthropic.messages.stream({
                   model: 'claude-opus-4-6',
                   max_tokens: 32000,
-                  system: 'You are a senior government proposal writer at HGI Global (Hammerman & Gainer LLC), founded 1929, 97-year-old, 100% minority-owned. Fix every CRITICAL defect identified below. Emit ONLY the corrected full proposal text. Do NOT emit bracketed meta-commentary ([ACTION REQUIRED], [Correction], [TBD], etc.) — the ONLY permitted bracket is [TO BE ASSIGNED] for Key Personnel. Never write 1931, 1930, 95 years, 96 years — use 1929 and 97-year exactly. Geoffrey Brien is never mentioned. OPSB/LIGA/TPCIGA/PBGC are never listed as HGI past performance (only as client names where applicable). NEVER name, reference, allude to, or acknowledge any competitor in proposal output. NEVER write comparative language ("unlike", "competitors lack", "while others", "compared to", etc.). The proposal reads as if HGI is the only firm in the room. Use any competitive intelligence to decide which HGI strengths to emphasize, never to call out other firms.',
+                  system: 'You are a senior government proposal writer at HGI Global (Hammerman & Gainer LLC), founded 1929, 97-year-old, 100% minority-owned. Fix every CANON VIOLATION identified below. Emit ONLY the corrected full proposal text. Do NOT emit bracketed meta-commentary ([ACTION REQUIRED], [Correction], [TBD], etc.) — the ONLY permitted bracket is [TO BE ASSIGNED] for Key Personnel. Never write 1931, 1930, 95 years, 96 years — use 1929 and 97-year exactly. Geoffrey Brien is never mentioned. OPSB/LIGA/TPCIGA/PBGC are never listed as HGI past performance (only as client names where applicable). NEVER name, reference, allude to, or acknowledge any competitor in proposal output. NEVER write comparative language ("unlike", "competitors lack", "while others", "compared to", etc.). The proposal reads as if HGI is the only firm in the room. Use any competitive intelligence to decide which HGI strengths to emphasize, never to call out other firms.',
                   messages: [{ role: 'user', content: _correctivePrompt }]
                 });
                 var _retryFinal = await _retryStream.finalMessage();
@@ -2383,7 +2380,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
                   // Re-run post-processing bracket killer on the retry output
                   _retryText = _retryText.replace(/\[(?:ACTION\s*REQUIRED|Correction|CORRECTION|Note|NOTE|TBD|TBC|To be determined|TO BE DETERMINED|To be completed|TO BE COMPLETED|Insert|INSERT|Confirm|CONFIRM|Verify|VERIFY|Placeholder|PLACEHOLDER|Pending|PENDING)(?:[:\-\s][^\[\]]{0,400})?\]/g, '');
                   _retryText = _retryText.replace(/\n{3,}/g, '\n\n');
-                  // Re-run canon sweep on retry output to record delta (no further auto-regen)
+                  // Re-run canon sweep on retry output to record delta
                   var _retryCs = [];
                   for (var _rci = 0; _rci < _canonChecks.length; _rci++) {
                     var _rck = _canonChecks[_rci];
@@ -2392,33 +2389,46 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
                     if (_rm.length > 0) _retryCs.push({ label: _rck.label, count: _rm.length, samples: _rm.slice(0,3) });
                   }
                   var _retryCanonCrit = _retryCs.length;
-                  var _regenStatus = (_retryCanonCrit === 0) ? 'CLEAN' : 'PARTIAL';
-                  // Overwrite proposal_content with retry
-                  await supabase.from('opportunities').update({
-                    proposal_content: _retryText,
-                    last_updated: new Date().toISOString()
-                  }).eq('id', ppId);
-                  // Log the regen attempt with delta
-                  await supabase.from('organism_memory').insert({
-                    id: 'ar-' + ppId.slice(0,20) + '-' + Date.now(),
-                    agent: 'proposal_auto_regen',
-                    opportunity_id: ppId,
-                    observation: 'AUTO-REGEN ' + _regenStatus + ' for ' + (opp.title||'').slice(0,60) +
-                      ' | Pre-regen canon critical: ' + _canonCritCount + ' | Post-regen canon critical: ' + _retryCanonCrit +
-                      ' | Pre-regen red-team critical: ' + critCount +
-                      ' | Pre-regen chars: ' + proposalText.length + ' | Post-regen chars: ' + _retryText.length +
-                      ' | Defects fixed: ' + Math.max(0, _canonCritCount - _retryCanonCrit) +
-                      ' | Residual canon violations: ' + (_retryCs.map(function(x){return x.label+'x'+x.count;}).join(', ') || 'none'),
-                    memory_type: 'analysis',
-                    created_at: new Date().toISOString()
-                  });
-                  log('AUTO-REGEN: ' + _regenStatus + ' — canon ' + _canonCritCount + '→' + _retryCanonCrit + ', chars ' + proposalText.length + '→' + _retryText.length);
-                  proposalText = _retryText;
-                  // Update proposal_review to note the regen happened
-                  await supabase.from('opportunities').update({
-                    proposal_review: '[AUTO-REGEN ' + _regenStatus + '] ' + reviewStorage + '\n\n=== AUTO-REGEN DELTA ===\nPre-regen canon critical: ' + _canonCritCount + '\nPost-regen canon critical: ' + _retryCanonCrit + '\nResidual: ' + (_retryCs.map(function(x){return x.label+'x'+x.count;}).join(', ') || 'none'),
-                    last_updated: new Date().toISOString()
-                  }).eq('id', ppId);
+                  // S149 IMPROVEMENT GATE: only accept retry if it actually reduced canon violations.
+                  // Previously the retry was stored regardless of whether it helped.
+                  if (_retryCanonCrit < _canonCritCount) {
+                    var _regenStatus = (_retryCanonCrit === 0) ? 'CLEAN' : 'PARTIAL';
+                    await supabase.from('opportunities').update({
+                      proposal_content: _retryText,
+                      last_updated: new Date().toISOString()
+                    }).eq('id', ppId);
+                    await supabase.from('organism_memory').insert({
+                      id: 'ar-' + ppId.slice(0,20) + '-' + Date.now(),
+                      agent: 'proposal_auto_regen',
+                      opportunity_id: ppId,
+                      observation: 'AUTO-REGEN ' + _regenStatus + ' for ' + (opp.title||'').slice(0,60) +
+                        ' | Pre-regen canon critical: ' + _canonCritCount + ' | Post-regen canon critical: ' + _retryCanonCrit +
+                        ' | Pre-regen chars: ' + proposalText.length + ' | Post-regen chars: ' + _retryText.length +
+                        ' | Defects fixed: ' + (_canonCritCount - _retryCanonCrit) +
+                        ' | Residual canon violations: ' + (_retryCs.map(function(x){return x.label+'x'+x.count;}).join(', ') || 'none'),
+                      memory_type: 'analysis',
+                      created_at: new Date().toISOString()
+                    });
+                    log('AUTO-REGEN: ' + _regenStatus + ' — canon ' + _canonCritCount + '→' + _retryCanonCrit + ' (improvement), chars ' + proposalText.length + '→' + _retryText.length);
+                    proposalText = _retryText;
+                    await supabase.from('opportunities').update({
+                      proposal_review: '[AUTO-REGEN ' + _regenStatus + '] ' + reviewStorage + '\n\n=== AUTO-REGEN DELTA ===\nPre-regen canon critical: ' + _canonCritCount + '\nPost-regen canon critical: ' + _retryCanonCrit + '\nResidual: ' + (_retryCs.map(function(x){return x.label+'x'+x.count;}).join(', ') || 'none'),
+                      last_updated: new Date().toISOString()
+                    }).eq('id', ppId);
+                  } else {
+                    // Retry didn't help — keep original. S149 fix.
+                    log('AUTO-REGEN: NO IMPROVEMENT — canon ' + _canonCritCount + '→' + _retryCanonCrit + '. Keeping original proposal. Cost ~$5-10 burned without benefit.');
+                    await supabase.from('organism_memory').insert({
+                      id: 'ar-noimprove-' + ppId.slice(0,20) + '-' + Date.now(),
+                      agent: 'proposal_auto_regen',
+                      opportunity_id: ppId,
+                      observation: 'AUTO-REGEN NO IMPROVEMENT for ' + (opp.title||'').slice(0,60) +
+                        ' | Pre-regen canon critical: ' + _canonCritCount + ' | Post-regen canon critical: ' + _retryCanonCrit +
+                        ' | Retry produced ' + _retryText.length + ' chars but did not reduce canon violations. Original proposal retained.',
+                      memory_type: 'analysis',
+                      created_at: new Date().toISOString()
+                    });
+                  }
                 } else {
                   log('AUTO-REGEN: retry output too short (' + (_retryText||'').length + ' chars), keeping original');
                   await supabase.from('organism_memory').insert({
@@ -2436,6 +2446,8 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
             }
           } else if (_needsRegen && _isRetryCall) {
             log('AUTO-REGEN: skipped — this IS the retry call (retry flag set)');
+          } else if (_canonCritCount === 0 && critCount > 0) {
+            log('AUTO-REGEN: not fired — ' + critCount + ' red team criticals deferred to L7 (canon clean). S149 scope rule.');
           } else {
             log('AUTO-REGEN: not needed — no critical findings, proposal passes gate');
           }
