@@ -4378,6 +4378,75 @@ if (url === '/api/capture-lesson' && req.method === 'POST') {
   return;
 }
 
+// === S149 STANDALONE DOC REGEN — /api/regenerate-doc?id= ===
+// Generates the Word doc and uploads to Supabase Storage on an EXISTING opportunity
+// without re-running produce-proposal. Use this to refresh the .docx after manual
+// edits to proposal_content, or to backfill proposal_doc_url on opps that completed
+// before fix #10 was deployed. Cost: ~$0 (visuals come from cache; no Anthropic calls).
+if (url.startsWith('/api/regenerate-doc')) {
+  var rdId = (req.url.split('?id=')[1]||'').split('&')[0];
+  if (!rdId) { res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }); res.end(JSON.stringify({error:'id required'})); return; }
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+  res.end(JSON.stringify({ started: true, id: rdId, note: 'Doc regen running async. Watch opportunities.proposal_doc_url for completion.' }));
+
+  setImmediate(async () => {
+    try {
+      var rdStart = Date.now();
+      var rdLocalPort = process.env.PORT || 8080;
+      log('DOC REGEN: Generating Word doc for ' + rdId + '...');
+
+      var rdResp = await fetch('http://localhost:' + rdLocalPort + '/api/proposal-doc?id=' + encodeURIComponent(rdId));
+      if (!rdResp.ok) {
+        log('DOC REGEN: /api/proposal-doc returned http ' + rdResp.status);
+        return;
+      }
+      var rdBuf = Buffer.from(await rdResp.arrayBuffer());
+      var rdSize = rdBuf.length;
+      var rdWall = Math.round((Date.now() - rdStart) / 1000);
+      log('DOC REGEN: Word doc generated — ' + rdSize + ' bytes in ' + rdWall + 's');
+
+      var rdTs = new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+      var rdFilename = rdId.slice(0,40) + '_' + rdTs + '.docx';
+      var rdPath = rdId.slice(0,40) + '/' + rdFilename;
+
+      var rdUpload = await supabase.storage
+        .from('proposal-docs')
+        .upload(rdPath, rdBuf, {
+          contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          upsert: false
+        });
+      if (rdUpload.error) {
+        log('DOC REGEN: upload error — ' + (rdUpload.error.message||'').slice(0,200));
+        return;
+      }
+      var rdUrlData = supabase.storage.from('proposal-docs').getPublicUrl(rdPath);
+      var rdPublicUrl = (rdUrlData && rdUrlData.data && rdUrlData.data.publicUrl) || null;
+      if (rdPublicUrl) {
+        await supabase.from('opportunities').update({
+          proposal_doc_url: rdPublicUrl,
+          proposal_doc_generated_at: new Date().toISOString(),
+          proposal_doc_size_bytes: rdSize,
+          last_updated: new Date().toISOString()
+        }).eq('id', rdId);
+        log('DOC REGEN: Upload OK — ' + rdPublicUrl);
+        await supabase.from('organism_memory').insert({
+          id: 'mem_doc_regen_' + rdId.slice(0,20) + '_' + Date.now(),
+          agent: 'doc_pipeline',
+          opportunity_id: rdId,
+          observation: 'WORD DOC REGENERATED (standalone): ' + rdSize + ' bytes in ' + rdWall + 's. URL: ' + rdPublicUrl,
+          memory_type: 'analysis',
+          created_at: new Date().toISOString()
+        });
+      } else {
+        log('DOC REGEN: getPublicUrl returned no URL');
+      }
+    } catch (rdErr) {
+      log('DOC REGEN ERROR: ' + (rdErr.message||'').slice(0,300));
+    }
+  });
+  return;
+}
+
 // === TWO-PASS PROPOSAL REFINEMENT — /api/proposal-refine?id= ===
 // Port from V1 opus-build.js (178 lines). Takes existing proposal + red team review,
 // does parallel web research + KB query, then Opus with extended thinking rebuilds weak sections.
