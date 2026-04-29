@@ -1397,15 +1397,25 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       // char 68,508 — within the 80K window for THIS extractor but missed because
       // the LLM schema only captures per-section page_limit, not a total.
       // Also persists to opp.rfp_requirements.total_page_limit for downstream.
+      // S151: Also detect scope (full_submission vs narrative_tabs_only) so the L7
+      // prompt and fact-check can apply the limit correctly. Default convention:
+      // when "Appendices" tab exists in submission structure, the page limit covers
+      // only the narrative body, not the appendices.
       var totalPageLimit = null;
       var pageLimitContext = '';
+      var pageLimitScope = 'unspecified';        // S151: 'narrative_tabs_only' | 'full_submission' | 'unspecified'
+      var narrativeTabMax = null;                 // S151: highest narrative tab number (e.g. 10 if Tab 11 = Appendices)
+      var pageLimitScopeReasoning = '';           // S151: human-readable explanation of scope decision
       try {
         var fullRfpForPL = opp.rfp_text || rfpText || '';
         // First check if orchestrator already extracted it
         if (opp.rfp_requirements && opp.rfp_requirements.total_page_limit) {
           totalPageLimit = opp.rfp_requirements.total_page_limit;
           pageLimitContext = opp.rfp_requirements.total_page_limit_context || '';
-          log('PROPOSAL ENGINE: page limit ' + totalPageLimit + ' inherited from rfp_requirements (orchestrator).');
+          pageLimitScope = opp.rfp_requirements.total_page_limit_scope || 'unspecified';
+          narrativeTabMax = opp.rfp_requirements.total_page_limit_narrative_tab_max || null;
+          pageLimitScopeReasoning = opp.rfp_requirements.total_page_limit_scope_reasoning || '';
+          log('PROPOSAL ENGINE: page limit ' + totalPageLimit + ' inherited from rfp_requirements (orchestrator), scope=' + pageLimitScope + (narrativeTabMax ? ', tab_max=' + narrativeTabMax : ''));
         } else if (fullRfpForPL && fullRfpForPL.length >= 500) {
           var pl_patterns = [
             /(?:not\s+to\s+exceed|shall\s+not\s+exceed|may\s+not\s+exceed|limited\s+to|maximum\s+of)\s+(\d{1,3})\s+pages?/i,
@@ -1414,22 +1424,74 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
             /(\d{1,3})[-\s]+page\s+(?:limit|maximum)/i,
             /response\s+(?:not\s+to\s+exceed|limited\s+to)\s+(\d{1,3})\s+pages?/i
           ];
+          var _plMatchPos = -1;
+          var _plMatchLen = 0;
           for (var _pli = 0; _pli < pl_patterns.length; _pli++) {
             var _plM = fullRfpForPL.match(pl_patterns[_pli]);
             if (_plM && parseInt(_plM[1]) > 0 && parseInt(_plM[1]) <= 500) {
               totalPageLimit = parseInt(_plM[1]);
               var _plPos = fullRfpForPL.indexOf(_plM[0]);
+              _plMatchPos = _plPos;
+              _plMatchLen = _plM[0].length;
               pageLimitContext = fullRfpForPL.slice(Math.max(0, _plPos - 100), _plPos + _plM[0].length + 200).replace(/\s+/g, ' ').trim();
               break;
             }
           }
+          // S151 SCOPE DETECTION (mirrored from orchestrator pre-pass for cases where
+          // proposal-engine runs without orchestrator having captured it first)
+          if (totalPageLimit && _plMatchPos >= 0) {
+            var afterWindow = fullRfpForPL.slice(
+              _plMatchPos + _plMatchLen,
+              Math.min(fullRfpForPL.length, _plMatchPos + _plMatchLen + 8000)
+            );
+            var beforeWindow = fullRfpForPL.slice(
+              Math.max(0, _plMatchPos - 600),
+              _plMatchPos
+            );
+            var tabMatches = afterWindow.match(/Tab\s+(\d{1,2})/gi) || [];
+            var tabNumbers = tabMatches.map(function(t) {
+              var n = t.match(/\d+/);
+              return n ? parseInt(n[0]) : 0;
+            }).filter(function(n) { return n > 0 && n < 50; });
+            var maxTabNumber = tabNumbers.length ? Math.max.apply(null, tabNumbers) : 0;
+            var hasAppendix = /(?:^|[\s.,;:()])[Aa]ppendi(?:x|ces)\b/.test(afterWindow);
+            var appendixTabPattern = /Tab\s+(\d{1,2})\s*[-–—]\s*[Aa]ppendi(?:x|ces)/i;
+            var appendixTabMatch = afterWindow.match(appendixTabPattern);
+            var appendixTabNumber = appendixTabMatch ? parseInt(appendixTabMatch[1]) : null;
+            var hasQualResponseFraming = /qualifications?\s+response\s+format/i.test(beforeWindow + ' ' + afterWindow.slice(0, 500));
+            var hasNarrativeFraming = /\b(?:narrative|main\s+body|response\s+body)\b/i.test(beforeWindow + ' ' + afterWindow.slice(0, 500));
+
+            if (appendixTabNumber && appendixTabNumber > 1) {
+              pageLimitScope = 'narrative_tabs_only';
+              narrativeTabMax = appendixTabNumber - 1;
+              pageLimitScopeReasoning = 'Detected explicit appendix tab (Tab ' + appendixTabNumber + '); narrative tabs are 1 through ' + (appendixTabNumber - 1) + '.';
+            } else if (hasAppendix && hasQualResponseFraming) {
+              pageLimitScope = 'narrative_tabs_only';
+              narrativeTabMax = maxTabNumber > 0 ? maxTabNumber - 1 : null;
+              pageLimitScopeReasoning = 'Page-limit framed as "qualifications response" with appendices section in body structure.';
+            } else if (hasQualResponseFraming || hasNarrativeFraming) {
+              pageLimitScope = 'narrative_tabs_only';
+              narrativeTabMax = maxTabNumber > 0 ? maxTabNumber : null;
+              pageLimitScopeReasoning = 'Page-limit clause uses "qualifications response" or "narrative" framing.';
+            } else if (hasAppendix) {
+              pageLimitScope = 'narrative_tabs_only';
+              narrativeTabMax = maxTabNumber > 0 ? maxTabNumber - 1 : null;
+              pageLimitScopeReasoning = 'Appendices section present after page-limit clause.';
+            } else {
+              pageLimitScope = 'full_submission';
+              pageLimitScopeReasoning = 'No appendix structure or narrative-specific framing detected.';
+            }
+          }
           if (totalPageLimit) {
-            log('PROPOSAL ENGINE: PAGE LIMIT DETECTED — ' + totalPageLimit + ' pages (regex). Context: ' + pageLimitContext.slice(0, 150));
+            log('PROPOSAL ENGINE: PAGE LIMIT DETECTED — ' + totalPageLimit + ' pages, scope=' + pageLimitScope + (narrativeTabMax ? ', tab_max=' + narrativeTabMax : '') + ' (regex). Reasoning: ' + pageLimitScopeReasoning.slice(0, 100));
             // Persist for next time
             try {
               var _pdReqs = opp.rfp_requirements || {};
               _pdReqs.total_page_limit = totalPageLimit;
               _pdReqs.total_page_limit_context = pageLimitContext.slice(0, 400);
+              _pdReqs.total_page_limit_scope = pageLimitScope;
+              _pdReqs.total_page_limit_narrative_tab_max = narrativeTabMax;
+              _pdReqs.total_page_limit_scope_reasoning = pageLimitScopeReasoning;
               await supabase.from('opportunities').update({ rfp_requirements: _pdReqs }).eq('id', opp.id);
             } catch(_pdErr) {/* non-fatal */}
           }
@@ -1444,24 +1506,75 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       var pageLimitBlock = '';
       if (totalPageLimit) {
         var charBudget = totalPageLimit * 3200;
-        pageLimitBlock = '\n\n## ⚠️ HARD PAGE LIMIT — DISQUALIFICATION RISK ⚠️\n' +
-          'The RFP imposes a TOTAL PAGE LIMIT of ' + totalPageLimit + ' PAGES on the qualifications response.\n' +
-          'Verbatim from RFP: "' + pageLimitContext.slice(0, 250) + '"\n\n' +
-          'YOUR PROPOSAL MUST NOT EXCEED ~' + charBudget.toLocaleString() + ' CHARACTERS TOTAL across all qualifications-narrative tabs.\n' +
-          '(Page-density math: 3,200 chars/page × ' + totalPageLimit + ' pages = ' + charBudget.toLocaleString() + ' chars.)\n\n' +
-          'NOLA-PS-furnished forms (cover sheet, certifications, lobbying form, debarment, non-collusion, conflict of interest, vendor registration, EDGAR addendum, DBE forms, references form, cost form) are typically excluded from the page count when filed as separate exhibits — but the qualifications NARRATIVE in Tabs 1 through 10 (cover letter, firm background, experience/qualifications, methodology/approach, financial standing, timeline, project staff, scope-of-work response, references, cost narrative) MUST fit within the ' + totalPageLimit + '-page envelope.\n\n' +
-          'PER-TAB CHAR BUDGETS (suggested allocation across ' + totalPageLimit + ' pages):\n' +
-          '- Tab 1 (cover letter): 1 page = 3,200 chars\n' +
-          '- Tab 2 (firm background): 1 page = 3,200 chars\n' +
-          '- Tab 3 (experience): ' + Math.floor(totalPageLimit*0.20) + ' pages = ' + (Math.floor(totalPageLimit*0.20)*3200).toLocaleString() + ' chars\n' +
-          '- Tab 4 (methodology): ' + Math.floor(totalPageLimit*0.30) + ' pages = ' + (Math.floor(totalPageLimit*0.30)*3200).toLocaleString() + ' chars (largest section)\n' +
-          '- Tab 5 (financial standing): 1 page = 3,200 chars\n' +
-          '- Tab 6 (timeline): 1 page = 3,200 chars\n' +
-          '- Tab 7 (project staff): ' + Math.floor(totalPageLimit*0.15) + ' pages = ' + (Math.floor(totalPageLimit*0.15)*3200).toLocaleString() + ' chars (named personnel + roles)\n' +
-          '- Tab 8 (scope response): ' + Math.max(1, Math.floor(totalPageLimit*0.08)) + ' pages\n' +
-          '- Tab 9 (references): 1 page = 3,200 chars\n' +
-          '- Tab 10 (cost narrative): 1 page = 3,200 chars\n\n' +
-          'COMPRESSION DIRECTIVE: Write tight prose. Eliminate transitional throat-clearing. No section may have more than 2 paragraphs of narrative before moving to bulleted/structured content. Cut every "HGI is pleased to..." opener. State conclusions, support with one example, move on.\n\n';
+        // S151: Build scope-specific guidance. Three scopes:
+        //   narrative_tabs_only — limit covers narrative body (Tabs 1-N), appendices unlimited
+        //   full_submission — limit covers everything in the submission
+        //   unspecified — fall back to safer "narrative-only with explicit acknowledgment" framing
+        var narrativeMax = narrativeTabMax || 10; // sensible default if scope detected but max not pinned
+        var appendixTabNum = narrativeMax + 1;
+        if (pageLimitScope === 'narrative_tabs_only') {
+          pageLimitBlock = '\n\n## ⚠️ HARD PAGE LIMIT — DISQUALIFICATION RISK ⚠️\n' +
+            'The RFP imposes a page limit of ' + totalPageLimit + ' PAGES on the **qualifications response narrative** (Tabs 1 through ' + narrativeMax + ').\n' +
+            'Verbatim from RFP: "' + pageLimitContext.slice(0, 250) + '"\n\n' +
+            'SCOPE OF LIMIT (system-detected): ' + pageLimitScopeReasoning + '\n\n' +
+            'YOUR NARRATIVE BODY (Tabs 1-' + narrativeMax + ') MUST NOT EXCEED ~' + charBudget.toLocaleString() + ' CHARACTERS TOTAL.\n' +
+            '(Page-density math: 3,200 chars/page × ' + totalPageLimit + ' pages = ' + charBudget.toLocaleString() + ' chars.)\n\n' +
+            '═══ TWO-ZONE PROPOSAL ARCHITECTURE ═══\n\n' +
+            'ZONE A — PAGE-COUNTED NARRATIVE BODY (Tabs 1-' + narrativeMax + '): ~' + charBudget.toLocaleString() + ' chars max.\n' +
+            'Tight prose. No throat-clearing. State the claim, support with one specific example, move on. Use bullets and structured content over paragraphs whenever possible.\n\n' +
+            'ZONE B — APPENDICES (Tab ' + appendixTabNum + '): UNLIMITED LENGTH.\n' +
+            'Tab ' + appendixTabNum + ' is "Appendices" — explicitly OUTSIDE the page count per RFP structure. Move ALL of the following into Tab ' + appendixTabNum + ' so they do not consume narrative budget:\n' +
+            '  • Full resumes / CVs of named personnel (narrative body just lists name, title, role, key credential)\n' +
+            '  • Completed NOLA-PS forms / agency-furnished forms (DBE, Non-Collusion, Lobbying, Cost Form, References Form, Conflict of Interest, Vendor Registration, EDGAR Addendum, Debarment Certification)\n' +
+            '  • Detailed past-performance project profiles (narrative body lists 3-5 anchors with one-line summary; full sheets in appendix)\n' +
+            '  • Full rate schedule / detailed cost worksheets (narrative body summarizes pricing logic; full schedule in appendix)\n' +
+            '  • Org chart, compliance matrix, supporting tables longer than 1/2 page\n' +
+            '  • Letters of commitment, teaming letters, certification letters (NMSDC, etc.)\n' +
+            '  • Sample work products if requested\n\n' +
+            'COMPRESSION DIRECTIVE FOR ZONE A:\n' +
+            '  • Cover letter (Tab 1): ~1 page. Letterhead, signature, primary contact, addendum acknowledgment, 2-3 paragraphs maximum.\n' +
+            '  • Tab 2 (firm background): ~1 page. Years in business, ownership, geographic footprint, three-line capability statement.\n' +
+            '  • Tab 3 (experience): ' + Math.max(2, Math.floor(totalPageLimit*0.20)) + ' pages. List 3-5 anchor projects with one-paragraph summary each. FULL profile sheets go in Tab ' + appendixTabNum + '.\n' +
+            '  • Tab 4 (methodology): ' + Math.max(3, Math.floor(totalPageLimit*0.30)) + ' pages — largest section. Process, controls, quality, risk management.\n' +
+            '  • Tab 5 (financial standing): ~1 page. Litigation summary as required.\n' +
+            '  • Tab 6 (timeline): ~1 page. Table form.\n' +
+            '  • Tab 7 (project staff): ' + Math.max(2, Math.floor(totalPageLimit*0.15)) + ' pages. Named personnel, role, credential, one-line "why this person." FULL resumes in Tab ' + appendixTabNum + '.\n' +
+            '  • Tab 8/9 if separate (scope response): ~1 page each.\n' +
+            '  • Tab 9 (references): ~1 page. Five references in compact format — name, title, phone, email, contract date, project value, relevance.\n' +
+            '  • Tab 10 (cost narrative): ~1 page. Pricing logic summary. Cost Form goes in Tab ' + appendixTabNum + '.\n\n' +
+            'ACKNOWLEDGE THE PAGE-LIMIT INTERPRETATION IN COVER LETTER:\n' +
+            'Add one sentence to the cover letter (Tab 1) such as: "This Qualifications Response narrative (Tabs 1-' + narrativeMax + ') has been prepared to fit within the ' + totalPageLimit + '-page limit per RFQ Section 7. Required NOLA-PS forms, resumes, and supporting documentation are provided in Tab ' + appendixTabNum + ' — Appendices, per the RFQ\'s submission format."\n\n' +
+            'COMPRESSION DIRECTIVE: Write tight prose. Eliminate transitional throat-clearing. No section may have more than 2 paragraphs of narrative before moving to bulleted/structured content. Cut every "HGI is pleased to..." opener. State conclusions, support with one example, move on.\n\n';
+        } else if (pageLimitScope === 'full_submission') {
+          pageLimitBlock = '\n\n## ⚠️ HARD PAGE LIMIT — DISQUALIFICATION RISK ⚠️\n' +
+            'The RFP imposes a page limit of ' + totalPageLimit + ' PAGES on the **entire submission**.\n' +
+            'Verbatim from RFP: "' + pageLimitContext.slice(0, 250) + '"\n\n' +
+            'SCOPE OF LIMIT (system-detected): ' + pageLimitScopeReasoning + '\n\n' +
+            'YOUR FULL SUBMISSION (everything — narrative + forms + resumes + appendices) MUST NOT EXCEED ~' + charBudget.toLocaleString() + ' CHARACTERS TOTAL.\n' +
+            '(Page-density math: 3,200 chars/page × ' + totalPageLimit + ' pages = ' + charBudget.toLocaleString() + ' chars.)\n\n' +
+            'PER-TAB CHAR BUDGETS:\n' +
+            '- Tab 1 (cover letter): 1 page = 3,200 chars\n' +
+            '- Tab 2 (firm background): 1 page = 3,200 chars\n' +
+            '- Tab 3 (experience): ' + Math.floor(totalPageLimit*0.20) + ' pages = ' + (Math.floor(totalPageLimit*0.20)*3200).toLocaleString() + ' chars\n' +
+            '- Tab 4 (methodology): ' + Math.floor(totalPageLimit*0.30) + ' pages = ' + (Math.floor(totalPageLimit*0.30)*3200).toLocaleString() + ' chars (largest section)\n' +
+            '- Tab 5 (financial standing): 1 page = 3,200 chars\n' +
+            '- Tab 6 (timeline): 1 page = 3,200 chars\n' +
+            '- Tab 7 (project staff): ' + Math.floor(totalPageLimit*0.15) + ' pages = ' + (Math.floor(totalPageLimit*0.15)*3200).toLocaleString() + ' chars (named personnel + roles)\n' +
+            '- Tab 8 (scope response): ' + Math.max(1, Math.floor(totalPageLimit*0.08)) + ' pages\n' +
+            '- Tab 9 (references): 1 page = 3,200 chars\n' +
+            '- Tab 10 (cost narrative): 1 page = 3,200 chars\n\n' +
+            'COMPRESSION DIRECTIVE: Write tight prose. Eliminate transitional throat-clearing. No section may have more than 2 paragraphs of narrative before moving to bulleted/structured content. Cut every "HGI is pleased to..." opener. State conclusions, support with one example, move on.\n\n';
+        } else {
+          // Unspecified scope — defensive: target narrative under limit, put forms/resumes in appendix
+          pageLimitBlock = '\n\n## ⚠️ HARD PAGE LIMIT — DISQUALIFICATION RISK ⚠️\n' +
+            'The RFP imposes a page limit of ' + totalPageLimit + ' PAGES.\n' +
+            'Verbatim from RFP: "' + pageLimitContext.slice(0, 250) + '"\n\n' +
+            'SCOPE INTERPRETATION: The RFP language does not explicitly state whether the limit covers only the narrative body or the full submission. To be defensively compliant under either interpretation:\n' +
+            '  1. Target the qualifications NARRATIVE (Tabs 1-10) to fit within ' + totalPageLimit + ' pages (~' + charBudget.toLocaleString() + ' chars).\n' +
+            '  2. Place agency-furnished forms, resumes, full project profiles, and supporting tables in a clearly-labeled "Appendices" section.\n' +
+            '  3. In the cover letter, acknowledge the page-limit interpretation: "The qualifications response narrative has been prepared within the ' + totalPageLimit + '-page envelope. Supporting documentation is provided as appendices."\n\n' +
+            'COMPRESSION DIRECTIVE: Write tight prose. Eliminate transitional throat-clearing. No section may have more than 2 paragraphs of narrative before moving to bulleted/structured content. Cut every "HGI is pleased to..." opener.\n\n';
+        }
       }
 
       // ═══ STAGE 2: BUILD THE COMPLIANCE-DRIVEN PROMPT ═══
@@ -2481,25 +2594,84 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         // flags critical when overage exceeds 25%. Auto-correction is NOT attempted —
         // compression requires re-generation, not regex. The flag surfaces in fact-check
         // memory so Christopher / red team see it before document hand-off.
+        // S151: Scope-aware. When scope = narrative_tabs_only, count only the narrative
+        // body chars (everything before the Appendices boundary). When scope =
+        // full_submission, count everything as before. When scope = unspecified,
+        // count everything but record both interpretations for human review.
         try {
           var pageCheckLimit = null;
+          var pageCheckScope = 'unspecified';
+          var pageCheckTabMax = null;
           if (opp.rfp_requirements && opp.rfp_requirements.total_page_limit) {
             pageCheckLimit = opp.rfp_requirements.total_page_limit;
+            pageCheckScope = opp.rfp_requirements.total_page_limit_scope || 'unspecified';
+            pageCheckTabMax = opp.rfp_requirements.total_page_limit_narrative_tab_max || null;
           }
           if (pageCheckLimit) {
             var charsPerPage = 3200; // empirical proposal-density baseline
-            var estimatedPages = Math.round(proposalText.length / charsPerPage);
+            // S151: Determine which slice of the proposal counts toward the limit
+            var charsToCount = proposalText.length;
+            var countingScope = 'full proposal';
+            var appendixBoundaryFound = false;
+            if (pageCheckScope === 'narrative_tabs_only') {
+              // Try to find the appendix boundary in the proposal text. The proposal
+              // engine writes section headers; the L7 prompt tells it to label the
+              // appendix tab explicitly (e.g. "Tab 11 — Appendices"). Use multiple
+              // patterns to find where the narrative ends.
+              var appendixPatterns = [
+                /\n\s*Tab\s+\d{1,2}\s*[-–—]\s*Appendi(?:x|ces)/i,
+                /\n\s*#+\s*Tab\s+\d{1,2}\s*[-–—:]\s*Appendi(?:x|ces)/i,
+                /\n\s*Appendi(?:x|ces)\s*[-–—:\n]/i,
+                /\n\s*#+\s*Appendi(?:x|ces)\b/i,
+                /\n\s*APPENDIX\s+[A-Z]\b/,
+                /\n\s*APPENDICES\b/
+              ];
+              var appendixBoundary = -1;
+              for (var _abp = 0; _abp < appendixPatterns.length; _abp++) {
+                var _abm = proposalText.match(appendixPatterns[_abp]);
+                if (_abm) {
+                  var _abPos = proposalText.indexOf(_abm[0]);
+                  if (_abPos > 0 && (appendixBoundary < 0 || _abPos < appendixBoundary)) {
+                    appendixBoundary = _abPos;
+                  }
+                }
+              }
+              if (appendixBoundary > 0) {
+                charsToCount = appendixBoundary;
+                countingScope = 'narrative body (chars 0–' + appendixBoundary.toLocaleString() + '; appendix found at boundary)';
+                appendixBoundaryFound = true;
+              } else {
+                // No appendix boundary found in the generated text. Two possibilities:
+                // (a) L7 didn't structure with an appendix yet — count all chars but flag softly
+                // (b) The proposal genuinely is narrative-only and there's no appendix
+                // We count the full text but record the lack of appendix as a soft signal.
+                countingScope = 'full proposal (no appendix boundary detected; treating all as narrative — this may inflate the count)';
+              }
+            } else if (pageCheckScope === 'full_submission') {
+              countingScope = 'full submission per RFP scope';
+            } else {
+              countingScope = 'full proposal (scope unspecified — defensive interpretation)';
+            }
+            var estimatedPages = Math.round(charsToCount / charsPerPage);
             var overagePct = ((estimatedPages - pageCheckLimit) / pageCheckLimit) * 100;
             if (estimatedPages > pageCheckLimit) {
               var sev = overagePct > 25 ? 'critical' : 'major';
+              var detailMsg = 'Counted ' + countingScope + ': ' + charsToCount.toLocaleString() + ' chars ≈ ' + estimatedPages + ' pages — exceeds ' + pageCheckLimit + '-page RFP limit by ' + overagePct.toFixed(0) + '% (scope=' + pageCheckScope;
+              if (pageCheckTabMax) detailMsg += ', narrative_tab_max=' + pageCheckTabMax;
+              detailMsg += '). Budget: ' + (pageCheckLimit * charsPerPage).toLocaleString() + ' chars.';
+              if (pageCheckScope === 'narrative_tabs_only' && !appendixBoundaryFound) {
+                detailMsg += ' NOTE: scope is narrative-only but no appendix boundary was found in the generated text — L7 may not have separated narrative from appendix as instructed. Investigate before regenerating.';
+              } else {
+                detailMsg += ' NOT auto-correctable — compression requires regeneration with stricter L7 prompt budget.';
+              }
               s150_findings.push({
                 sev: sev,
                 type: 'page_limit_overage',
-                detail: 'Proposal estimated at ' + estimatedPages + ' pages — exceeds ' + pageCheckLimit + '-page RFP limit by ' + overagePct.toFixed(0) + '%. Char count: ' + proposalText.length.toLocaleString() + ' (budget: ' + (pageCheckLimit * charsPerPage).toLocaleString() + '). NOT auto-correctable — compression requires regeneration with stricter L7 prompt budget.'
+                detail: detailMsg
               });
-              log('S150 FACT-CHECK (b3): PAGE LIMIT OVERAGE — ' + estimatedPages + ' pages vs ' + pageCheckLimit + ' limit (' + overagePct.toFixed(0) + '% over).');
+              log('S150 FACT-CHECK (b3): PAGE LIMIT OVERAGE — ' + estimatedPages + ' pages vs ' + pageCheckLimit + ' limit (' + overagePct.toFixed(0) + '% over, counting=' + countingScope + ').');
             } else {
-              log('S150 FACT-CHECK (b3): page count OK — ' + estimatedPages + ' pages within ' + pageCheckLimit + '-page limit.');
+              log('S150 FACT-CHECK (b3): page count OK — ' + estimatedPages + ' pages within ' + pageCheckLimit + '-page limit (counting=' + countingScope + ').');
             }
           }
         } catch(_b3err) {
@@ -15651,28 +15823,112 @@ async function orchestrateOpp(opp) {
         ];
         var detectedPageLimit = null;
         var pageLimitContext = '';
+        var pageLimitMatchPos = -1;
+        var pageLimitMatchLen = 0;
         for (var _pli = 0; _pli < pageLimitPatterns.length; _pli++) {
           var _plMatch = fullRfpForExtraction.match(pageLimitPatterns[_pli]);
           if (_plMatch && parseInt(_plMatch[1]) > 0 && parseInt(_plMatch[1]) <= 500) {
             detectedPageLimit = parseInt(_plMatch[1]);
             // Capture surrounding context (200 chars) to disambiguate
             var _plPos = fullRfpForExtraction.indexOf(_plMatch[0]);
+            pageLimitMatchPos = _plPos;
+            pageLimitMatchLen = _plMatch[0].length;
             pageLimitContext = fullRfpForExtraction.slice(Math.max(0, _plPos - 100), _plPos + _plMatch[0].length + 200).replace(/\s+/g, ' ').trim();
             break;
+          }
+        }
+        // S151 SCOPE DETECTION: when a page limit is found, determine WHAT it applies to.
+        // Default RFP-drafting convention: when "Appendices" or "Appendix" tabs follow the
+        // page-limited body, the limit covers only the narrative body. Per OPSB RFQ 26-0108
+        // language: "Qualifications Response Format (Qualifications Response Not to exceed
+        // 20 Pages)" followed by tab structure with Tab 11 = Appendices. The defensible read
+        // is that 20 pages applies to Tabs 1-10 only.
+        var detectedPageLimitScope = 'unspecified';
+        var detectedNarrativeTabMax = null;
+        var pageLimitScopeReasoning = '';
+        if (detectedPageLimit && pageLimitMatchPos >= 0) {
+          // Look at a wider window AFTER the page-limit match for tab structure
+          var afterWindow = fullRfpForExtraction.slice(
+            pageLimitMatchPos + pageLimitMatchLen,
+            Math.min(fullRfpForExtraction.length, pageLimitMatchPos + pageLimitMatchLen + 8000)
+          );
+          // Look at a window BEFORE the page-limit match for "qualifications response" or "narrative" framing
+          var beforeWindow = fullRfpForExtraction.slice(
+            Math.max(0, pageLimitMatchPos - 600),
+            pageLimitMatchPos
+          );
+
+          // Find all tab numbers mentioned after the page-limit clause
+          var tabMatches = afterWindow.match(/Tab\s+(\d{1,2})/gi) || [];
+          var tabNumbers = tabMatches.map(function(t) {
+            var n = t.match(/\d+/);
+            return n ? parseInt(n[0]) : 0;
+          }).filter(function(n) { return n > 0 && n < 50; });
+          var maxTabNumber = tabNumbers.length ? Math.max.apply(null, tabNumbers) : 0;
+
+          // Look for appendix/appendices keyword in the same window
+          var hasAppendix = /(?:^|[\s.,;:()])[Aa]ppendi(?:x|ces)\b/.test(afterWindow);
+          // Detect the appendix tab number — common patterns:
+          //   "Tab N - Appendices", "Tab N – Appendices", "Tab N — Appendices"
+          var appendixTabPattern = /Tab\s+(\d{1,2})\s*[-–—]\s*[Aa]ppendi(?:x|ces)/i;
+          var appendixTabMatch = afterWindow.match(appendixTabPattern);
+          var appendixTabNumber = appendixTabMatch ? parseInt(appendixTabMatch[1]) : null;
+
+          // Look for "qualifications response" or "narrative" framing in the BEFORE window
+          // (the limit clause "(Qualifications Response Not to exceed 20 Pages)" is preceded
+          // by "Qualifications Response Format" — that's a tell that the limit is on the
+          // qualifications response body, not the appendix attachments)
+          var hasQualResponseFraming = /qualifications?\s+response\s+format/i.test(beforeWindow + ' ' + afterWindow.slice(0, 500));
+          var hasNarrativeFraming = /\b(?:narrative|main\s+body|response\s+body)\b/i.test(beforeWindow + ' ' + afterWindow.slice(0, 500));
+
+          // Decide scope
+          if (appendixTabNumber && appendixTabNumber > 1) {
+            // Best signal: explicit appendix tab found AFTER the page limit clause
+            detectedPageLimitScope = 'narrative_tabs_only';
+            detectedNarrativeTabMax = appendixTabNumber - 1;
+            pageLimitScopeReasoning = 'Detected explicit appendix tab (Tab ' + appendixTabNumber + ') in body structure after page-limit clause; ' +
+              'narrative tabs are 1 through ' + (appendixTabNumber - 1) + '. Defensible RFP-drafting convention: appendices are excluded from page count.';
+          } else if (hasAppendix && hasQualResponseFraming) {
+            // "Appendices" present but no explicit tab number — still strong implication
+            detectedPageLimitScope = 'narrative_tabs_only';
+            detectedNarrativeTabMax = maxTabNumber > 0 ? maxTabNumber - 1 : null;
+            pageLimitScopeReasoning = 'Page-limit framed as "qualifications response" with appendices section present in body structure — ' +
+              'standard RFP-drafting convention treats appendices as outside page count.';
+          } else if (hasQualResponseFraming || hasNarrativeFraming) {
+            // Limit explicitly applies to the "qualifications response" or "narrative"
+            detectedPageLimitScope = 'narrative_tabs_only';
+            detectedNarrativeTabMax = maxTabNumber > 0 ? maxTabNumber : null;
+            pageLimitScopeReasoning = 'Page-limit clause uses "qualifications response" or "narrative" framing; limit applies to narrative body only.';
+          } else if (hasAppendix) {
+            // Appendix mentioned but no qualifications-response framing — softer signal but lean narrative-only
+            detectedPageLimitScope = 'narrative_tabs_only';
+            detectedNarrativeTabMax = maxTabNumber > 0 ? maxTabNumber - 1 : null;
+            pageLimitScopeReasoning = 'Appendices section present in submission structure after page-limit clause; ' +
+              'narrative-only interpretation is the more defensible reading.';
+          } else {
+            // No appendix and no narrative framing — limit covers full submission
+            detectedPageLimitScope = 'full_submission';
+            pageLimitScopeReasoning = 'No appendix structure or narrative-specific framing detected; limit appears to cover full submission.';
           }
         }
         if (detectedPageLimit && reqs) {
           reqs.total_page_limit = detectedPageLimit;
           reqs.total_page_limit_context = pageLimitContext.slice(0, 400);
+          reqs.total_page_limit_scope = detectedPageLimitScope;
+          reqs.total_page_limit_narrative_tab_max = detectedNarrativeTabMax;
+          reqs.total_page_limit_scope_reasoning = pageLimitScopeReasoning;
           // Inject into submission_requirements if not already present
           var hasPageReq = (reqs.submission_requirements || []).some(function(s) {
             return (s.type === 'page_count') || /\d+\s*page/i.test(s.constraint || '');
           });
           if (!hasPageReq) {
             reqs.submission_requirements = reqs.submission_requirements || [];
+            var scopeLabel = detectedPageLimitScope === 'narrative_tabs_only'
+              ? (detectedNarrativeTabMax ? ' (applies to Tabs 1-' + detectedNarrativeTabMax + ' narrative; appendices excluded)' : ' (applies to narrative body only; appendices excluded)')
+              : (detectedPageLimitScope === 'full_submission' ? ' (applies to full submission)' : '');
             reqs.submission_requirements.unshift({
               type: 'page_count',
-              constraint: 'Response not to exceed ' + detectedPageLimit + ' pages (deterministic regex match: "' + pageLimitContext.slice(0, 150) + '...")'
+              constraint: 'Response not to exceed ' + detectedPageLimit + ' pages' + scopeLabel + ' (deterministic regex match: "' + pageLimitContext.slice(0, 150) + '...")'
             });
           }
           // Inject as fatal flaw if not already there
@@ -15681,12 +15937,17 @@ async function orchestrateOpp(opp) {
           });
           if (!hasFatalPageFlaw) {
             reqs.fatal_flaws = reqs.fatal_flaws || [];
+            var fatalScopeText = detectedPageLimitScope === 'narrative_tabs_only'
+              ? ' (narrative body — Tabs 1-' + (detectedNarrativeTabMax || 'N') + ' — only; appendices excluded)'
+              : '';
             reqs.fatal_flaws.push({
-              pattern: 'Response exceeds ' + detectedPageLimit + '-page limit',
+              pattern: 'Response narrative exceeds ' + detectedPageLimit + '-page limit' + fatalScopeText,
               penalty: 'Disqualification / non-responsive determination — RFP explicitly caps response length'
             });
           }
-          log('ORCHESTRATE: PAGE LIMIT DETECTED — ' + detectedPageLimit + ' pages (regex deterministic). Injected into rfp_requirements.');
+          log('ORCHESTRATE: PAGE LIMIT DETECTED — ' + detectedPageLimit + ' pages, scope=' + detectedPageLimitScope +
+              (detectedNarrativeTabMax ? ', narrative_tab_max=' + detectedNarrativeTabMax : '') +
+              ' (regex deterministic). Reasoning: ' + pageLimitScopeReasoning.slice(0, 100));
         } else {
           log('ORCHESTRATE: No page limit pattern detected in full RFP text (' + fullRfpForExtraction.length + ' chars scanned).');
         }
