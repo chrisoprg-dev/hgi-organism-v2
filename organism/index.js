@@ -14957,9 +14957,37 @@ async function agentHunting(state, trigger) {
   var qualified = [];
   var rejectedSamples = [];
 
-  for (var c = 0; c < Math.min(preFiltered.length, 50); c++) {
+  // S152 #6: per-source scoring quota — protect federal/sparse sources from being
+  // squeezed out by high-volume CB. Take top N per source first, fill remaining
+  // slots from sorted remainder up to maxScoreQueue total.
+  var perSourceQuota = 6;
+  var maxScoreQueue = 80;
+  var scoreQueue = [];
+  var bySource = {};
+  preFiltered.forEach(function(_o) {
+    var _s = _o.source || 'unknown';
+    if (!bySource[_s]) bySource[_s] = [];
+    bySource[_s].push(_o);
+  });
+  Object.keys(bySource).forEach(function(_s) {
+    var _taken = bySource[_s].slice(0, perSourceQuota);
+    for (var _ti = 0; _ti < _taken.length; _ti++) scoreQueue.push(_taken[_ti]);
+  });
+  var _seenInQueue = new Set(scoreQueue.map(function(_o) { return _o.title || ''; }));
+  for (var _pi = 0; _pi < preFiltered.length && scoreQueue.length < maxScoreQueue; _pi++) {
+    var _pCand = preFiltered[_pi];
+    var _ptitle = _pCand.title || '';
+    if (!_seenInQueue.has(_ptitle)) {
+      scoreQueue.push(_pCand);
+      _seenInQueue.add(_ptitle);
+    }
+  }
+  var _quotaSummary = Object.keys(bySource).map(function(_s) { return _s + ':' + Math.min(bySource[_s].length, perSourceQuota); }).join(',');
+  log('HUNTING: Score queue: ' + scoreQueue.length + ' (per-source min ' + perSourceQuota + ' [' + _quotaSummary + '], cap ' + maxScoreQueue + ')');
+
+  for (var c = 0; c < scoreQueue.length; c++) {
     try {
-      var cand = preFiltered[c];
+      var cand = scoreQueue[c];
       var scorePrompt = HGI + '\n\nORGANISM INTELLIGENCE (use this to adjust scoring — relationships, competitor weaknesses, disasters, budget windows, and outcome lessons all affect how HGI should score this):' + huntContext +
         '\n\nPER-VERTICAL OPI SCORING GUIDE — score each vertical on ITS OWN merits, not compared to DR:' +
         '\nDISASTER (disaster): Score 70+ if LA/TX/FL/MS/AL/GA, FEMA PA or CDBG-DR, program mgmt not physical work. HGI has $750M+ managed FEMA funds.' +
