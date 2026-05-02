@@ -14633,34 +14633,75 @@ async function agentHunting(state, trigger) {
   } catch (e) { log('HUNTING USAspending err: ' + e.message); }
   sourceCounts.usaspending = sourceCounts.usaspending || 0;
 
-  // === NEW: Grants.gov forecasted+posted (free, no key) ===
+  // === Grants.gov two-track (S152 #2 — replaces single OR-mashed query) ===
+  // Track A: fundingInstruments=PC for direct procurement contracts (small set, all relevant)
+  // Track B: per-vertical keyword search restricted to HGI eligibility (22|23 = for-profit + small biz)
+  // Pipe syntax for eligibilities confirmed via pre-flight; comma silently returns 0 hits.
   try {
-    var gr = await fetch('https://api.grants.gov/v1/api/search2', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        keyword: 'disaster recovery OR CDBG-DR OR housing program OR workforce development OR WIOA OR grant management OR hazard mitigation OR workers compensation OR claims administration OR construction management OR housing authority',
-        oppStatuses: 'forecasted|posted', rows: 15, startRecordNum: 0
-      })
-    });
-    if (gr.ok) {
-      var gd = await gr.json();
-      var gops = (gd.data && gd.data.oppHits) ? gd.data.oppHits : [];
-      sourceCounts.grants_gov = gops.length;
-      for (var gi = 0; gi < gops.length; gi++) {
-        var go = gops[gi];
-        if (go.oppTitle && !isDupe(go.oppTitle)) {
-          newOpps.push({
-            title: go.oppTitle, agency: go.agencyName || 'Federal',
-            source: 'grants_gov', source_url: 'https://grants.gov/search-grants?oppNumber=' + (go.number || ''),
-            description: (go.synopsis || '').slice(0, 300) +
-              (go.oppStatus === 'forecasted' ? ' [FORECASTED]' : ''),
-            due_date: go.closeDate || null, vertical: 'grant'
-          });
+    var grantsHits = 0;
+    // Track A: Procurement Contracts
+    try {
+      var pcResp = await fetch('https://api.grants.gov/v1/api/search2', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fundingInstruments: 'PC',
+          oppStatuses: 'forecasted|posted',
+          rows: 50, startRecordNum: 0
+        })
+      });
+      if (pcResp.ok) {
+        var pcD = await pcResp.json();
+        var pcHits = (pcD.data && pcD.data.oppHits) ? pcD.data.oppHits : [];
+        for (var pi = 0; pi < pcHits.length; pi++) {
+          var pc = pcHits[pi];
+          if (pc.oppTitle && !isDupe(pc.oppTitle)) {
+            newOpps.push({
+              title: pc.oppTitle, agency: pc.agencyName || 'Federal',
+              source: 'grants_gov', source_url: 'https://grants.gov/search-grants?oppNumber=' + (pc.number || ''),
+              description: '[PROCUREMENT CONTRACT] ' + (pc.synopsis || '').slice(0, 280) +
+                (pc.oppStatus === 'forecasted' ? ' [FORECASTED]' : ''),
+              due_date: pc.closeDate || null, vertical: 'grant'
+            });
+          }
         }
+        grantsHits += pcHits.length;
       }
-      log('HUNTING: Grants.gov found ' + gops.length + ' results');
+    } catch (eA) { log('HUNTING Grants.gov Track A err: ' + (eA.message||'').slice(0,80)); }
+    // Track B: per-vertical keyword (HGI-eligible only)
+    var grantsKw = ['disaster recovery','workforce development','housing administration','claims administration','grant management','program administration','tpa','community development'];
+    for (var gk = 0; gk < grantsKw.length; gk++) {
+      try {
+        var bResp = await fetch('https://api.grants.gov/v1/api/search2', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            keyword: grantsKw[gk],
+            eligibilities: '22|23',
+            oppStatuses: 'forecasted|posted',
+            rows: 20, startRecordNum: 0
+          })
+        });
+        if (bResp.ok) {
+          var bD = await bResp.json();
+          var bHits = (bD.data && bD.data.oppHits) ? bD.data.oppHits : [];
+          for (var bi = 0; bi < bHits.length; bi++) {
+            var bo = bHits[bi];
+            if (bo.oppTitle && !isDupe(bo.oppTitle)) {
+              newOpps.push({
+                title: bo.oppTitle, agency: bo.agencyName || 'Federal',
+                source: 'grants_gov', source_url: 'https://grants.gov/search-grants?oppNumber=' + (bo.number || ''),
+                description: (bo.synopsis || '').slice(0, 300) +
+                  (bo.oppStatus === 'forecasted' ? ' [FORECASTED]' : ''),
+                due_date: bo.closeDate || null, vertical: 'grant'
+              });
+            }
+          }
+          grantsHits += bHits.length;
+        }
+      } catch (eB) {}
     }
-  } catch (e) { log('HUNTING Grants.gov err: ' + e.message); }
+    sourceCounts.grants_gov = grantsHits;
+    log('HUNTING: Grants.gov found ' + grantsHits + ' results (PC track + ' + grantsKw.length + ' vertical keywords)');
+  } catch (e) { log('HUNTING Grants.gov err: ' + (e.message||'').slice(0,80)); }
   if (!('grants_gov' in sourceCounts)) sourceCounts.grants_gov = 0;
 
   // === Federal Register DISABLED Session 107 ===
