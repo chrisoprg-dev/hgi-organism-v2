@@ -4522,7 +4522,7 @@ if (url === '/api/health-monitor') {
     }
 
     // CHECK 3: Scraper health — hunt_runs today
-    var scraperSources = ['central_bidding', 'sam_gov', 'grants_gov', 'openfema', 'usaspending', 'federal_register'];
+    var scraperSources = ['central_bidding', 'sam_gov', 'grants_gov', 'usaspending', 'federal_register']; // S152: openfema removed - disasterMonitor owns that channel
     var huntRuns = await supabase.from('hunt_runs')
       .select('source,run_at,status')
       .gte('run_at', hmTodayStart)
@@ -14579,42 +14579,11 @@ async function agentHunting(state, trigger) {
   if (!('sam_gov' in sourceCounts)) sourceCounts.sam_gov = 0;
 
 
-  // === NEW: OpenFEMA disaster declarations (free, no key) ===
-  // S144: OpenFEMA's state field is a 2-letter code (LA, TX, FL, MS, AL, GA), not full
-  // names. Previous full-name array silently returned 0 results from OpenFEMA every run.
-  var hgiStates = ['LA', 'TX', 'FL', 'MS', 'AL', 'GA'];
-  for (var fs = 0; fs < hgiStates.length; fs++) {
-    try {
-      var femaUrl = 'https://www.fema.gov/api/open/v2/DisasterDeclarationsSummaries?' +
-        '$filter=state%20eq%20%27' + hgiStates[fs] + '%27%20and%20declarationDate%20gt%20%27' +
-        new Date(Date.now() - 180 * 86400000).toISOString().slice(0, 10) + 'T00:00:00.000z%27' +
-        '&$orderby=declarationDate%20desc&$top=10';
-      var fr = await fetch(femaUrl, { headers: { Accept: 'application/json' } });
-      if (fr.ok) {
-        var fd = await fr.json();
-        var decls = fd.DisasterDeclarationsSummaries || [];
-        sourceCounts.openfema = (sourceCounts.openfema || 0) + decls.length;
-        for (var fi = 0; fi < decls.length; fi++) {
-          var decl = decls[fi];
-          var ft = 'DR-' + decl.disasterNumber + ' ' + (decl.state || '') + ' — ' + (decl.declarationTitle || '');
-          if (!isDupe(ft) && !isDupe('DR-' + decl.disasterNumber)) {
-            newOpps.push({
-              title: ft, agency: 'FEMA / ' + (decl.state || 'Federal'),
-              source: 'openfema', source_url: 'https://www.fema.gov/disaster/' + decl.disasterNumber,
-              description: 'FEMA Declaration. Incident: ' + (decl.incidentType || '') +
-                '. Date: ' + (decl.declarationDate || '').slice(0, 10) +
-                '. Programs: ' + (decl.ihProgramDeclared ? 'IA ' : '') +
-                (decl.paProgramDeclared ? 'PA ' : '') + (decl.hmProgramDeclared ? 'HM' : '') +
-                '. Signal for PA-TAC and CM procurement 3-18 months out.',
-              due_date: null, vertical: 'disaster'
-            });
-          }
-        }
-      }
-    } catch (e) { log('HUNTING OpenFEMA err: ' + e.message); }
-  }
-  if (!('openfema' in sourceCounts)) sourceCounts.openfema = 0;
-  log('HUNTING: OpenFEMA checked ' + hgiStates.length + ' states');
+  // S152: OpenFEMA disaster declarations REMOVED from agentHunting.
+  // disasterMonitor agent (line ~13470) handles OpenFEMA cleanly: writes disaster_alerts
+  // with full schema, creates opportunities only for PA-eligible declarations at OPI 75.
+  // This loop was duplicate work and the source of DR-XXXX-as-RFP scoring confusion
+  // (Haiku correctly refused to score wildfire signals as procurements).
 
   // === USAspending DISABLED Session 107 ===
   // Returns historical awards (already-awarded contracts that have ended) — these get
