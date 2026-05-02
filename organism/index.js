@@ -14771,7 +14771,7 @@ async function agentHunting(state, trigger) {
             if (wo.title && !isDupe(wo.title)) {
               newOpps.push({
                 title: wo.title, agency: wo.agency || 'Unknown Agency',
-                source: 'web_search', source_url: wo.source_url || 'https://www.google.com',
+                source: 'web_search', source_url: wo.source_url || null,
                 description: (wo.description || '').slice(0, 500),
                 due_date: wo.due_date || null, vertical: wo.vertical || null
               });
@@ -15106,6 +15106,7 @@ async function autoRetrieveRFPs() {
     try {
       var url = opp.source_url;
       if (!url || !url.startsWith('http')) continue;
+      if (url.indexOf('google.com') >= 0) { log('AUTO-RFP: skip ' + (opp.title||'').slice(0, 40) + ' — placeholder URL, no usable source'); continue; }
       var isCB = url.includes('centralauctionhouse.com') || url.includes('centralbidding.com');
       log('AUTO-RFP: Fetching ' + url.slice(0, 80) + (isCB ? ' [CB-AUTH]' : ''));
 
