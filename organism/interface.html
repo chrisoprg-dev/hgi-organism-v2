@@ -30,7 +30,7 @@ var e=React.createElement,useState=React.useState,useEffect=React.useEffect,useR
 var GOLD='#C9A84C',GOLD_D='#8B6E2E',BG='#0A0A0A',BG2='#111111',BG3='#191919',BG4='#222222',
 TEXT='#E8E0D0',TEXT_D='#888070',BORDER='#2A2520',RED='#C0392B',GREEN='#27AE60',BLUE='#2980B9',ORANGE='#E67E22',CYAN='#00D4FF';
 
-var HGI_CONTEXT='HGI Global (Hammerman & Gainer LLC) — 97-year-old, 100% minority-owned program management firm in Kenner, LA. 8 verticals: Disaster Recovery, TPA/Claims, Property Tax Appeals, Workforce/WIOA, Construction Management, Program Administration, Housing/HUD, Grant Management. SAM UEI: DL4SJEVKZ6H4.';
+var HGI_CONTEXT='HGI Global (Hammerman & Gainer LLC) — founded 1929, 100% minority-owned program management firm in Kenner, LA. 8 verticals: Disaster Recovery, TPA/Claims, Property Tax Appeals, Workforce/WIOA, Construction Management, Program Administration, Housing/HUD, Grant Management. SAM UEI: DL4SJEVKZ6H4.';
 
 function Badge(p){
   var c=p.color||GOLD;
@@ -3386,7 +3386,7 @@ function App(){
       e('div',{style:{padding:'16px 16px 12px'}},
         e('div',{style:{fontSize:18,fontWeight:'bold',color:GOLD,letterSpacing:2}},'HGI'),
         e('div',{style:{fontSize:9,letterSpacing:2,color:TEXT_D}},'AI CAPTURE SYSTEM '+(health&&health.version?health.version:'')),
-        e('div',{style:{fontSize:10,color:TEXT_D}},'Hammerman & Gainer LLC · 97 Years')
+        e('div',{style:{fontSize:10,color:TEXT_D}},'Hammerman & Gainer LLC · Founded 1929')
       ),
       // Module list
       e('div',{style:{flex:1}},
@@ -3406,7 +3406,7 @@ function App(){
       // Footer
       e('div',{style:{padding:12,borderTop:'1px solid '+BORDER,fontSize:10,color:GOLD}},
         e('div',{style:{fontWeight:'bold',letterSpacing:2,marginBottom:4}},'KEY PAST PERFORMANCE'),
-        ['Road Home $12B CDBG-DR','BP GCCF 1M+ claims','PBGC 34M beneficiaries','TPCIGA 20yrs Texas','Restore Louisiana','Terrebonne Parish / Ida'].map(function(pp){
+        ['Road Home $12B CDBG-DR','BP GCCF 1M+ claims','City of NOLA WC TPA ($283K/mo)','SWBNO Billing Appeals ($200K/mo)','Restore Louisiana','Terrebonne Parish / Ida'].map(function(pp){
           return e('div',{key:pp,style:{color:TEXT_D,marginBottom:2}},'· '+pp);
         })
       )
