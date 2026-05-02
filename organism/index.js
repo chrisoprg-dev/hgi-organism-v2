@@ -14509,8 +14509,23 @@ async function agentHunting(state, trigger) {
   // Keys: centralbidding_v2, lapac_v2, sam_gov, openfema, usaspending, grants_gov, federal_register, web_search
   var sourceCounts = {};
   var existingTitles = state.pipeline.map(function(o) { return (o.title || '').toLowerCase().slice(0, 50); });
+  // S153 Option A: stable-ID dedup. Federal sources carry SAM opportunityId / grants oppNumber.
+  // Title-only isDupe (50% word-overlap heuristic) was killing federal candidates against
+  // generic pipeline titles like "Project Management Services". Stable IDs short-circuit that.
+  var existingSolnums = new Set(state.pipeline
+    .map(function(o) { return (o.solicitation_number || '').trim(); })
+    .filter(function(s) { return s.length > 0; }));
 
-  function isDupe(title) {
+  // Accepts either a string (legacy callers — title only) or a candidate object
+  // {title, solicitation_number}. When solicitation_number is present, it wins —
+  // we only flag dupe if THAT exact ID is already in the pipeline. Otherwise falls
+  // back to the title heuristic. Sources without stable IDs (CB, LaPAC, web_search)
+  // keep the prior behavior unchanged.
+  function isDupe(cand) {
+    var title, solnum;
+    if (typeof cand === 'string') { title = cand; solnum = ''; }
+    else { title = cand.title || ''; solnum = (cand.solicitation_number || '').trim(); }
+    if (solnum) return existingSolnums.has(solnum);
     var t = (title || '').toLowerCase().slice(0, 50);
     return existingTitles.some(function(e) {
       var words = t.split(' ').filter(function(w) { return w.length > 4; });
@@ -14581,7 +14596,8 @@ async function agentHunting(state, trigger) {
         var samBatch = sd.opportunitiesData || [];
         sourceCounts.sam_gov = (sourceCounts.sam_gov || 0) + samBatch.length;
         samBatch.forEach(function(o) {
-          if (o.title && !isDupe(o.title)) {
+          var _samCand = { title: o.title, solicitation_number: o.opportunityId || '' };
+          if (o.title && !isDupe(_samCand)) {
             var _setAside = o.typeOfSetAsideDescription || 'No set-aside';
             var _noticeType = o.type || '?';
             newOpps.push({
@@ -14590,7 +14606,8 @@ async function agentHunting(state, trigger) {
               source: 'sam_gov',
               source_url: 'https://sam.gov/opp/' + o.opportunityId,
               description: '[' + _noticeType + '] [Set-aside: ' + _setAside + '] [NAICS: ' + samNAICS[sni] + '] ' + (o.description || '').slice(0, 400),
-              due_date: o.responseDeadLine || null
+              due_date: o.responseDeadLine || null,
+              solicitation_number: o.opportunityId || null
             });
           }
         });
@@ -14676,13 +14693,15 @@ async function agentHunting(state, trigger) {
         var pcHits = (pcD.data && pcD.data.oppHits) ? pcD.data.oppHits : [];
         for (var pi = 0; pi < pcHits.length; pi++) {
           var pc = pcHits[pi];
-          if (pc.oppTitle && !isDupe(pc.oppTitle)) {
+          var _pcCand = { title: pc.oppTitle, solicitation_number: pc.number || '' };
+          if (pc.oppTitle && !isDupe(_pcCand)) {
             newOpps.push({
               title: pc.oppTitle, agency: pc.agencyName || 'Federal',
               source: 'grants_gov', source_url: 'https://grants.gov/search-grants?oppNumber=' + (pc.number || ''),
               description: '[PROCUREMENT CONTRACT] ' + (pc.synopsis || '').slice(0, 280) +
                 (pc.oppStatus === 'forecasted' ? ' [FORECASTED]' : ''),
-              due_date: pc.closeDate || null, vertical: 'grant'
+              due_date: pc.closeDate || null, vertical: 'grant',
+              solicitation_number: pc.number || null
             });
           }
         }
@@ -14707,13 +14726,15 @@ async function agentHunting(state, trigger) {
           var bHits = (bD.data && bD.data.oppHits) ? bD.data.oppHits : [];
           for (var bi = 0; bi < bHits.length; bi++) {
             var bo = bHits[bi];
-            if (bo.oppTitle && !isDupe(bo.oppTitle)) {
+            var _boCand = { title: bo.oppTitle, solicitation_number: bo.number || '' };
+            if (bo.oppTitle && !isDupe(_boCand)) {
               newOpps.push({
                 title: bo.oppTitle, agency: bo.agencyName || 'Federal',
                 source: 'grants_gov', source_url: 'https://grants.gov/search-grants?oppNumber=' + (bo.number || ''),
                 description: (bo.synopsis || '').slice(0, 300) +
                   (bo.oppStatus === 'forecasted' ? ' [FORECASTED]' : ''),
-                due_date: bo.closeDate || null, vertical: 'grant'
+                due_date: bo.closeDate || null, vertical: 'grant',
+                solicitation_number: bo.number || null
               });
             }
           }
@@ -15088,6 +15109,7 @@ async function agentHunting(state, trigger) {
         id: newId, title: cand.title, agency: cand.agency, vertical: score.vertical,
         opi_score: score.opi, status: 'active', stage: 'identified', source: cand.source,
         source_url: cand.source_url, estimated_value: 'unknown', due_date: cand.due_date || null,
+        solicitation_number: cand.solicitation_number || null,
         capture_action: score.capture_action + ': ' + score.why,
         discovered_at: new Date().toISOString(), last_updated: new Date().toISOString()
       });
