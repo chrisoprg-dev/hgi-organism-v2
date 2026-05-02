@@ -14545,38 +14545,60 @@ async function agentHunting(state, trigger) {
 
   // LaPAC — now handled by huntLaPAC() above
 
-  // SAM.gov — ALL 8 VERTICALS
-  var samKW = [
-    // Disaster Recovery
-    'disaster recovery program management', 'FEMA public assistance', 'CDBG-DR',
-    // TPA / Claims
-    'claims administration third party', 'workers compensation TPA', 'insurance guaranty association',
-    // Housing / HUD
-    'housing authority management', 'HUD housing program administration',
-    // Workforce / WIOA
-    'WIOA workforce development', 'workforce services program',
-    // Construction Management
-    'construction management services oversight',
-    // Grant Management
-    'grant administration services', 'federal grant program management',
-    // Program Administration
-    'program administration services'
+  // SAM.gov — NAICS-driven (S152 #1, replaces broken keyword search)
+  // Per official GSA docs: SAM.gov v2 API has NO keyword/q parameter — only title/ncode/ptype/state.
+  // Old loop's q= was silently ignored, returning generic 13,664 active list every call.
+  // New strategy: loop HGI NAICS codes with ncode=, capture all relevant notice types incl
+  // Sources Sought (ptype=r) which is highest-leverage for direct federal pursuit (pre-RFP intel).
+  // Set-aside, notice type, and NAICS captured into description so scorer can flag HGI eligibility.
+  // No state filter — federal place-of-performance varies; HGI now pursuing direct federal contracts.
+  var samNAICS = [
+    '541611',  // Mgmt Consulting (~72/30d)
+    '541618',  // Other Mgmt Consulting (~7/30d)
+    '541690',  // Other Sci/Tech Consulting (~41/30d)
+    '541219',  // Other Accounting (~5/30d)
+    '561110',  // Office Admin Services (~12/30d)
+    '921190',  // Other Govt Support (~12/30d)
+    '923120',  // Public Health Admin (~1/30d)
+    '524291',  // Claims Adjusting (federal claims rare)
+    '624310'   // Vocational Rehab (sparse but keep)
+    // 561990 Other Support Services dropped — pre-flight showed mostly shredding/document destruction
   ];
-  for (var s = 0; s < samKW.length; s++) {
+  var samNoticeTypes = 'k,o,p,r,s';  // Combined, Solicitation, Presolicitation, Sources Sought, Special Notice
+  for (var sni = 0; sni < samNAICS.length; sni++) {
     try {
       var samApiKey = process.env.SAM_GOV_API_KEY || 'DEMO_KEY';
-      var sr = await fetch('https://api.sam.gov/prod/opportunities/v2/search?api_key=' + samApiKey + '&q=' + encodeURIComponent(samKW[s]) + '&postedFrom=' + daysAgo(14) + '&postedTo=' + today() + '&active=true&limit=10');
+      var samUrl = 'https://api.sam.gov/prod/opportunities/v2/search' +
+        '?api_key=' + samApiKey +
+        '&ncode=' + samNAICS[sni] +
+        '&ptype=' + samNoticeTypes +
+        '&postedFrom=' + daysAgo(30) +
+        '&postedTo=' + today() +
+        '&limit=100';
+      var sr = await fetch(samUrl);
       if (sr.ok) {
         var sd = await sr.json();
         var samBatch = sd.opportunitiesData || [];
         sourceCounts.sam_gov = (sourceCounts.sam_gov || 0) + samBatch.length;
         samBatch.forEach(function(o) {
-          if (o.title && !isDupe(o.title)) newOpps.push({ title: o.title, agency: o.fullParentPathName || 'Federal', source: 'sam_gov', source_url: 'https://sam.gov/opp/' + o.opportunityId, description: (o.description || '').slice(0, 500), due_date: o.responseDeadLine || null });
+          if (o.title && !isDupe(o.title)) {
+            var _setAside = o.typeOfSetAsideDescription || 'No set-aside';
+            var _noticeType = o.type || '?';
+            newOpps.push({
+              title: o.title,
+              agency: o.fullParentPathName || 'Federal',
+              source: 'sam_gov',
+              source_url: 'https://sam.gov/opp/' + o.opportunityId,
+              description: '[' + _noticeType + '] [Set-aside: ' + _setAside + '] [NAICS: ' + samNAICS[sni] + '] ' + (o.description || '').slice(0, 400),
+              due_date: o.responseDeadLine || null
+            });
+          }
         });
       }
-    } catch (e) {}
+    } catch (eS) { log('HUNTING SAM ncode=' + samNAICS[sni] + ' err: ' + (eS.message||'').slice(0,80)); }
   }
   if (!('sam_gov' in sourceCounts)) sourceCounts.sam_gov = 0;
+  log('HUNTING: SAM.gov found ' + sourceCounts.sam_gov + ' results across ' + samNAICS.length + ' NAICS codes (Sources Sought + Solicitations)');
 
 
   // S152: OpenFEMA disaster declarations REMOVED from agentHunting.
