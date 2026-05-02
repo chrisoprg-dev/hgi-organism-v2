@@ -15005,6 +15005,33 @@ async function agentHunting(state, trigger) {
   }
 
   log('HUNTING: ' + qualified.length + ' qualified and added');
+
+  // === S152 #5: UPDATE hunt_runs rows with per-source qualified counts ===
+  // Preserves the early INSERT above for crash-tolerance; this late UPDATE flips
+  // opportunities_new from 0 to the real qualified count per source. Without this,
+  // the dashboard metric was always 0 because the INSERT happened before scoring.
+  try {
+    var qualifiedBySource = qualified.reduce(function(acc, q) {
+      acc[q.source] = (acc[q.source] || 0) + 1;
+      return acc;
+    }, {});
+    var updatedSources = [];
+    for (var qsrc in qualifiedBySource) {
+      if (Object.prototype.hasOwnProperty.call(qualifiedBySource, qsrc)) {
+        await supabase.from('hunt_runs')
+          .update({
+            opportunities_new: qualifiedBySource[qsrc],
+            status: 'found:' + (sourceCounts[qsrc] || 0) + ' new:' + qualifiedBySource[qsrc]
+          })
+          .eq('source', qsrc)
+          .eq('run_at', huntRunTs);
+        updatedSources.push(qsrc + ':' + qualifiedBySource[qsrc]);
+      }
+    }
+    if (updatedSources.length > 0) {
+      log('HUNTING: hunt_runs updated with qualified counts \u2014 ' + updatedSources.join(', '));
+    }
+  } catch(ue) { log('HUNTING: hunt_runs late-update failed \u2014 ' + (ue.message || '').slice(0, 120)); }
   await storeMemory('hunting_agent', null, 'hunting', 'HUNTING: ' + qualified.length + '/' + preFiltered.length + ' qualified (from ' + newOpps.length + ' raw, ' + deduped.length + ' deduped, ' + preFiltered.length + ' pre-filtered).\n' + qualified.map(function(q) { return 'OPI:' + q.opi + ' [' + q.source + '] ' + q.title.slice(0, 50); }).join('\n'), 'analysis', null, 'high');
   return { agent: 'hunting_agent', chars: 300, new_opps: qualified.length };
 }
