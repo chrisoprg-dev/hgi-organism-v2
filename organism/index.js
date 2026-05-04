@@ -8477,6 +8477,16 @@ function log(msg) { var line = '[' + new Date().toISOString() + '] [ORGANISM] ' 
 // Independent of V1 writes in shared Supabase
 var cycleWrites = new Set();
 
+// S155 CONCURRENCY LOCK — prevents parallel runSession execution.
+// S153 observed parallel-session collision (manual + cron firing within seconds).
+// Without this, simultaneous /api/trigger + /api/trigger-full + cron all run runSession
+// in parallel: duplicate observations, doubled API spend, pipeline state drift.
+// Locked sessions get a clean "skipped" return instead of silent collision.
+var _sessionInFlight = false;
+var _sessionLockAcquiredAt = null;
+var _sessionLockTrigger = null;
+var _SESSION_STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 min stale-override safety
+
 async function storeMemory(agent, oppId, tags, observation, memType, sourceUrl, confidence) {
   try {
     sourceUrl = sourceUrl || null;
@@ -16569,6 +16579,20 @@ async function orchestrateOpp(opp) {
 async function runSession(trigger) {
   var id = 'v4-' + Date.now();
   var isSkeleton = trigger.indexOf('skeleton') >= 0;
+
+  // S155 Concurrency Lock: refuse parallel sessions (clean rejection, not collision)
+  if (_sessionInFlight) {
+    var ageMs = Date.now() - (_sessionLockAcquiredAt || 0);
+    if (ageMs < _SESSION_STALE_THRESHOLD_MS) {
+      log('SESSION REJECTED: ' + id + ' | trigger: ' + trigger + ' | reason: another session in flight (' + Math.round(ageMs/1000) + 's ago, holder: ' + _sessionLockTrigger + ')');
+      return { skipped: true, reason: 'session_in_flight', held_by: _sessionLockTrigger, age_seconds: Math.round(ageMs/1000) };
+    }
+    log('SESSION OVERRIDE: ' + id + ' | reason: prior lock stale (' + Math.round(ageMs/1000) + 's old, holder: ' + _sessionLockTrigger + ') — taking lock');
+  }
+  _sessionInFlight = true;
+  _sessionLockAcquiredAt = Date.now();
+  _sessionLockTrigger = trigger;
+
   log('=== SESSION START: ' + id + ' | trigger: ' + trigger + ' | mode: ' + (isSkeleton ? 'SKELETON (cost-control)' : 'FULL') + ' ===');
   cycleWrites.clear(); // Reset dedup tracker for new cycle
 
@@ -17172,6 +17196,12 @@ async function runSession(trigger) {
         created_at: new Date().toISOString()
       });
     } catch (e2) { log('Could not log crash: ' + e2.message); }
+  } finally {
+    // S155: always release the session lock, even on crash or early return
+    _sessionInFlight = false;
+    _sessionLockAcquiredAt = null;
+    _sessionLockTrigger = null;
+    log('SESSION LOCK RELEASED: ' + id);
   }
 }
 
