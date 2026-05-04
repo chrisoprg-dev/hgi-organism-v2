@@ -8545,7 +8545,8 @@ async function multiSearch(queries) {
         system: 'Intelligence analyst. Return specific verified findings with sources. Be concise.',
         messages: [{ role: 'user', content: queries[i].q }]
       });
-      trackCost('multiSearch', 'claude-haiku-4-5-20251001', r.usage);
+      var rWs = countWebSearches(r);
+      trackCost('multiSearch', 'claude-haiku-4-5-20251001', r.usage, { web_searches: rWs, endpoint: 'multiSearch', metadata: { query_label: queries[i].label } });
       var text = (r.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('\n');
       if (text && text.length > 30) {
         results.push(queries[i].label + ':\n' + text.slice(0, 1500));
@@ -9508,7 +9509,8 @@ async function agentPursuitResearcher(opp, opts) {
         system: execSystem,
         messages: [{ role: 'user', content: execUser }]
       });
-      trackCost('pursuit_research_exec', 'claude-sonnet-4-6', execResp.usage);
+      var execWs = countWebSearches(execResp);
+      trackCost('pursuit_research_exec', 'claude-sonnet-4-6', execResp.usage, { web_searches: execWs, endpoint: 'pursuit_research_exec', metadata: { item_num: item.num || (i + 1), category: item.category || 'other' } });
       addCost('claude-sonnet-4-6', execResp.usage);
     } catch (ee) {
       log(log_prefix + ' item ' + (i + 1) + ' exec error: ' + (ee.message || '').slice(0, 120));
@@ -9740,7 +9742,8 @@ async function agentMethodologyResearcher(params, opts) {
         system: researchSystem,
         messages: [{ role: 'user', content: 'RESEARCH FOCUS: ' + rq.focus + '\n\n' + rq.query + '\n\nReturn ONLY the JSON array of source extracts.' }]
       });
-      trackCost('methodology_research', 'claude-sonnet-4-6', rResp.usage);
+      var rWs = countWebSearches(rResp);
+      trackCost('methodology_research', 'claude-sonnet-4-6', rResp.usage, { web_searches: rWs, endpoint: 'methodology_research', metadata: { vertical: vertical, work_area: workArea, research_pass: ri } });
       addCost('claude-sonnet-4-6', rResp.usage);
     } catch (re) {
       log(log_prefix + ' research pass ' + ri + ' error: ' + (re.message||'').slice(0,150));
@@ -16391,7 +16394,8 @@ async function orchestrateOpp(opp) {
       system: 'HGI senior capture intelligence analyst. Always search the web for agency facts, incumbents, budgets. Never guess. Cite sources.',
       messages: [{ role: 'user', content: 'Capture intelligence brief for HGI.\n\nOPP: ' + opp.title + '\nAGENCY: ' + (opp.agency || '') + '\nSTATE: ' + (opp.state || 'LA') + '\nOPI: ' + opp.opi_score + '\nSCOPE:\n' + (scopeAnalysis || '').slice(0, 1500) + '\nFINANCIAL:\n' + (finAnalysis || '').slice(0, 1500) + '\n' + kbContext.slice(0, 1500) + '\n\nORGANISM INTELLIGENCE (existing competitor data, contacts, relationships, incumbent info, budget cycles, regulatory context, outcome lessons, cross-opp patterns):\n' + orchSlice + '\n\nUse the organism intelligence above as your STARTING POINT — do not duplicate what the organism already knows. Search the web to FILL GAPS and verify/update existing intelligence. Provide:\n1. AGENCY PROFILE — budget, leadership, procurement patterns. Cross-reference agency profiles above.\n2. COMPETITIVE LANDSCAPE — START with the competitor data above, then add new findings. Who will bid? What are their real weaknesses HGI can exploit?\n3. HGI WIN STRATEGY — 3 differentiators mapped to eval criteria. Use relationship data above to identify insider advantages.\n4. GHOST LANGUAGE — specific themes that highlight competitor weaknesses without naming them (based on the weaknesses data above)\n5. RED FLAGS\n6. 48-HOUR ACTION PLAN — use role titles only, never names\n7. RISKS & CHALLENGES — honest assessment' }]
     });
-    trackCost('orchestrator_research', 'claude-sonnet-4-6', researchResp.usage);
+    var researchWs = countWebSearches(researchResp);
+    trackCost('orchestrator_research', 'claude-sonnet-4-6', researchResp.usage, { web_searches: researchWs, endpoint: 'orchestrator_research', metadata: { opportunity_id: oppId } });
     var researchText = (researchResp.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('\n');
     if (researchText.length > 100) {
       await supabase.from('opportunities').update({ research_brief: researchText, last_updated: new Date().toISOString() }).eq('id', oppId);
