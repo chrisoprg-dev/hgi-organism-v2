@@ -374,6 +374,118 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (url === '/api/cost' || url.startsWith('/api/cost?')) {
+      try {
+        var capParam = parseFloat(new URL(req.url, 'http://x').searchParams.get('cap')) || 5;
+        var nowMs = Date.now();
+        // CT (CST/CDT) today-midnight in UTC ms — DST-safe via Intl
+        var ctParts = {};
+        new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'America/Chicago',
+          year: 'numeric', month: '2-digit', day: '2-digit',
+          hour: '2-digit', minute: '2-digit', second: '2-digit',
+          hourCycle: 'h23'
+        }).formatToParts(new Date(nowMs)).forEach(function(part) { ctParts[part.type] = part.value; });
+        var ctOffsetMs = Date.UTC(+ctParts.year, +ctParts.month - 1, +ctParts.day, +ctParts.hour, +ctParts.minute, +ctParts.second) - nowMs;
+        var ctMidnightMs = Date.UTC(+ctParts.year, +ctParts.month - 1, +ctParts.day, 0, 0, 0) - ctOffsetMs;
+        var ms_1h  = nowMs - 60 * 60 * 1000;
+        var ms_24h = nowMs - 24 * 60 * 60 * 1000;
+        var ms_7d  = nowMs - 7 * 24 * 60 * 60 * 1000;
+        var ms_30d = nowMs - 30 * 24 * 60 * 60 * 1000;
+
+        var qr = await supabase.from('api_cost_log')
+          .select('ts,source_system,endpoint,agent,model,input_tokens,output_tokens,web_searches,total_cost_usd,opportunity_id,status')
+          .gte('ts', new Date(ms_30d).toISOString())
+          .order('ts', { ascending: false })
+          .limit(100000);
+        if (qr.error) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'query_failed', message: qr.error.message }));
+          return;
+        }
+        var rows = qr.data || [];
+
+        var summary = {
+          today_usd: 0, hour_usd: 0, last_24h_usd: 0, last_7d_usd: 0, last_30d_usd: 0,
+          total_calls_today: 0, total_web_searches_today: 0,
+          daily_cap_usd: capParam, cap_status: 'OK'
+        };
+        var bySrc = {}, byEnd = {}, byAgent = {}, byModel = {};
+        for (var ci = 0; ci < rows.length; ci++) {
+          var r = rows[ci];
+          var c = Number(r.total_cost_usd) || 0;
+          var ws = Number(r.web_searches) || 0;
+          var inT = Number(r.input_tokens) || 0;
+          var outT = Number(r.output_tokens) || 0;
+          var ts = new Date(r.ts).getTime();
+          if (ts >= ctMidnightMs) {
+            summary.today_usd += c;
+            summary.total_calls_today += 1;
+            summary.total_web_searches_today += ws;
+            var src = r.source_system || 'unknown';
+            var ep  = r.endpoint || '(none)';
+            var ag  = r.agent || '(none)';
+            var md  = r.model || 'unknown';
+            if (!bySrc[src])   bySrc[src]   = { calls: 0, cost_usd: 0 };
+            if (!byEnd[ep])    byEnd[ep]    = { calls: 0, cost_usd: 0 };
+            if (!byAgent[ag])  byAgent[ag]  = { calls: 0, cost_usd: 0, input_tokens: 0, output_tokens: 0, web_searches: 0 };
+            if (!byModel[md])  byModel[md]  = { calls: 0, cost_usd: 0 };
+            bySrc[src].calls++;   bySrc[src].cost_usd += c;
+            byEnd[ep].calls++;    byEnd[ep].cost_usd += c;
+            byAgent[ag].calls++;  byAgent[ag].cost_usd += c;
+            byAgent[ag].input_tokens += inT;
+            byAgent[ag].output_tokens += outT;
+            byAgent[ag].web_searches += ws;
+            byModel[md].calls++;  byModel[md].cost_usd += c;
+          }
+          if (ts >= ms_1h)  summary.hour_usd     += c;
+          if (ts >= ms_24h) summary.last_24h_usd += c;
+          if (ts >= ms_7d)  summary.last_7d_usd  += c;
+          summary.last_30d_usd += c;
+        }
+        function rndCost(x) { return Math.round(x * 10000) / 10000; }
+        summary.today_usd = rndCost(summary.today_usd);
+        summary.hour_usd = rndCost(summary.hour_usd);
+        summary.last_24h_usd = rndCost(summary.last_24h_usd);
+        summary.last_7d_usd = rndCost(summary.last_7d_usd);
+        summary.last_30d_usd = rndCost(summary.last_30d_usd);
+        if (summary.today_usd >= capParam) summary.cap_status = 'OVER_CAP';
+        else if (summary.today_usd >= capParam * 0.8) summary.cap_status = 'NEAR_CAP';
+        function toCostArr(o, keyName) {
+          var arr = [];
+          for (var k in o) {
+            var entry = { calls: o[k].calls, cost_usd: rndCost(o[k].cost_usd) };
+            entry[keyName] = k;
+            if (o[k].input_tokens !== undefined) {
+              entry.input_tokens = o[k].input_tokens;
+              entry.output_tokens = o[k].output_tokens;
+              entry.web_searches = o[k].web_searches;
+            }
+            arr.push(entry);
+          }
+          arr.sort(function(a, b) { return b.cost_usd - a.cost_usd; });
+          return arr;
+        }
+        var as_of_cst = new Date(nowMs).toLocaleString('en-US', { timeZone: 'America/Chicago' }) + ' CT';
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          summary: summary,
+          by_source_system: toCostArr(bySrc, 'source_system'),
+          by_endpoint: toCostArr(byEnd, 'endpoint'),
+          by_agent: toCostArr(byAgent, 'agent'),
+          by_model: toCostArr(byModel, 'model'),
+          recent_calls: rows.slice(0, 50),
+          as_of_cst: as_of_cst,
+          rows_scanned: rows.length
+        }));
+      } catch (ce) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'cost_endpoint_failed', message: String(ce.message || ce).slice(0, 300) }));
+      }
+      return;
+    }
+
     if (url === '/api/trigger') {
       log('SMART TRIGGER via /api/trigger — only changed/new opps');
       res.writeHead(200, { 'Content-Type': 'application/json' });
