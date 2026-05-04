@@ -15003,7 +15003,13 @@ async function agentHunting(state, trigger) {
         var samBatch = sd.opportunitiesData || [];
         sourceCounts.sam_gov = (sourceCounts.sam_gov || 0) + samBatch.length;
         samBatch.forEach(function(o) {
-          var _samCand = { title: o.title, solicitation_number: o.opportunityId || '' };
+          // S155B: SAM.gov v2 actually returns `noticeId` (not `opportunityId`) and
+          // `solicitationNumber`. Field-name bug killed federal funnel since ~Apr 11
+          // (24+ days, zero records ingested). solicitationNumber is the stable ID
+          // for dedup; noticeId backs the source URL. Description field doesn't
+          // exist on the search endpoint — synthesize from type/setaside/NAICS/sol#.
+          var _stableId = o.solicitationNumber || o.noticeId || '';
+          var _samCand = { title: o.title, solicitation_number: _stableId };
           if (o.title && !isDupe(_samCand)) {
             var _setAside = o.typeOfSetAsideDescription || 'No set-aside';
             var _noticeType = o.type || '?';
@@ -15011,10 +15017,10 @@ async function agentHunting(state, trigger) {
               title: o.title,
               agency: o.fullParentPathName || 'Federal',
               source: 'sam_gov',
-              source_url: 'https://sam.gov/opp/' + o.opportunityId,
-              description: '[' + _noticeType + '] [Set-aside: ' + _setAside + '] [NAICS: ' + samNAICS[sni] + '] ' + (o.description || '').slice(0, 400),
+              source_url: 'https://sam.gov/opp/' + (o.noticeId || ''),
+              description: '[' + _noticeType + '] [Set-aside: ' + _setAside + '] [NAICS: ' + samNAICS[sni] + '] [Sol#: ' + (o.solicitationNumber || 'n/a') + '] [Posted: ' + (o.postedDate || '?') + ']',
               due_date: o.responseDeadLine || null,
-              solicitation_number: o.opportunityId || null
+              solicitation_number: _stableId || null
             });
           }
         });
@@ -15023,6 +15029,24 @@ async function agentHunting(state, trigger) {
   }
   if (!('sam_gov' in sourceCounts)) sourceCounts.sam_gov = 0;
   log('HUNTING: SAM.gov found ' + sourceCounts.sam_gov + ' results across ' + samNAICS.length + ' NAICS codes (Sources Sought + Solicitations)');
+
+  // S155B FEDERAL FUNNEL MONITOR: write SAM.gov hunter snapshot to organism_memory.
+  // Without this, silent failures (24-day blackout pre-S155B) leave no trace.
+  try {
+    var _samPushed = newOpps.filter(function(o) { return o.source === 'sam_gov'; }).length;
+    var _samStatus = (sourceCounts.sam_gov > 0 && _samPushed === 0) ? 'SILENT_DEDUP_WIPEOUT'
+                   : (sourceCounts.sam_gov === 0) ? 'EMPTY_RESPONSE'
+                   : 'OK';
+    await supabase.from('organism_memory').insert({
+      id: 'fed-hunter-' + Date.now() + '-sam',
+      agent: 'federal_funnel_monitor',
+      observation: 'SAM.gov: ' + sourceCounts.sam_gov + ' raw -> ' + _samPushed + ' pushed across ' + samNAICS.length + ' NAICS codes. Status: ' + _samStatus,
+      memory_type: 'system_health',
+      entity_tags: 'federal,sam_gov,health,' + _samStatus.toLowerCase(),
+      source_url: null, confidence: 'high', status: 'scratch',
+      created_at: new Date().toISOString()
+    });
+  } catch (memErr) { log('SAM funnel monitor write: ' + memErr.message); }
 
 
   // S152: OpenFEMA disaster declarations REMOVED from agentHunting.
@@ -15100,12 +15124,15 @@ async function agentHunting(state, trigger) {
         var pcHits = (pcD.data && pcD.data.oppHits) ? pcD.data.oppHits : [];
         for (var pi = 0; pi < pcHits.length; pi++) {
           var pc = pcHits[pi];
-          var _pcCand = { title: pc.oppTitle, solicitation_number: pc.number || '' };
-          if (pc.oppTitle && !isDupe(_pcCand)) {
+          // S155B: Grants.gov v2 returns `title` and `agency` (not `oppTitle`/`agencyName`).
+          // No `synopsis` on the search endpoint — synthesize from cfdaList + dates.
+          var _pcCand = { title: pc.title, solicitation_number: pc.number || '' };
+          if (pc.title && !isDupe(_pcCand)) {
             newOpps.push({
-              title: pc.oppTitle, agency: pc.agencyName || 'Federal',
+              title: pc.title, agency: pc.agency || 'Federal',
               source: 'grants_gov', source_url: 'https://grants.gov/search-grants?oppNumber=' + (pc.number || ''),
-              description: '[PROCUREMENT CONTRACT] ' + (pc.synopsis || '').slice(0, 280) +
+              description: '[PROCUREMENT CONTRACT] CFDA: ' + ((pc.cfdaList || []).join(',') || 'n/a') +
+                ' | Opens: ' + (pc.openDate || '?') + ' | Closes: ' + (pc.closeDate || '?') +
                 (pc.oppStatus === 'forecasted' ? ' [FORECASTED]' : ''),
               due_date: pc.closeDate || null, vertical: 'grant',
               solicitation_number: pc.number || null
@@ -15133,12 +15160,14 @@ async function agentHunting(state, trigger) {
           var bHits = (bD.data && bD.data.oppHits) ? bD.data.oppHits : [];
           for (var bi = 0; bi < bHits.length; bi++) {
             var bo = bHits[bi];
-            var _boCand = { title: bo.oppTitle, solicitation_number: bo.number || '' };
-            if (bo.oppTitle && !isDupe(_boCand)) {
+            // S155B: Same field-name fix as Track A.
+            var _boCand = { title: bo.title, solicitation_number: bo.number || '' };
+            if (bo.title && !isDupe(_boCand)) {
               newOpps.push({
-                title: bo.oppTitle, agency: bo.agencyName || 'Federal',
+                title: bo.title, agency: bo.agency || 'Federal',
                 source: 'grants_gov', source_url: 'https://grants.gov/search-grants?oppNumber=' + (bo.number || ''),
-                description: (bo.synopsis || '').slice(0, 300) +
+                description: '[' + grantsKw[gk] + '] CFDA: ' + ((bo.cfdaList || []).join(',') || 'n/a') +
+                  ' | Opens: ' + (bo.openDate || '?') + ' | Closes: ' + (bo.closeDate || '?') +
                   (bo.oppStatus === 'forecasted' ? ' [FORECASTED]' : ''),
                 due_date: bo.closeDate || null, vertical: 'grant',
                 solicitation_number: bo.number || null
@@ -15153,6 +15182,23 @@ async function agentHunting(state, trigger) {
     log('HUNTING: Grants.gov found ' + grantsHits + ' results (PC track + ' + grantsKw.length + ' vertical keywords)');
   } catch (e) { log('HUNTING Grants.gov err: ' + (e.message||'').slice(0,80)); }
   if (!('grants_gov' in sourceCounts)) sourceCounts.grants_gov = 0;
+
+  // S155B FEDERAL FUNNEL MONITOR: same pattern for grants.gov.
+  try {
+    var _grPushed = newOpps.filter(function(o) { return o.source === 'grants_gov'; }).length;
+    var _grStatus = (sourceCounts.grants_gov > 0 && _grPushed === 0) ? 'SILENT_DEDUP_WIPEOUT'
+                  : (sourceCounts.grants_gov === 0) ? 'EMPTY_RESPONSE'
+                  : 'OK';
+    await supabase.from('organism_memory').insert({
+      id: 'fed-hunter-' + Date.now() + '-grants',
+      agent: 'federal_funnel_monitor',
+      observation: 'Grants.gov: ' + sourceCounts.grants_gov + ' raw -> ' + _grPushed + ' pushed (Track A PC + Track B keyword). Status: ' + _grStatus,
+      memory_type: 'system_health',
+      entity_tags: 'federal,grants_gov,health,' + _grStatus.toLowerCase(),
+      source_url: null, confidence: 'high', status: 'scratch',
+      created_at: new Date().toISOString()
+    });
+  } catch (memErr) { log('Grants funnel monitor write: ' + memErr.message); }
 
   // === Federal Register DISABLED Session 107 ===
   // Produced 36 results/run, 0 qualified ever. Every result scored FILTER by Haiku.
