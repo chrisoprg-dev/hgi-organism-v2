@@ -3317,12 +3317,15 @@ function App(){
   var st3=useState([]),notifs=st3[0],setNotifs=st3[1];
   var st4=useState(false),bellOpen=st4[0],setBellOpen=st4[1];
   var st5=useState(null),health=st5[0],setHealth=st5[1];
+  var st6=useState(null),cost=st6[0],setCost=st6[1];
 
   useEffect(function(){
     fetch('/health').then(function(r){return r.json()}).then(setHealth).catch(function(){});
     fetch('/api/notify').then(function(r){return r.json()}).then(function(d){setNotifs(Array.isArray(d.notifications)?d.notifications:Array.isArray(d)?d:[])}).catch(function(){});
+    fetch('/api/cost').then(function(r){return r.json()}).then(setCost).catch(function(){});
     var iv=setInterval(function(){
       fetch('/api/notify').then(function(r){return r.json()}).then(function(d){setNotifs(Array.isArray(d.notifications)?d.notifications:Array.isArray(d)?d:[])}).catch(function(){});
+      fetch('/api/cost').then(function(r){return r.json()}).then(setCost).catch(function(){});
     },60000);
     return function(){clearInterval(iv)};
   },[]);
@@ -3420,6 +3423,20 @@ function App(){
           e('span',{onClick:function(){setSidebarOpen(!sidebarOpen)},style:{cursor:'pointer',fontSize:18,color:TEXT_D}},'☰'),
           e('span',{style:{fontWeight:'bold',color:TEXT,fontSize:14}},moduleLabel),
           health?e('span',{style:{fontSize:10,color:health.status==='alive'?GREEN:RED}},'● '+(health.status==='alive'?'ALIVE':'OFFLINE')):null
+        ),
+        // Cost widget (S155)
+        e('div',{style:{display:'flex',alignItems:'center',gap:12}},
+          cost?e('span',{
+            title:'Hour: $'+(cost.summary.hour_usd||0).toFixed(4)+'\nLast 24h: $'+(cost.summary.last_24h_usd||0).toFixed(2)+'\nLast 7d: $'+(cost.summary.last_7d_usd||0).toFixed(2)+'\nLast 30d: $'+(cost.summary.last_30d_usd||0).toFixed(2)+'\nWeb searches today: '+(cost.summary.total_web_searches_today||0)+'\nDaily cap: $'+(cost.summary.daily_cap_usd||0)+' ('+(cost.summary.cap_status||'OK')+')\nAs of: '+(cost.as_of_cst||'')+'\nClick to view full breakdown',
+            onClick:function(){window.open('/api/cost','_blank')},
+            style:{
+              cursor:'pointer',fontSize:11,fontFamily:'ui-monospace,monospace',padding:'4px 10px',borderRadius:4,
+              border:'1px solid '+(cost.summary.cap_status==='OVER_CAP'?RED:cost.summary.cap_status==='NEAR_CAP'?ORANGE:GREEN),
+              color:(cost.summary.cap_status==='OVER_CAP'?RED:cost.summary.cap_status==='NEAR_CAP'?ORANGE:GREEN),
+              background:'transparent'
+            }
+          },'$'+(cost.summary.today_usd||0).toFixed(2)+' today · '+(cost.summary.total_calls_today||0)+' calls'):
+          e('span',{style:{fontSize:11,color:TEXT_D,fontFamily:'ui-monospace,monospace'}},'$… loading')
         ),
         // Notification bell
         e('div',{style:{position:'relative'}},
