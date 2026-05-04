@@ -5044,6 +5044,26 @@ if (url === '/api/update-opportunity' && req.method === 'POST') {
   return;
 }
 
+// === S154 Fix 5: AUTO-EXPIRE DRY RUN — /api/auto-expire-dry-run ===
+// GET: previews which opps the safe-expire sweep would close, without writing.
+// POST with {confirm:true}: actually runs the live sweep (same code path as cron).
+if (url === '/api/auto-expire-dry-run' || url === '/api/auto-expire') {
+  var aeBody = '';
+  req.on('data', function(c) { aeBody += c; });
+  req.on('end', async function() {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    try {
+      var live = false;
+      if (req.method === 'POST') {
+        try { var p = JSON.parse(aeBody || '{}'); live = p.confirm === true; } catch(e) {}
+      }
+      var result = await autoExpireOpportunities(!live);
+      res.end(JSON.stringify({ success: true, mode: live ? 'LIVE' : 'DRY_RUN', result: result }, null, 2));
+    } catch (e) { res.end(JSON.stringify({ error: e.message })); }
+  });
+  return;
+}
+
 // === UPDATE STAGE — /api/update-stage ===
 if (url === '/api/update-stage' && req.method === 'POST') {
   var body = '';
@@ -14051,6 +14071,171 @@ async function recomputeMethodologyCorrelation() {
   return { success: true, briefs_scanned: res.data.length, briefs_updated: updated };
 }
 
+// =============================================================================
+// S154 Fix 5: SAFE AUTO-EXPIRE
+// -----------------------------------------------------------------------------
+// Daily sweep that closes opportunities whose deadline has clearly passed.
+// HARD PROTECTIONS (all must hold for an opp to be expired):
+//   1. stage NOT IN ('pursuing','proposal','submitted')
+//   2. proposal_content length <= 5000 chars
+//   3. NO organism_memory observation contains addendum/extension/extended/amended/postponed
+//   4. due_date parses to a real Date AND is more than 7 days past today
+// If ANY protection fails, the opp is left active and a skip reason is logged.
+// All actions are reversible: status flips to 'inactive', stage to 'auto_expired',
+// last_updated stamped — `last_updated > 'YYYY-MM-DD HH:MM'` recovers the set.
+// =============================================================================
+
+// parseDeadline: tolerant date parser handling the formats observed in V2 pipeline.
+// Returns a Date object if parseable, otherwise null. NEVER throws.
+function parseDeadline(raw) {
+  if (!raw) return null;
+  if (raw instanceof Date) return isNaN(raw.getTime()) ? null : raw;
+  var s = String(raw).trim();
+  if (!s) return null;
+
+  // Format 1: ISO date or datetime (most common in V2)
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    var d1 = new Date(s);
+    if (!isNaN(d1.getTime())) return d1;
+  }
+
+  // Format 2: DD-Mon-YYYY HH:MM:SS [AM/PM] [TZ]
+  var m2 = s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?/i);
+  if (m2) {
+    var monMap = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11 };
+    var monIdx = monMap[m2[2].toLowerCase().slice(0,3)];
+    if (monIdx !== undefined) {
+      var hh = m2[4] ? parseInt(m2[4], 10) : 0;
+      var mm = m2[5] ? parseInt(m2[5], 10) : 0;
+      var ss = m2[6] ? parseInt(m2[6], 10) : 0;
+      if (m2[7] && m2[7].toUpperCase() === 'PM' && hh < 12) hh += 12;
+      if (m2[7] && m2[7].toUpperCase() === 'AM' && hh === 12) hh = 0;
+      var d2 = new Date(Date.UTC(parseInt(m2[3],10), monIdx, parseInt(m2[1],10), hh, mm, ss));
+      if (!isNaN(d2.getTime())) return d2;
+    }
+  }
+
+  // Format 3: [Day, ]Month DD, YYYY [@ HH:MM AM/PM]
+  var m3 = s.match(/(?:[A-Za-z]+,\s*)?([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})(?:\s*[@\sat]+\s*(\d{1,2}):(\d{2})\s*(AM|PM)?)?/i);
+  if (m3) {
+    var monMap3 = { january:0,february:1,march:2,april:3,may:4,june:5,july:6,august:7,september:8,october:9,november:10,december:11 };
+    var monIdx3 = monMap3[m3[1].toLowerCase()];
+    if (monIdx3 !== undefined) {
+      var hh3 = m3[4] ? parseInt(m3[4], 10) : 0;
+      var mm3 = m3[5] ? parseInt(m3[5], 10) : 0;
+      if (m3[6] && m3[6].toUpperCase() === 'PM' && hh3 < 12) hh3 += 12;
+      if (m3[6] && m3[6].toUpperCase() === 'AM' && hh3 === 12) hh3 = 0;
+      var d3 = new Date(Date.UTC(parseInt(m3[3],10), monIdx3, parseInt(m3[2],10), hh3, mm3, 0));
+      if (!isNaN(d3.getTime())) return d3;
+    }
+  }
+
+  // Format 4: native Date parse fallback (catches some odd cases)
+  var d4 = new Date(s);
+  if (!isNaN(d4.getTime()) && d4.getFullYear() > 2000 && d4.getFullYear() < 2100) return d4;
+
+  return null;
+}
+
+// autoExpireOpportunities: scan active pipeline, expire only those that pass all
+// hard protection checks. Returns a structured summary for logging.
+// dryRun=true previews what would happen without modifying any rows.
+async function autoExpireOpportunities(dryRun) {
+  log('AUTO-EXPIRE: starting safe sweep' + (dryRun ? ' [DRY RUN]' : '') + '...');
+  var summary = { dry_run: !!dryRun, scanned: 0, expired: 0, skipped: 0, skip_reasons: {}, expired_titles: [], would_expire: [] };
+  try {
+    var EXPIRE_GRACE_DAYS = 7;
+    var PROPOSAL_PROTECT_CHARS = 5000;
+    var PROTECTED_STAGES = ['pursuing','proposal','submitted'];
+    var nowMs = Date.now();
+    var graceMs = EXPIRE_GRACE_DAYS * 24 * 60 * 60 * 1000;
+
+    var res = await supabase.from('opportunities')
+      .select('id,title,stage,due_date,proposal_content,status')
+      .eq('status', 'active')
+      .limit(500);
+    if (!res.data) { log('AUTO-EXPIRE: query returned no data'); return summary; }
+    summary.scanned = res.data.length;
+
+    for (var i = 0; i < res.data.length; i++) {
+      var opp = res.data[i];
+      var skip = null;
+
+      if (PROTECTED_STAGES.indexOf((opp.stage || '').toLowerCase()) >= 0) skip = 'stage_protected';
+      if (!skip && opp.proposal_content && String(opp.proposal_content).length > PROPOSAL_PROTECT_CHARS) skip = 'proposal_drafted';
+      var dl = !skip ? parseDeadline(opp.due_date) : null;
+      if (!skip && !dl) skip = 'no_parseable_deadline';
+      if (!skip && dl && (nowMs - dl.getTime()) <= graceMs) skip = 'within_grace_or_future';
+
+      if (!skip) {
+        try {
+          var memRes = await supabase.from('organism_memory')
+            .select('observation,memory_type')
+            .eq('opportunity_id', opp.id)
+            .limit(50);
+          var hasExtension = (memRes.data || []).some(function(m) {
+            var t = String(m.observation || '').toLowerCase();
+            return t.indexOf('addendum') >= 0 || t.indexOf('extension') >= 0 ||
+                   t.indexOf('extended') >= 0 || t.indexOf('amended deadline') >= 0 ||
+                   t.indexOf('postponed') >= 0 || t.indexOf('deadline pushed') >= 0;
+          });
+          if (hasExtension) skip = 'extension_memory';
+        } catch (memErr) {
+          skip = 'memory_check_failed';
+        }
+      }
+
+      if (skip) {
+        summary.skipped++;
+        summary.skip_reasons[skip] = (summary.skip_reasons[skip] || 0) + 1;
+        continue;
+      }
+
+      // Dry-run: record what WOULD be expired but make no DB writes
+      if (dryRun) {
+        summary.would_expire.push({
+          id: opp.id,
+          title: (opp.title || '').slice(0, 80),
+          stage: opp.stage,
+          due_date: opp.due_date,
+          proposal_chars: (opp.proposal_content || '').length
+        });
+        continue;
+      }
+
+      try {
+        await supabase.from('opportunities').update({
+          status: 'inactive',
+          stage: 'auto_expired',
+          last_updated: new Date().toISOString()
+        }).eq('id', opp.id);
+        summary.expired++;
+        summary.expired_titles.push((opp.title || '').slice(0, 60) + ' (due ' + opp.due_date + ')');
+        log('AUTO-EXPIRE: closed ' + (opp.title || '').slice(0,55) + ' | due:' + opp.due_date);
+      } catch (updErr) {
+        summary.skipped++;
+        summary.skip_reasons['update_failed'] = (summary.skip_reasons['update_failed'] || 0) + 1;
+      }
+    }
+
+    if (!dryRun && (summary.expired > 0 || summary.scanned > 0)) {
+      try {
+        await supabase.from('organism_memory').insert({
+          agent: 'auto_expire',
+          opportunity_id: null,
+          memory_type: 'analysis',
+          observation: 'AUTO-EXPIRE sweep: scanned=' + summary.scanned + ' expired=' + summary.expired + ' skipped=' + summary.skipped + ' reasons=' + JSON.stringify(summary.skip_reasons),
+          created_at: new Date().toISOString()
+        });
+      } catch(e) { /* non-fatal */ }
+    }
+    log('AUTO-EXPIRE: done — scanned:' + summary.scanned + ' expired:' + summary.expired + ' skipped:' + summary.skipped + (dryRun ? ' [DRY RUN — no DB writes]' : '') + ' reasons:' + JSON.stringify(summary.skip_reasons));
+  } catch (e) {
+    log('AUTO-EXPIRE: fatal — ' + (e.message||'').slice(0,200) + ' (no opportunities modified)');
+  }
+  return summary;
+}
+
 async function agentLossAnalysis(state) {
   log('LOSS ANALYSIS (S138 — real outcome pass)...');
   // Replace memo-only stub with real pass: (a) scan for opps marked 'lost' that haven't
@@ -16161,6 +16346,10 @@ async function runSession(trigger) {
   var isSkeleton = trigger.indexOf('skeleton') >= 0;
   log('=== SESSION START: ' + id + ' | trigger: ' + trigger + ' | mode: ' + (isSkeleton ? 'SKELETON (cost-control)' : 'FULL') + ' ===');
   cycleWrites.clear(); // Reset dedup tracker for new cycle
+
+  // S154 Fix 5: SAFE AUTO-EXPIRE — runs before loadState so cleaned pipeline
+  // is what hunting/dedup sees. Wrapped to never block the rest of the session.
+  try { await autoExpireOpportunities(); } catch (e) { log('AUTO-EXPIRE wrapper error (non-fatal): ' + (e.message||'').slice(0,200)); }
 
   try {
     var state = await loadState();
