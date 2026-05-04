@@ -8488,7 +8488,12 @@ async function multiSearch(queries) {
 async function loadState() {
   log('Loading system state...');
   var results = await Promise.all([
-    supabase.from('opportunities').select('*').eq('status', 'active').order('opi_score', { ascending: false }).limit(15),
+    // S153 dedup-scope fix: pipeline is read by isDupe() in agentHunting to detect
+    // re-discovered opportunities. The prior limit(15) hid 100+ opps from dedup,
+    // letting duplicates accumulate every cron cycle. Broadened to 500 active opps —
+    // dedup now sees the real pipeline. Stats and counts also become accurate.
+    // 500 is a safety cap; if pipeline ever exceeds this, increase or paginate.
+    supabase.from('opportunities').select('*').eq('status', 'active').order('opi_score', { ascending: false }).limit(500),
     supabase.from('organism_memory').select('*').neq('memory_type', 'decision_point').order('created_at', { ascending: false }).limit(1000),
     supabase.from('competitive_intelligence').select('*').order('created_at', { ascending: false }).limit(100),
     supabase.from('relationship_graph').select('*').order('updated_at', { ascending: false }).limit(100)
@@ -13548,34 +13553,25 @@ async function agentDisasterMonitor(state) {
     } catch (e) { log('DA insert err: ' + e.message); }
     
     if (nd.pa) {
-      var oppTitle = 'DR-' + nd.disaster_number + ' ' + nd.state + ' \u2014 ' + nd.title;
-      var dupCheck = await supabase.from('opportunities').select('id').ilike('title', '%DR-' + nd.disaster_number + '%').limit(1);
-      if (!dupCheck.data || dupCheck.data.length === 0) {
-        try {
-          await supabase.from('opportunities').insert({
-            id: 'fema-dr-' + nd.disaster_number + '-' + nd.state.toLowerCase(),
-            title: oppTitle, agency: 'FEMA / ' + nd.state_full,
-            vertical: 'disaster', state: nd.state,
-            opi_score: 75, stage: 'identified', status: 'active',
-            source_url: nd.fema_url,
-            description: 'FEMA DR-' + nd.disaster_number + '. ' + nd.type + ' (' + (nd.declaration_date || '').slice(0,10) + '). Programs: ' + programs + '. Auto-discovered by organism disaster monitor.',
-            discovered_at: new Date().toISOString(), last_updated: new Date().toISOString()
-          });
-          autoIntaked++;
-          log('AUTO-INTAKE: DR-' + nd.disaster_number + ' ' + nd.state + ' added (OPI 75)');
-          // Create disaster alert notification
-          try {
-            // NOTE: hunt_runs.id is bigint auto-increment — do NOT pass a string id or the insert drops silently.
-            await supabase.from('hunt_runs').insert({
-              source: 'notify:disaster_alert',
-              status: 'completed',
-              run_at: new Date().toISOString(),
-              opportunities_found: 1,
-              notes: JSON.stringify({ title: 'DR-' + nd.disaster_number + ' ' + nd.state + ': ' + nd.title, message: 'New PA disaster declared. Auto-intaked at OPI 75. Generate capture package at /api/disaster-response.', priority: 'high', read: false, disaster_name: nd.title, state: nd.state, fema_number: nd.disaster_number })
-            });
-          } catch (ne) { log('Notify err: ' + ne.message); }
-        } catch (e) { log('Auto-intake err: ' + e.message); }
-      }
+      // S153: FEMA disaster declarations are intelligence, not procurement opportunities.
+      // The declaration itself is a federal action — actual contracting RFPs surface
+      // 3-18 months later from state/local agencies. Capturing declarations as
+      // opportunities polluted the high-OPI tier and would have caused auto-fire to
+      // generate proposals against events with no client and no RFP.
+      // Intelligence persists in disaster_alerts (line 13532). Notification still fires
+      // for high-priority awareness. No row is written to opportunities.
+      try {
+        // NOTE: hunt_runs.id is bigint auto-increment — do NOT pass a string id or the insert drops silently.
+        await supabase.from('hunt_runs').insert({
+          source: 'notify:disaster_alert',
+          status: 'completed',
+          run_at: new Date().toISOString(),
+          opportunities_found: 0,
+          notes: JSON.stringify({ title: 'DR-' + nd.disaster_number + ' ' + nd.state + ': ' + nd.title, message: 'New PA disaster declared. Captured as intelligence in disaster_alerts. Watch for follow-on state/local PA management RFPs in 60-90 days. Generate capture package at /api/disaster-response.', priority: 'high', read: false, disaster_name: nd.title, state: nd.state, fema_number: nd.disaster_number })
+        });
+        autoIntaked++;
+        log('DECLARATION LOGGED: DR-' + nd.disaster_number + ' ' + nd.state + ' (intelligence only, no opportunity row)');
+      } catch (ne) { log('Notify err: ' + ne.message); }
     }
   }
   
@@ -13583,9 +13579,9 @@ async function agentDisasterMonitor(state) {
   newDisasters.forEach(function(d) {
     summary += '  DR-' + d.disaster_number + ' ' + d.state + ': ' + d.title + ' (' + d.type + ') Programs: ' + ((d.pa?'PA ':'')+(d.ia?'IA ':'')+(d.hm?'HM':'')) + '\\n';
   });
-  if (autoIntaked > 0) summary += 'AUTO-INTAKE: ' + autoIntaked + ' PA disasters \u2192 pipeline (OPI 75)\\n';
+  if (autoIntaked > 0) summary += 'DECLARATIONS LOGGED: ' + autoIntaked + ' PA disasters captured in disaster_alerts (intelligence layer, no opportunity rows)\\n';
   
-  await storeMemory('disaster_monitor', null, 'disaster,fema,auto_intake', summary, 'analysis', 'fema.gov', 'high');
+  await storeMemory('disaster_monitor', null, 'disaster,fema,intelligence', summary, 'analysis', 'fema.gov', 'high');
   return { agent: 'disaster_monitor', opp: 'system', chars: summary.length, new_disasters: newDisasters.length, auto_intaked: autoIntaked };
 }
 
