@@ -34,17 +34,70 @@ var LOG_MAX = 500;
 // === COST TRACKING (Session 95) ===
 var costLog = [];
 var webSearchCount = 0; // Session 105: track web searches ($10/1000)
+// S154: Verified current Anthropic rates (May 4 2026 web-confirmed): Sonnet 4.6 $3/$15,
+// Haiku 4.5 $1/$5, Opus 4.6/4.7 $5/$25 per million tokens. Prior Haiku rate was 4x undercount.
 var PRICING = {
   'claude-sonnet-4-6': { in_per_tok: 0.000003, out_per_tok: 0.000015 },
   'claude-sonnet-4-20250514': { in_per_tok: 0.000003, out_per_tok: 0.000015 },
-  'claude-haiku-4-5-20251001': { in_per_tok: 0.00000025, out_per_tok: 0.00000125 },
-  'claude-opus-4-6': { in_per_tok: 0.000005, out_per_tok: 0.000025 }
+  'claude-haiku-4-5-20251001': { in_per_tok: 0.000001, out_per_tok: 0.000005 },
+  'claude-opus-4-6': { in_per_tok: 0.000005, out_per_tok: 0.000025 },
+  'claude-opus-4-7': { in_per_tok: 0.000005, out_per_tok: 0.000025 }
 };
-function trackCost(agent, model, usage) {
+var WEB_SEARCH_USD_PER_CALL = 0.01; // S154: $10/1000 web_search tool invocations
+
+// S154: countWebSearches — counts web_search tool invocations in any anthropic.messages.create
+// response, including direct calls that bypass claudeCall(). Caller passes the count to trackCost
+// via the extra.web_searches field so per-call cost rows include tool fees.
+function countWebSearches(response) {
+  if (!response || !response.content || !response.content.length) return 0;
+  var n = 0;
+  for (var i = 0; i < response.content.length; i++) {
+    var b = response.content[i];
+    if (b && (b.type === 'server_tool_use' || b.type === 'web_search_tool_result')) n++;
+  }
+  return n;
+}
+
+// S154: trackCost extended.
+// (1) Accepts optional `extra` param: { web_searches, endpoint, request_id, opportunity_id, status, error_message, metadata }.
+// (2) Includes web_search tool fees ($0.01/call) in the cost calculation.
+// (3) Writes a per-call row to api_cost_log (fire-and-forget, async, never blocks).
+// (4) Increments webSearchCount centrally so direct anthropic.messages.create() calls
+//     (not just claudeCall()) get their searches counted.
+// Backward-compatible: existing 3-arg trackCost(agent, model, usage) calls still work
+// — extra defaults to {}, web_searches=0, endpoint=null, etc.
+function trackCost(agent, model, usage, extra) {
   if (!usage) return;
+  extra = extra || {};
   var p = PRICING[model] || PRICING['claude-haiku-4-5-20251001'];
-  var cost = (usage.input_tokens || 0) * p.in_per_tok + (usage.output_tokens || 0) * p.out_per_tok;
-  costLog.push({ agent: agent, model: model, input_tokens: usage.input_tokens || 0, output_tokens: usage.output_tokens || 0, cost_usd: cost, ts: new Date().toISOString() });
+  var inTok = usage.input_tokens || 0;
+  var outTok = usage.output_tokens || 0;
+  var ws = extra.web_searches || 0;
+  var tokenCost = inTok * p.in_per_tok + outTok * p.out_per_tok;
+  var toolCost = ws * WEB_SEARCH_USD_PER_CALL;
+  var totalCost = tokenCost + toolCost;
+  costLog.push({ agent: agent, model: model, input_tokens: inTok, output_tokens: outTok, cost_usd: totalCost, ts: new Date().toISOString() });
+  if (ws > 0) webSearchCount += ws;
+  // Per-call row to unified ledger. Failure does not break the run.
+  try {
+    supabase.from('api_cost_log').insert({
+      source_system: 'v2',
+      endpoint: extra.endpoint || null,
+      agent: agent || null,
+      model: model || 'unknown',
+      input_tokens: inTok,
+      output_tokens: outTok,
+      web_searches: ws,
+      token_cost_usd: tokenCost,
+      tool_cost_usd: toolCost,
+      total_cost_usd: totalCost,
+      request_id: extra.request_id || null,
+      opportunity_id: extra.opportunity_id || null,
+      status: extra.status || 'ok',
+      error_message: extra.error_message || null,
+      metadata: extra.metadata || null
+    }).then(function(){}, function(_e){ /* non-blocking */ });
+  } catch(_pe) { /* non-blocking */ }
 }
 
 // SESSION 107: Periodic cost flush — every 5 min, flush accumulated cost to hunt_runs
@@ -8470,8 +8523,8 @@ async function claudeCall(system, prompt, maxTokens, opts) {
   }
 
   var response = await anthropic.messages.create(params);
-  trackCost(opts.agent || system.slice(0, 40), model, response.usage);
-  if (useSearch) { var wsHits = (response.content || []).filter(function(b) { return b.type === 'server_tool_use' || b.type === 'web_search_tool_result'; }).length; webSearchCount += Math.max(wsHits, 1); }
+  var wsHits = useSearch ? countWebSearches(response) : 0;
+  trackCost(opts.agent || system.slice(0, 40), model, response.usage, { web_searches: wsHits, endpoint: opts.endpoint || null });
   var texts = [];
   for (var i = 0; i < (response.content || []).length; i++) {
     if (response.content[i].type === 'text') texts.push(response.content[i].text);
@@ -10103,7 +10156,8 @@ async function agentCompetitorBriefResearcher(params, opts) {
         system: researchSystem,
         messages: [{ role: 'user', content: 'COMPETITOR: ' + competitorName + '\nRESEARCH FOCUS: ' + rq.focus + '\n\n' + rq.query + '\n\nReturn ONLY the JSON array of source extracts.' }]
       });
-      trackCost('competitor_research', 'claude-sonnet-4-6', rResp.usage);
+      var rWs = countWebSearches(rResp);
+      trackCost('competitor_research', 'claude-sonnet-4-6', rResp.usage, { web_searches: rWs, endpoint: '/api/competitor-brief-batch', metadata: { competitor: competitorName, research_pass: ri } });
       addCost('claude-sonnet-4-6', rResp.usage);
     } catch (re) {
       log(log_prefix + ' research pass ' + ri + ' error: ' + (re.message||'').slice(0,150));
@@ -10195,7 +10249,7 @@ async function agentCompetitorBriefResearcher(params, opts) {
       system: briefSystem,
       messages: [{ role: 'user', content: briefUser }]
     });
-    trackCost('competitor_brief', 'claude-opus-4-6', briefResp.usage);
+    trackCost('competitor_brief', 'claude-opus-4-6', briefResp.usage, { endpoint: '/api/competitor-brief-batch', metadata: { competitor: competitorName, phase: 'generation' } });
     addCost('claude-opus-4-6', briefResp.usage);
   } catch (bge) {
     log(log_prefix + ' brief generation error: ' + (bge.message||'').slice(0,200));
