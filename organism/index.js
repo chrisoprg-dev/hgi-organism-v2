@@ -14549,17 +14549,30 @@ async function huntCentralBidding(isCron) {
             await page.goto(prioritized[ei].url, { waitUntil: 'networkidle2', timeout: 12000 });
             var bids = await page.evaluate(function(entityName) {
               var found = [];
+              // S154 Fix 3a: capture richer listing context — original parent text is often
+              // just the title repeated. Pull the listing block AND its next 2 siblings,
+              // which is where CB typically renders bid description + closing date.
+              function richContext(anchor) {
+                var box = anchor.closest('.listing_boxes') || anchor.closest('tr') || anchor.closest('div') || anchor.parentElement;
+                if (!box) return '';
+                var pieces = [(box.textContent || '').replace(/\s+/g,' ').trim()];
+                var sib = box.nextElementSibling;
+                for (var k = 0; k < 2 && sib; k++) {
+                  pieces.push((sib.textContent || '').replace(/\s+/g,' ').trim());
+                  sib = sib.nextElementSibling;
+                }
+                return pieces.join(' | ').slice(0, 800);
+              }
               // CB uses listing_boxes for bid display
               document.querySelectorAll('.listing_boxes_title a, .listing_boxes a[href*=".html"], a[href*="rfpc"], a[href*="rfp-"]').forEach(function(a) {
                 var text = (a.textContent || '').trim();
                 var href = a.getAttribute('href') || '';
                 if (text.length > 15 && !href.includes('Category/') && !href.includes('login')) {
-                  var parent = a.closest('.listing_boxes') || a.closest('tr') || a.closest('div') || a.parentElement;
                   found.push({
                     title: text.slice(0, 200),
                     url: href.startsWith('http') ? href : 'https://www.centralauctionhouse.com/' + href.replace(/^\//, ''),
                     agency: entityName,
-                    context: parent ? (parent.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 300) : ''
+                    context: richContext(a)
                   });
                 }
               });
@@ -14569,7 +14582,7 @@ async function huntCentralBidding(isCron) {
                 var href = a.getAttribute('href') || '';
                 if (text.length > 20 && href.includes('.html') && !href.includes('Category/') && !href.includes('login') && !href.includes('register') && !href.includes('rfp.php')) {
                   if (!found.some(function(f) { return f.url === href || f.title === text; })) {
-                    found.push({ title: text.slice(0, 200), url: href.startsWith('http') ? href : 'https://www.centralauctionhouse.com/' + href.replace(/^\//, ''), agency: entityName, context: '' });
+                    found.push({ title: text.slice(0, 200), url: href.startsWith('http') ? href : 'https://www.centralauctionhouse.com/' + href.replace(/^\//, ''), agency: entityName, context: richContext(a) });
                   }
                 }
               });
@@ -14578,7 +14591,41 @@ async function huntCentralBidding(isCron) {
 
             bids.forEach(function(b) {
               if (b.title && b.title.length > 15) {
-                results.push({ title: b.title, agency: b.agency, source: 'centralbidding_v2', source_url: b.url, description: (b.context || b.title).slice(0, 500), due_date: null });
+                // S154 Fix 3a: extract due_date from listing context text via regex sweep.
+                // CB listings commonly show closing dates in patterns like:
+                //   "Bid Due: 05/15/2026", "Closing Date 5/15/2026 2:00 PM",
+                //   "Due: May 15, 2026", "Bids Due 15-May-2026 14:00"
+                // Result is normalized to ISO YYYY-MM-DD if confident; else null.
+                var ctx = b.context || '';
+                var dueDate = null;
+                var dueLabelMatch = ctx.match(/(?:bids?\s*(?:due|close|closing)|closing\s*date|due\s*date|deadline|due\s*by|\bdue)[:\s]+([A-Za-z0-9\/\-,\.\s:]{6,40})/i);
+                if (dueLabelMatch) {
+                  var raw = dueLabelMatch[1].trim();
+                  // Try MM/DD/YYYY first (common on CB)
+                  var mdy = raw.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+                  if (mdy) {
+                    var pad = function(n){return ('0'+n).slice(-2);};
+                    dueDate = mdy[3] + '-' + pad(mdy[1]) + '-' + pad(mdy[2]);
+                  } else if (typeof parseDeadline === 'function') {
+                    // Reuse the tolerant parser added in Fix 5
+                    var pd = parseDeadline(raw);
+                    if (pd) dueDate = pd.toISOString().slice(0,10);
+                  }
+                }
+                // Strip the title from the start of context to make a real description.
+                var desc = ctx;
+                if (b.title && desc.toLowerCase().indexOf(b.title.toLowerCase()) === 0) {
+                  desc = desc.slice(b.title.length).trim();
+                }
+                if (!desc) desc = b.title;
+                results.push({
+                  title: b.title,
+                  agency: b.agency,
+                  source: 'centralbidding_v2',
+                  source_url: b.url,
+                  description: desc.slice(0, 800),
+                  due_date: dueDate
+                });
                 stateResults++;
               }
             });
@@ -14989,8 +15036,16 @@ async function agentHunting(state, trigger) {
     var webResults = await multiSearch(webHuntQueries);
     if (webResults && webResults.length > 100) {
       // Parse web search results for opportunity-like entries
+      // S154 Fix 3b: prompt now requires (a) substantive 2-4 sentence descriptions
+      // pulled from snippet text, not 1-sentence stubs; (b) explicit date-extraction
+      // discipline — Haiku must scan snippet text for any date-like pattern (MM/DD/YYYY,
+      // YYYY-MM-DD, "Month DD, YYYY", "DD-Mon-YYYY") and return null only when truly absent.
       var webScorePrompt = HGI + '\n\nYou are parsing web search results to find REAL procurement opportunities (RFPs, RFQs, SOQs, ITBs) for HGI across ALL 8 verticals. Extract only REAL opportunities with titles, agencies, due dates, and URLs. Ignore news articles, old awards, and irrelevant results.\n\nWEB SEARCH RESULTS:\n' + webResults.slice(0, 6000) +
-        '\n\nReturn JSON array only: [{"title":"...","agency":"...","due_date":"YYYY-MM-DD or null","source_url":"...","vertical":"disaster|tpa|workforce|housing|construction|grant|program_admin|tax_appeals","description":"1 sentence"}]\nReturn [] if no real opportunities found. Maximum 10 entries.';
+        '\n\n=== EXTRACTION DISCIPLINE (S154) ===\n' +
+        'description: 2-4 substantive sentences quoting/paraphrasing the snippet. Include scope, agency, what services are sought, and any value/duration signals present. NOT a 1-sentence stub. If the snippet only has the title, set description to the title PLUS any agency/location context, no shorter than 100 chars.\n' +
+        'due_date: scan the FULL snippet text for date patterns: MM/DD/YYYY, YYYY-MM-DD, "Month DD, YYYY", "DD-Mon-YYYY", "Day, Month DD, YYYY". Return YYYY-MM-DD format. Only return null if no date appears in the snippet. Do NOT guess. If a date appears but is in the past (before today), still return it — the scoring layer will mark it expired downstream.\n' +
+        'agency: extract from the snippet, not the URL. Common patterns: "City of X", "X Parish", "X County", "X School Board", "X Housing Authority", "Department of X". If multiple, pick the procuring agency.\n\n' +
+        'Return JSON array only: [{"title":"...","agency":"...","due_date":"YYYY-MM-DD or null","source_url":"...","vertical":"disaster|tpa|workforce|housing|construction|grant|program_admin|tax_appeals","description":"2-4 sentences"}]\nReturn [] if no real opportunities found. Maximum 10 entries.';
       var webResp = await anthropic.messages.create({
         model: 'claude-haiku-4-5-20251001', max_tokens: 2000,
         messages: [{ role: 'user', content: webScorePrompt }]
