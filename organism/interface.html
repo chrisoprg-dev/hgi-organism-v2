@@ -88,6 +88,80 @@ function Badge(p){
   return e('span',{style:{display:'inline-block',padding:'2px 8px',borderRadius:10,fontSize:10,fontWeight:'bold',letterSpacing:1,textTransform:'uppercase',background:c+'22',color:c,border:'1px solid '+c+'44'}},p.children);
 }
 
+// F-066/F-093a/F-123 (S158 close T2B-finish): rich quality badge for a section_* JSONB blob.
+// Surfaces quality_score (color-coded), tier1_all_met gate, canon_violations count, evidence anchor
+// count, word count. Shape matches the section_* JSONB keys verified S158 (35 keys per section,
+// content lives in section_text).
+function SectionQualityBadge(p){
+  var m = p.meta;
+  if(!m) return null;
+  var qs = m.quality_score;
+  var t1 = m.tier1_all_met;
+  var canon = (m.canon_violations || []).length;
+  var qsColor = (qs == null) ? null : (qs >= 90 ? GREEN : qs >= 70 ? GOLD : RED);
+  return e('span',{style:{display:'inline-flex',gap:6,fontSize:10,marginLeft:8,alignItems:'center',flexWrap:'wrap'}},
+    qsColor ? e('span',{key:'qs',style:{padding:'2px 8px',borderRadius:10,fontWeight:'bold',background:qsColor+'22',color:qsColor,border:'1px solid '+qsColor+'44'}}, 'Q'+qs) : null,
+    t1 === true ? e('span',{key:'t1y',style:{padding:'2px 8px',borderRadius:10,background:GREEN+'22',color:GREEN,border:'1px solid '+GREEN+'44',fontWeight:'bold'}},'TIER1 ✓') : null,
+    t1 === false ? e('span',{key:'t1n',style:{padding:'2px 8px',borderRadius:10,background:RED+'22',color:RED,border:'1px solid '+RED+'44',fontWeight:'bold'}},'TIER1 ✗ ('+m.tier1_met_count+'/'+m.tier1_total+')') : null,
+    canon > 0 ? e('span',{key:'cn',style:{padding:'2px 8px',borderRadius:10,background:RED+'22',color:RED,border:'1px solid '+RED+'44',fontWeight:'bold'}}, '✗ '+canon+' CANON') : null,
+    m.evidence_count != null ? e('span',{key:'ev',style:{color:TEXT_D}}, m.evidence_count+' anchors') : null,
+    m.word_count != null ? e('span',{key:'wc',style:{color:TEXT_D}}, m.word_count+'w') : null
+  );
+}
+
+// F-066/F-093a/F-123: top-level proposal quality panel — all 7 sections at a glance.
+// Reads section_* JSONB from a record (det or pl.selected). Empty sections render with placeholder.
+// Click handler optional — used to scroll/expand to that section in workspace mode.
+function ProposalQualityPanel(p){
+  var det = p.det || {};
+  var sectionDefs = [
+    {key:'cover_letter', label:'COVER LETTER'},
+    {key:'executive_summary', label:'EXECUTIVE SUMMARY'},
+    {key:'technical_approach', label:'TECHNICAL APPROACH'},
+    {key:'past_performance', label:'PAST PERFORMANCE'},
+    {key:'staffing', label:'STAFFING'},
+    {key:'pricing_narrative', label:'PRICING'},
+    {key:'qa_compliance', label:'QA & COMPLIANCE'}
+  ];
+  // Detect any section_* JSONB present
+  var anyPresent = sectionDefs.some(function(s){
+    var b = det['section_'+s.key];
+    return b && (typeof b === 'string' ? b : (b.section_text || ''));
+  });
+  if(!anyPresent) return null;
+  return e('div',{style:{marginBottom:12,padding:12,background:BG2,borderLeft:'3px solid '+CYAN,borderRadius:4}},
+    e('div',{style:{fontSize:11,color:CYAN,letterSpacing:2,marginBottom:8,fontWeight:'bold'}},'PROPOSAL QUALITY TELEMETRY (organism section_* JSONB)'),
+    sectionDefs.map(function(s){
+      var blob = det['section_'+s.key];
+      if(!blob) return e('div',{key:s.key,style:{padding:'4px 0',display:'flex',alignItems:'center',justifyContent:'space-between',fontSize:11,color:TEXT_D}},
+        e('span',null, s.label),
+        e('span',{style:{fontStyle:'italic'}}, '— not generated —')
+      );
+      var text = (typeof blob === 'string') ? blob : (blob.section_text || '');
+      var meta = (typeof blob === 'object') ? {
+        quality_score: blob.quality_score,
+        tier1_all_met: blob.tier1_all_met,
+        tier1_met_count: blob.tier1_met_count,
+        tier1_total: blob.tier1_total,
+        canon_violations: blob.canon_violations || [],
+        evidence_count: (blob.evidence_anchors||[]).length,
+        word_count: blob.word_count
+      } : null;
+      var status = (typeof blob === 'object') ? (blob.status || '') : '';
+      var len = text ? text.length : 0;
+      return e('div',{key:s.key,style:{padding:'6px 0',borderBottom:'1px solid '+BORDER,display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,flexWrap:'wrap',fontSize:11}},
+        e('div',{style:{display:'flex',alignItems:'center',gap:8,minWidth:0,flex:1}},
+          e('strong',{style:{color:GOLD,minWidth:155}}, s.label),
+          status === 'published' ? e('span',{style:{color:GREEN,fontSize:9}}, '● published') :
+            status ? e('span',{style:{color:TEXT_D,fontSize:9}}, '● '+status) : null,
+          len > 0 ? e('span',{style:{color:TEXT_D,fontSize:10}}, (len/1000).toFixed(1)+'K chars') : null
+        ),
+        meta ? e(SectionQualityBadge,{meta:meta}) : null
+      );
+    })
+  );
+}
+
 function Card(p){
   return e('div',{style:Object.assign({background:BG2,border:'1px solid '+BORDER,borderRadius:6,padding:16,marginBottom:12},p.style||{}),onClick:p.onClick},p.children);
 }
@@ -340,8 +414,25 @@ function Dashboard(p){
     if(m<1)return'just now';if(m<60)return m+'m ago';if(h<24)return h+'h ago';return Math.floor(h/24)+'d ago';
   }
 
-  // Navigation targets per stat
-  var statNavMap={ACTIVE:'discovery','TIER 1':'tracker',PURSUING:'tracker','IN PROPOSAL':'proposal',SUBMITTED:'tracker',STALE:'tracker','NEW TODAY':'discovery','AVG OPI':'tracker',MEMORIES:'chat'};
+  // Navigation targets per stat — F-093b (S158 close T2B-finish): each entry is {mod, filter} so
+  // tile clicks can pre-apply filter context in the destination module. PipelineTracker reads
+  // store.get('pendingFilter') on mount and clears it after applying.
+  var statNavMap={
+    ACTIVE:       {mod:'discovery', filter:null},
+    'TIER 1':     {mod:'tracker',   filter:{opi:'high'}},
+    PURSUING:     {mod:'tracker',   filter:{stage:'pursuing'}},
+    'IN PROPOSAL':{mod:'tracker',   filter:{stage:'proposal'}},
+    SUBMITTED:    {mod:'tracker',   filter:{stage:'submitted'}},
+    STALE:        {mod:'tracker',   filter:null},
+    'NEW TODAY':  {mod:'discovery', filter:null},
+    'AVG OPI':    {mod:'tracker',   filter:null},
+    MEMORIES:     {mod:'chat',      filter:null}
+  };
+  function clickStat(label){
+    var t=statNavMap[label]||{mod:'tracker',filter:null};
+    if(t.filter) store.set('pendingFilter',t.filter);
+    p.nav(t.mod);
+  }
   var stats=[
     {label:'ACTIVE',value:activeCount,color:CYAN},
     {label:'TIER 1',value:tier1,color:GREEN},
@@ -410,7 +501,7 @@ function Dashboard(p){
     // === STATS GRID (spec item 2 — all clickable) ===
     e('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(100px,1fr))',gap:8,margin:'12px 0'}},
       stats.map(function(s){
-        return e('div',{key:s.label,onClick:function(){p.nav(statNavMap[s.label]||'tracker')},style:{
+        return e('div',{key:s.label,onClick:function(){clickStat(s.label)},style:{
           background:BG2,border:'1px solid '+BORDER,borderRadius:4,padding:'10px 6px',textAlign:'center',cursor:'pointer',borderBottom:'3px solid '+s.color
         }},
           e('div',{style:{fontSize:22,fontWeight:'bold',color:s.color}},s.value),
@@ -695,6 +786,18 @@ function PipelineTracker(p){
   var stE2=useState('winnability'),expIntelTab=stE2[0],setExpIntelTab=stE2[1];
   var stE3=useState({}),oppMemories=stE3[0],setOppMemories=stE3[1]; // keyed by opp id
   var stE4=useState({}),oppDetails=stE4[0],setOppDetails=stE4[1]; // keyed by opp id
+
+  // F-093b (S158 close T2B-finish): consume pendingFilter set by Dashboard tile click.
+  // One-shot — apply on mount and clear so navigating back doesn't re-apply stale intent.
+  useEffect(function(){
+    var pending=store.get('pendingFilter');
+    if(pending){
+      if(pending.stage) setStageFilter(pending.stage);
+      if(pending.opi) setOpiFilter(pending.opi);
+      if(pending.vertical) setVertFilter(pending.vertical);
+      store.set('pendingFilter',null);
+    }
+  },[]);
 
   var pipeline=pl.pipeline||[];
   // F-116b (S158 T2A): added real DB stages — archived, declaration_tracking, no_bid, filtered.
@@ -1152,11 +1255,16 @@ function PipelineTracker(p){
 
           // ---- PROPOSAL sub-tab ----
           expSubTab==='proposal'?e('div',null,
+            // F-123 (S158 close T2B-finish): proposal quality telemetry panel — same component as
+            // ProposalEngineModule. Surfaces all 7 section_* JSONB at a glance with quality_score
+            // (color-coded), tier1_anchor_gate, canon_violations count, evidence anchor count.
+            // Renders only when at least one section_* JSONB has section_text.
+            e(ProposalQualityPanel,{det:det||{}}),
             (det.proposal_content||o.proposal_content)?e('div',null,
               e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}},
                 e(Label,{text:'PROPOSAL'}),
                 e('div',{style:{display:'flex',gap:8}},
-                  e(Btn,{onClick:function(){if(o.proposal_doc_url){window.open(o.proposal_doc_url)}else{fetch('/api/regenerate-doc?id='+encodeURIComponent(o.id),{method:'POST'});showToast('No doc yet — generating now (~35s). Click DOWNLOAD again shortly.')}},small:true,variant:'primary'},o.proposal_doc_url?'DOWNLOAD DOC':'GENERATE DOC'),
+                  e(Btn,{onClick:function(){var docUrl=det.proposal_doc_url||o.proposal_doc_url;if(docUrl){window.open(docUrl)}else{fetch('/api/regenerate-doc?id='+encodeURIComponent(o.id),{method:'POST'});showToast('No doc yet — generating now (~35s). Click DOWNLOAD again shortly.')}},small:true,variant:'primary'},(det.proposal_doc_url||o.proposal_doc_url)?'DOWNLOAD DOC':'GENERATE DOC'),
                   e(Btn,{onClick:function(){fetch('/api/regenerate-doc?id='+encodeURIComponent(o.id),{method:'POST'});showToast('Doc regen started (~35s, ~$0).')},small:true,variant:'ghost'},'REGEN DOC'),
                   e(Btn,{onClick:function(){if(!confirm('Run full proposal pipeline?\n\n~$5-10 cost, ~10 min runtime.\nRe-runs all 19 stages including Opus calls.\n\nProceed?'))return;fetch('/api/produce-proposal?id='+encodeURIComponent(o.id),{method:'POST'}).then(function(){showToast('Proposal pipeline started — ~10 min.')})},small:true,variant:'ghost'},'RUN PROPOSAL')
                 )
@@ -2386,6 +2494,12 @@ function ProposalEngineModule(p){
         e(Btn,{onClick:exportDocx,variant:'ghost'},'📄 Export .docx'),
         e(Btn,{onClick:function(){setWsView(wsView==='full'?'sections':'full')},variant:'ghost'},wsView==='full'?'📑 Section View':'📄 Full View')
       ),
+      // F-066/F-093a (S158 close T2B-finish): proposal quality telemetry panel — surfaces all 7
+      // section_* JSONB at a glance with quality_score (color-coded), tier1_anchor_gate status,
+      // canon_violations count, evidence anchor count, word count. The legacy text-split workspace
+      // view below remains unchanged (it shows the assembled proposal_content); this panel shows
+      // the SOURCE quality metadata that drove the assembly.
+      e(ProposalQualityPanel,{det:pl.selected||{}}),
       (function(){
         var content=pl.selected&&pl.selected.proposal_content?pl.selected.proposal_content:(Object.keys(sections).length>0?sectionList.filter(function(s){return sections[s]}).map(function(s){return '## '+s+'\n\n'+sections[s]}).join('\n\n'):'');
         if(!content)return e(Card,{style:{background:BG3}},e('div',{style:{color:TEXT_D,fontSize:12,textAlign:'center',padding:24}},'No proposal content yet. Use "Produce Full Proposal" or generate sections individually.'));
