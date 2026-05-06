@@ -251,9 +251,14 @@ const server = http.createServer(async (req, res) => {
       _plQ = _plQ.range(_plOffset, _plOffset + _plLimit - 1);
       const r = await _plQ;
       // Add lightweight flags for completeness indicators without sending full text
-      if (r.data) {
-        var _plFullQ = supabase.from('opportunities').select('id,capture_action,scope_analysis,research_brief,staffing_plan,financial_analysis,proposal_content');
-        if (_plStatus !== 'all') _plFullQ = _plFullQ.eq('status', _plStatus);
+      // F-042 (S158 T2A): bound the second query to records actually being returned (.in id list),
+      // not all-status rows. With ?limit=200 + status=all, the prior code pulled rich text for ~200+
+      // rows just to compute booleans — wasted bandwidth. Now O(returned_rows) instead of O(table_rows).
+      if (r.data && r.data.length > 0) {
+        var _plIds = r.data.map(function(o){ return o.id; });
+        var _plFullQ = supabase.from('opportunities')
+          .select('id,capture_action,scope_analysis,research_brief,staffing_plan,financial_analysis,proposal_content')
+          .in('id', _plIds);
         var fullR = await _plFullQ;
         var fullMap = {};
         (fullR.data || []).forEach(function(o) { fullMap[o.id] = o; });
