@@ -3571,52 +3571,86 @@ function DiscoverySignals(){
 }
 
 function DiscoveryRetrieve(p){
+  // S160 T3D F-199 frontend rewrite: the prior URL input was dead theatre — backend
+  // /api/fetch-rfp reads ?id= from query string and ignored the POST body URL field.
+  // After T3D-1 SQL migration removed the 56 pending_rfp orphans, the meaningful
+  // "missing RFP" set is: status='active' AND rfp_document_retrieved=false. This UI
+  // now surfaces that list (no cap), sorted by OPI desc, with per-row Fetch Now and
+  // top-level Fetch All Missing. Closure marker: T3D F-199 missing-rfp surfaced.
   var pl=p.pl;
-  var st1=useState(''),url=st1[0],setUrl=st1[1];
-  var st2=useState(null),result=st2[0],setResult=st2[1];
-  var st3=useState(false),loading=st3[0],setLoading=st3[1];
-  var st4=useState(null),selOpp=st4[0],setSelOpp=st4[1];
+  var st1=useState(null),lastResult=st1[0],setLastResult=st1[1];
+  var st2=useState(null),loadingId=st2[0],setLoadingId=st2[1];
+  var st3=useState(false),bulkLoading=st3[0],setBulkLoading=st3[1];
 
-  function fetchDoc(){
-    if(!url)return;
-    setLoading(true);setResult(null);
-    fetch('/api/fetch-rfp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:url,opportunity_id:selOpp})}).then(function(r){return r.json()}).then(function(d){
-      setResult(d);setLoading(false);
-    }).catch(function(err){setResult({error:err.message});setLoading(false)});
+  function fetchOne(opp){
+    setLoadingId(opp.id);setLastResult(null);
+    fetch('/api/fetch-rfp?id='+encodeURIComponent(opp.id),{method:'GET'}).then(function(r){return r.json()}).then(function(d){
+      setLastResult({id:opp.id, title:opp.title, status:d.status||'?', detail:d.opp||d.error||''});
+      setLoadingId(null);
+      // Refresh pipeline after ~5s to pick up the rfp_document_retrieved flip
+      setTimeout(function(){ pl&&pl.refresh&&pl.refresh() },5000);
+    }).catch(function(err){setLastResult({id:opp.id, title:opp.title, status:'error', detail:err.message});setLoadingId(null)});
+  }
+  function fetchAll(){
+    setBulkLoading(true);setLastResult(null);
+    fetch('/api/fetch-rfp',{method:'GET'}).then(function(r){return r.json()}).then(function(d){
+      setLastResult({id:'bulk', title:'All missing RFPs', status:d.status||'started', detail:d.mode==='all'?'Bulk autoRetrieveRFPs running in background — will refresh shortly':''});
+      setBulkLoading(false);
+      setTimeout(function(){ pl&&pl.refresh&&pl.refresh() },10000);
+    }).catch(function(err){setLastResult({id:'bulk', title:'All missing', status:'error', detail:err.message});setBulkLoading(false)});
   }
 
   var pipeline=pl&&pl.pipeline?pl.pipeline:[];
+  // Missing-RFP set: active records that haven't successfully retrieved a doc yet.
+  // Sort by OPI desc so highest-value rescues surface first. T3D F-199 missing-rfp surfaced.
   var noDoc=pipeline.filter(function(o){return o.status==='active'&&!o.rfp_document_retrieved});
+  noDoc.sort(function(a,b){ return (b.opi_score||0)-(a.opi_score||0); });
+  var withSourceUrl = noDoc.filter(function(o){return o.source_url}).length;
 
   return e('div',null,
-    e(Label,{text:'RETRIEVE & ANALYZE DOCUMENTS'}),
-    e('div',{style:{display:'flex',gap:8,marginBottom:12}},
-      e(Input,{value:url,onChange:function(ev){setUrl(ev.target.value)},placeholder:'Paste RFP/solicitation URL...',style:{flex:1}}),
-      e(Btn,{onClick:fetchDoc,disabled:loading||!url},loading?'Fetching...':'Retrieve')
+    e(Label,{text:'MISSING RFP DOCUMENTS'}),
+    e('div',{style:{fontSize:11,color:TEXT_D,marginBottom:8}},
+      noDoc.length+' active records without a retrieved RFP document'+
+      (withSourceUrl<noDoc.length?(' ('+(noDoc.length-withSourceUrl)+' have no source_url and cannot be auto-fetched)'):'')+'.'
     ),
-    pipeline.length>0?e('div',{style:{marginBottom:12}},
-      e(Label,{text:'LINK TO OPPORTUNITY (OPTIONAL)'}),
-      e('select',{value:selOpp||'',onChange:function(ev){setSelOpp(ev.target.value||null)},style:{width:'100%',padding:8,background:BG3,border:'1px solid '+BORDER,color:'#fff',borderRadius:4,fontSize:12}},
-        e('option',{value:''},'— Select opportunity —'),
-        pipeline.map(function(o){return e('option',{key:o.id,value:o.id},(o.title||'').substring(0,60)+' (OPI '+(o.opi_score||0)+')')})
-      )
+    // Top-level bulk action
+    e('div',{style:{display:'flex',gap:8,marginBottom:12,alignItems:'center'}},
+      e(Btn,{onClick:fetchAll,disabled:bulkLoading||noDoc.length===0},
+        bulkLoading?'Triggering...':'Fetch All Missing ('+noDoc.length+')'
+      ),
+      e('span',{style:{fontSize:11,color:TEXT_D}},'Triggers backend autoRetrieveRFPs in background')
+    ),
+    // Result echo
+    lastResult?e(Card,{style:{borderLeft:'3px solid '+(lastResult.status==='error'?RED:GREEN),marginBottom:12}},
+      e('div',{style:{fontSize:12,color:lastResult.status==='error'?RED:GREEN}},
+        lastResult.title+' — '+lastResult.status
+      ),
+      lastResult.detail?e('div',{style:{fontSize:11,color:TEXT_D,marginTop:4}},lastResult.detail):null
     ):null,
-    result?e(Card,{style:{borderLeft:'3px solid '+(result.error?RED:GREEN)}},
-      result.error?e('div',{style:{color:RED,fontSize:12}},result.error):
-      e('div',null,
-        e('div',{style:{color:GREEN,fontSize:12,marginBottom:4}},result.message||'Document retrieved successfully'),
-        result.text_length?e('div',{style:{fontSize:11,color:TEXT_D}},'Extracted '+result.text_length+' characters'):null
-      )
-    ):null,
-    noDoc.length>0?e('div',{style:{marginTop:12}},
-      e(Label,{text:'OPPORTUNITIES MISSING DOCUMENTS ('+noDoc.length+')'}),
-      noDoc.slice(0,5).map(function(o){
-        return e('div',{key:o.id,style:{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:'1px solid '+BORDER,fontSize:11}},
-          e('span',null,o.title?(o.title).substring(0,45):'Untitled',' · ',o.agency||''),
-          e('span',null,e(OPIBadge,{score:o.opi_score||0}),o.source_url?e(Btn,{onClick:function(){setUrl(o.source_url);setSelOpp(o.id)},variant:'ghost',small:true},'Use Source URL'):null)
+    // Records list — no .slice() cap; uses LongScroll if list grows
+    noDoc.length>0?e(LongScroll,{maxHeight:400,style:{border:'1px solid '+BORDER,borderRadius:4,padding:8}},
+      noDoc.map(function(o,i){
+        var canFetch = !!o.source_url;
+        return e('div',{key:o.id,style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 0',borderBottom:i<noDoc.length-1?'1px solid '+BORDER:'none',fontSize:11}},
+          e('div',{style:{flex:1,minWidth:0}},
+            e('div',{style:{display:'flex',alignItems:'center',gap:6}},
+              e(OPIBadge,{score:o.opi_score||0}),
+              e('span',{style:{fontWeight:'bold',color:TEXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},(o.title||'Untitled').substring(0,55))
+            ),
+            e('div',{style:{fontSize:10,color:TEXT_D,marginTop:2}},
+              (o.agency||'?')+' · '+(o.stage||'?')+' · '+(o.source_url?'has URL':'NO URL — manual rescue only')
+            )
+          ),
+          e('div',{style:{flexShrink:0,marginLeft:8}},
+            canFetch?e(Btn,{onClick:function(){fetchOne(o)},disabled:loadingId===o.id,small:true},
+              loadingId===o.id?'...':'Fetch Now'
+            ):e('span',{style:{fontSize:10,color:TEXT_D,fontStyle:'italic'}},'no url')
+          )
         );
       })
-    ):null
+    ):e('div',{style:{fontSize:11,color:TEXT_D,padding:'12px 0',textAlign:'center'}},
+      'All active opportunities have retrieved documents.'
+    )
   );
 }
 
