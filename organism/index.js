@@ -16254,6 +16254,14 @@ async function extractRFPRequirements(rfpText, opp) {
 async function orchestrateOpp(opp) {
   var oppId = opp.id;
   var d = String.fromCharCode(36);
+  // F-016 (S157 T1A): skip orchestration on RFPs > 30 days past due (prevents wasted Anthropic spend)
+  if (opp.due_date) {
+    var _f016Due = Date.parse(opp.due_date);
+    if (!isNaN(_f016Due) && _f016Due < Date.now() - (30 * 24 * 60 * 60 * 1000)) {
+      log('ORCHESTRATE F-016 SKIP: ' + (opp.title || opp.id || '?').slice(0, 60) + ' (due_date ' + opp.due_date + ' > 30d past)');
+      return { steps: [], errors: ['skipped_expired_rfp'] };
+    }
+  }
   log('ORCHESTRATE: Starting 5-step analysis for ' + (opp.title || '').slice(0, 50));
 
   var rfpContent = (opp.rfp_text || '').slice(0, 40000);
@@ -16650,6 +16658,23 @@ async function orchestrateOpp(opp) {
 // ============================================================
 // RUN SESSION — The execution engine
 // ============================================================
+// F-016 (S157 T1A): Per-opp agent filter for runSession.
+// Skips opps with opi_score < 65 (pre-existing threshold) AND opps with due_date > 30 days past
+// (prevents Anthropic spend on dead RFPs — e.g., Field Adjusting Services ITN was being
+// analyzed in April 2026 with an Aug 2025 deadline). 30-day grace allows late-submitted
+// addenda or extensions on recently-expired RFPs to still get processed.
+function _f016ActiveOppsFilter(o) {
+  if ((o.opi_score || 0) < 65) return false;
+  if (o.due_date) {
+    var dueMs = Date.parse(o.due_date);
+    if (!isNaN(dueMs) && dueMs < Date.now() - (30 * 24 * 60 * 60 * 1000)) {
+      log('F-016 SKIP: ' + (o.title || o.id || '?').slice(0, 60) + ' (due_date ' + o.due_date + ' > 30d past)');
+      return false;
+    }
+  }
+  return true;
+}
+
 async function runSession(trigger) {
   var id = 'v4-' + Date.now();
   var isSkeleton = trigger.indexOf('skeleton') >= 0;
@@ -16684,7 +16709,7 @@ async function runSession(trigger) {
     log('Pipeline (' + state.pipeline.length + '):');
     state.pipeline.forEach(function(o) { log('  OPI:' + o.opi_score + ' | ' + (o.stage || '?') + ' | ' + (o.title || '').slice(0, 55)); });
 
-    var activeOpps = state.pipeline.filter(function(o) { return (o.opi_score || 0) >= 65; });
+    var activeOpps = state.pipeline.filter(_f016ActiveOppsFilter);
     var allResults = [];
     var allEvalScores = [];
     var cycleMemoryIds = [];
@@ -16693,10 +16718,10 @@ async function runSession(trigger) {
     var eventTriggeredOpps = []; // opps that need full analysis due to events
 
     // 1. HUNTING — fires first (always runs, even in skeleton)
-    try { var rH = await agentHunting(state, trigger); if (rH) { allResults.push(rH); if (rH.new_opps > 0) { newOppsFound = rH.new_opps; log('EVENT: ' + rH.new_opps + ' new opps discovered — will trigger full analysis'); var fresh = await supabase.from('opportunities').select('*').eq('status', 'active').order('opi_score', { ascending: false }).limit(15); if (fresh.data) { state.pipeline = fresh.data; activeOpps = state.pipeline.filter(function(o) { return (o.opi_score || 0) >= 65; }); } } } } catch (e) { log('Hunt error: ' + e.message); }
+    try { var rH = await agentHunting(state, trigger); if (rH) { allResults.push(rH); if (rH.new_opps > 0) { newOppsFound = rH.new_opps; log('EVENT: ' + rH.new_opps + ' new opps discovered — will trigger full analysis'); var fresh = await supabase.from('opportunities').select('*').eq('status', 'active').order('opi_score', { ascending: false }).limit(15); if (fresh.data) { state.pipeline = fresh.data; activeOpps = state.pipeline.filter(_f016ActiveOppsFilter); } } } } catch (e) { log('Hunt error: ' + e.message); }
 
     // 1.5. AUTO-RFP RETRIEVAL — always runs, tracks new retrievals
-    try { var rfpResults = await autoRetrieveRFPs(); if (rfpResults && rfpResults.length > 0) { var successfulRFPs = rfpResults.filter(function(r) { return r && r.retrieved; }); if (successfulRFPs.length > 0) { newRFPsRetrieved = successfulRFPs.length; log('EVENT: ' + successfulRFPs.length + ' new RFPs retrieved — will trigger full analysis for those opps'); successfulRFPs.forEach(function(r) { if (r && r.id) eventTriggeredOpps.push(r.id); }); } var refreshed = await supabase.from('opportunities').select('*').eq('status', 'active').order('opi_score', { ascending: false }).limit(15); if (refreshed.data) { state.pipeline = refreshed.data; activeOpps = state.pipeline.filter(function(o) { return (o.opi_score || 0) >= 65; }); } } } catch (e) { log('Auto-RFP error: ' + e.message); }
+    try { var rfpResults = await autoRetrieveRFPs(); if (rfpResults && rfpResults.length > 0) { var successfulRFPs = rfpResults.filter(function(r) { return r && r.retrieved; }); if (successfulRFPs.length > 0) { newRFPsRetrieved = successfulRFPs.length; log('EVENT: ' + successfulRFPs.length + ' new RFPs retrieved — will trigger full analysis for those opps'); successfulRFPs.forEach(function(r) { if (r && r.id) eventTriggeredOpps.push(r.id); }); } var refreshed = await supabase.from('opportunities').select('*').eq('status', 'active').order('opi_score', { ascending: false }).limit(15); if (refreshed.data) { state.pipeline = refreshed.data; activeOpps = state.pipeline.filter(_f016ActiveOppsFilter); } } } catch (e) { log('Auto-RFP error: ' + e.message); }
 
     // 2. ORCHESTRATION — Run full 5-step analysis on opps that need it
     // Triggers when: scope_analysis is NULL/empty AND rfp_text has real content
@@ -16721,7 +16746,7 @@ async function runSession(trigger) {
             allResults.push({ agent: 'orchestrator', chars: 500, opp: (needsOrch[oi].title || '').slice(0, 40), steps: orchResult.steps });
             // Refresh state after orchestration changes OPI
             var refreshOrch = await supabase.from('opportunities').select('*').eq('status', 'active').order('opi_score', { ascending: false }).limit(15);
-            if (refreshOrch.data) { state.pipeline = refreshOrch.data; activeOpps = state.pipeline.filter(function(o) { return (o.opi_score || 0) >= 65; }); }
+            if (refreshOrch.data) { state.pipeline = refreshOrch.data; activeOpps = state.pipeline.filter(_f016ActiveOppsFilter); }
           } catch(oe) { log('ORCHESTRATE error on ' + (needsOrch[oi].title || '').slice(0, 40) + ': ' + oe.message); }
         }
       }
