@@ -3715,6 +3715,42 @@ function App(){
 
   function nav(mod){setActive(mod)}
 
+  // T2C F-202+F-203 (S159 commit 4): notification bell click-to-action + mark-all-read.
+  // Backend /api/notify supports PATCH {id} to mark single notification as read; no bulk endpoint
+  // exists. markAllRead iterates unread notifs and PATCHes each (typical N is small — acceptable
+  // until volume grows; future bulk endpoint can replace without UI change).
+  function markNotifRead(id){
+    if(!id) return;
+    fetch('/api/notify',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})}).catch(function(){});
+  }
+  function clickNotif(n){
+    // Mark read in backend + locally (optimistic; refetch on next 60s poll will reconcile)
+    if(n.id) markNotifRead(n.id);
+    setNotifs(function(prev){return prev.map(function(x){return x.id===n.id?Object.assign({},x,{read:true}):x})});
+    setBellOpen(false);
+    // Navigate to opp if applicable. opportunity_id='system' means it's a system-level alert
+    // (no associated opp), in which case stay on current view.
+    if(n.opportunity_id && n.opportunity_id !== 'system'){
+      var opp=pl.pipeline.find(function(p){return p.id===n.opportunity_id});
+      // pl.select handles both full record (if in current pipeline page) and id-only stub
+      // (if opp is outside current /api/pipeline window — /api/opportunity-detail fills in the rest)
+      pl.select(opp || {id:n.opportunity_id, title:n.title||'', agency:''});
+      nav('tracker');
+    }
+  }
+  function markAllRead(){
+    notifs.filter(function(n){return !n.read}).forEach(function(n){if(n.id) markNotifRead(n.id)});
+    setNotifs(function(prev){return prev.map(function(n){return Object.assign({},n,{read:true})})});
+  }
+  function dismissNotif(ev,n){
+    ev.stopPropagation(); // don't trigger clickNotif's nav
+    if(n.id) markNotifRead(n.id);
+    // Optimistically remove from local list (server-side it's marked read, not deleted; next
+    // poll will return only unread by default behavior — but this list has both read+unread,
+    // so we just hide it locally)
+    setNotifs(function(prev){return prev.filter(function(x){return x.id!==n.id})});
+  }
+
   var modules=[
     {key:'dashboard',label:'Dashboard',icon:'⌂'},
     {key:'intake',label:'Manual Intake',icon:'⊕',badge:'NEW'},
@@ -3825,13 +3861,37 @@ function App(){
         e('div',{style:{position:'relative'}},
           e('span',{onClick:function(){setBellOpen(!bellOpen)},style:{cursor:'pointer',fontSize:20,color:GOLD}},'🔔'),
           unread>0?e('span',{style:{position:'absolute',top:-4,right:-4,background:RED,color:'#fff',fontSize:9,borderRadius:10,padding:'1px 5px',fontWeight:'bold'}},unread):null,
-          bellOpen?e('div',{style:{position:'absolute',right:0,top:32,width:320,maxHeight:400,overflowY:'auto',background:BG2,border:'1px solid '+BORDER,borderRadius:4,boxShadow:'0 4px 12px rgba(0,0,0,0.5)',zIndex:200}},
-            e('div',{style:{padding:'8px 12px',borderBottom:'1px solid '+BORDER,fontWeight:'bold',fontSize:12,color:GOLD}},'NOTIFICATIONS'),
+          bellOpen?e('div',{style:{position:'absolute',right:0,top:32,width:340,maxHeight:400,overflowY:'auto',background:BG2,border:'1px solid '+BORDER,borderRadius:4,boxShadow:'0 4px 12px rgba(0,0,0,0.5)',zIndex:200}},
+            e('div',{style:{padding:'8px 12px',borderBottom:'1px solid '+BORDER,display:'flex',justifyContent:'space-between',alignItems:'center'}},
+              e('span',{style:{fontWeight:'bold',fontSize:12,color:GOLD}},'NOTIFICATIONS'),
+              unread>0?e('span',{onClick:markAllRead,style:{cursor:'pointer',fontSize:10,color:CYAN,textDecoration:'underline'}},'Mark all read ('+unread+')'):null
+            ),
             notifs.length===0?e('div',{style:{padding:12,color:TEXT_D,fontSize:12}},'No notifications'):
             notifs.slice(0,10).map(function(n,i){
-              return e('div',{key:i,style:{padding:'8px 12px',borderBottom:'1px solid '+BORDER,fontSize:11,color:n.read?TEXT_D:TEXT}},
-                e('div',{style:{fontWeight:n.read?'normal':'bold'}},n.message||n.title||'Notification'),
-                n.timestamp?e('div',{style:{fontSize:10,color:TEXT_D,marginTop:2}},new Date(n.timestamp).toLocaleString()):null
+              // T2C F-202 (S159 commit 4): each notification is now click-to-navigate. Whole row
+              // click triggers clickNotif(n) which marks read + navigates to tracker with opp
+              // pre-selected (when opportunity_id is real). Per-notification ✕ dismiss button at
+              // right uses dismissNotif with stopPropagation so it doesn't trigger nav.
+              var isClickable=n.opportunity_id && n.opportunity_id!=='system';
+              return e('div',{key:n.id||i,onClick:function(){clickNotif(n)},style:{
+                padding:'8px 12px',borderBottom:'1px solid '+BORDER,fontSize:11,
+                color:n.read?TEXT_D:TEXT,
+                cursor:isClickable?'pointer':'default',
+                display:'flex',gap:8,alignItems:'flex-start',
+                background:'transparent'
+              },
+              onMouseEnter:isClickable?function(ev){ev.currentTarget.style.background=GOLD+'11'}:null,
+              onMouseLeave:isClickable?function(ev){ev.currentTarget.style.background='transparent'}:null
+              },
+                e('div',{style:{flex:1,minWidth:0}},
+                  e('div',{style:{fontWeight:n.read?'normal':'bold',wordBreak:'break-word'}},n.title||n.message||'Notification'),
+                  e('div',{style:{display:'flex',gap:8,marginTop:2,fontSize:10,color:TEXT_D}},
+                    n.priority?e('span',{style:{color:n.priority==='high'?RED:(n.priority==='medium'?GOLD:TEXT_D),fontWeight:'bold',textTransform:'uppercase'}},n.priority):null,
+                    n.timestamp?e('span',null,new Date(n.timestamp).toLocaleString()):null,
+                    isClickable?e('span',{style:{color:CYAN}},'→ open'):null
+                  )
+                ),
+                e('span',{onClick:function(ev){dismissNotif(ev,n)},title:'Dismiss',style:{cursor:'pointer',color:TEXT_D,fontSize:14,padding:'0 4px',flexShrink:0}},'✕')
               );
             })
           ):null
