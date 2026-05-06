@@ -401,6 +401,9 @@ function Dashboard(p){
   var st8=useState(''),timeStr=st8[0],setTimeStr=st8[1];
   var st9=useState(null),decisions=st9[0],setDecisions=st9[1];
   var st10=useState(null),executing=st10[0],setExecuting=st10[1];
+  // S160 T4B F-096b: agentDetail holds /api/agents response — per-agent recency + gap_analysis.
+  var st11=useState(null),agentDetail=st11[0],setAgentDetail=st11[1];
+  var st12=useState(false),gapOpen=st12[0],setGapOpen=st12[1];
 
   useEffect(function(){
     function loadAll(){
@@ -410,6 +413,8 @@ function Dashboard(p){
       fetch('/api/hunt-stats').then(function(r){return r.json()}).then(setHuntStats).catch(function(){});
       fetch('/api/cycle-history').then(function(r){return r.json()}).then(setCycleHist).catch(function(){});
       fetch('/api/organism-decisions').then(function(r){return r.json()}).then(setDecisions).catch(function(){});
+      // S160 T4B F-096b: registry + per-agent activity for ORGANISM STATUS dot grid coloring.
+      fetch('/api/agents').then(function(r){return r.json()}).then(setAgentDetail).catch(function(){});
     }
     loadAll();
     var iv=setInterval(loadAll,300000);
@@ -616,30 +621,120 @@ function Dashboard(p){
       })
     ):null,
 
-    // === ORGANISM STATUS (spec item 3 — agent dot grid) ===
+    // === ORGANISM STATUS — S160 T4B F-096b: dots colored by recency from /api/agents,
+    // tooltip shows last fire + 24h/7d/30d counts. Header now shows "X firing in 24h"
+    // (real ground truth) instead of static category counts. Gap_analysis surfaced
+    // below: registered_not_firing_7d (keep agents that went silent) and
+    // firing_not_registered (agents firing but not in registry — caught upstream by
+    // alias_of mapping, but still surfaced here as a safety net). T4B F-096b marker.
     e(Card,{style:{marginBottom:12}},
       e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}},
         e('div',{style:{fontSize:11,fontWeight:'bold',letterSpacing:2,color:GOLD}},'ORGANISM STATUS'),
-        e('div',{style:{display:'flex',gap:12,fontSize:11}},
-          agentLists?[
+        e('div',{style:{display:'flex',gap:12,fontSize:11,flexWrap:'wrap',justifyContent:'flex-end'}},
+          agentDetail&&agentDetail.activity?[
+            e('span',{key:'live',title:'Distinct agents that wrote organism_memory in the last 24 hours',style:{color:GREEN,cursor:'help'}},'● LIVE 24h '+(agentDetail.activity.last_24h.distinct_agents||0)),
+            e('span',{key:'wk',title:'Distinct agents that wrote organism_memory in the last 7 days',style:{color:GOLD,cursor:'help'}},'● 7d '+(agentDetail.activity.last_7d.distinct_agents||0)),
+            e('span',{key:'mo',title:'Distinct agents that wrote organism_memory in the last 30 days',style:{color:CYAN,cursor:'help'}},'● 30d '+(agentDetail.activity.last_30d.distinct_agents||0)),
+            e('span',{key:'reg',title:'agent_registry: '+(agentDetail.registry.keep_canonical_count||0)+' keep + '+((agentDetail.registry.by_status||{}).investigate||0)+' investigate',style:{color:TEXT_D,cursor:'help'}},'· reg '+((agentDetail.registry.total_canonical||0)+(agentDetail.registry.aliases||0)))
+          ]:agentLists?[
             e('span',{key:'live',style:{color:GREEN}},'● LIVE '+(agentLists.per_opp||[]).length),
             e('span',{key:'gated',style:{color:ORANGE}},'● GATED '+(agentLists.gated||[]).length),
             e('span',{key:'core',style:{color:CYAN}},'● CORE '+((agentLists.system_core||[]).length+(agentLists.system_intel||[]).length))
           ]:null
         )
       ),
-      // Agent dot grid
-      agentLists?e('div',{style:{display:'flex',flexWrap:'wrap',gap:3,marginBottom:8}},
-        (agentLists.per_opp||[]).map(function(a){return e('div',{key:a,title:a+' (per-opp)',style:{width:12,height:12,borderRadius:2,background:GREEN,cursor:'help'}})}),
-        (agentLists.gated||[]).map(function(a){return e('div',{key:a,title:a+' (gated)',style:{width:12,height:12,borderRadius:2,background:ORANGE,cursor:'help'}})}),
-        (agentLists.system_core||[]).map(function(a){return e('div',{key:a,title:a+' (system)',style:{width:12,height:12,borderRadius:2,background:CYAN,cursor:'help'}})}),
-        (agentLists.system_intel||[]).map(function(a){return e('div',{key:a,title:a+' (intel)',style:{width:12,height:12,borderRadius:2,background:'#5B9BD5',cursor:'help'}})})
-      ):null,
+      // Agent dot grid — now keyed off agentDetail.agents which has per-agent recency.
+      // Falls back to category-colored dots from agentLists if /api/agents hasn't
+      // loaded yet (preserves original behavior on first render).
+      (function(){
+        if(!agentDetail||!Array.isArray(agentDetail.agents)){
+          return agentLists?e('div',{style:{display:'flex',flexWrap:'wrap',gap:3,marginBottom:8}},
+            (agentLists.per_opp||[]).map(function(a){return e('div',{key:a,title:a+' (per-opp)',style:{width:12,height:12,borderRadius:2,background:GREEN,cursor:'help'}})}),
+            (agentLists.gated||[]).map(function(a){return e('div',{key:a,title:a+' (gated)',style:{width:12,height:12,borderRadius:2,background:ORANGE,cursor:'help'}})}),
+            (agentLists.system_core||[]).map(function(a){return e('div',{key:a,title:a+' (system)',style:{width:12,height:12,borderRadius:2,background:CYAN,cursor:'help'}})}),
+            (agentLists.system_intel||[]).map(function(a){return e('div',{key:a,title:a+' (intel)',style:{width:12,height:12,borderRadius:2,background:'#5B9BD5',cursor:'help'}})})
+          ):null;
+        }
+        // Sort: keep status first (per_opp,gated,system_core,system_intel,utility), then by 30d activity desc.
+        // Within keep: category order. Then investigate (utility) sorted by 30d activity.
+        var catOrder={per_opp:0,gated:1,system_core:2,system_intel:3,utility:4};
+        var sortedAgents=agentDetail.agents.slice().sort(function(a,b){
+          if(a.status==='keep' && b.status!=='keep') return -1;
+          if(b.status==='keep' && a.status!=='keep') return 1;
+          var ca=catOrder[a.category]==null?9:catOrder[a.category];
+          var cb=catOrder[b.category]==null?9:catOrder[b.category];
+          if(ca!==cb) return ca-cb;
+          return (b.fires_30d||0)-(a.fires_30d||0);
+        });
+        function dotColor(ag){
+          // Recency wins. Never-fired ⇒ deep gray. <48h ⇒ category color. 2-7d ⇒ orange. >7d ⇒ red.
+          var hrs=ag.hours_since_last;
+          if(hrs===null||hrs===undefined) return '#3a3a3a';
+          if(hrs<48) {
+            if(ag.category==='per_opp') return GREEN;
+            if(ag.category==='gated') return ORANGE;
+            if(ag.category==='system_core') return CYAN;
+            if(ag.category==='system_intel') return '#5B9BD5';
+            return '#888'; // utility-investigate but firing
+          }
+          if(hrs<168) return GOLD;
+          return RED;
+        }
+        function ageStr(hrs){
+          if(hrs===null||hrs===undefined) return 'never';
+          if(hrs<1) return Math.round(hrs*60)+'m';
+          if(hrs<48) return Math.round(hrs)+'h';
+          return Math.round(hrs/24)+'d';
+        }
+        return e('div',{style:{display:'flex',flexWrap:'wrap',gap:3,marginBottom:8}},
+          sortedAgents.map(function(ag){
+            var tip=ag.name+' ('+ag.category+(ag.status==='keep'?'':' · '+ag.status)+')'+
+              ' · last '+ageStr(ag.hours_since_last)+
+              ' · fires 24h/7d/30d: '+(ag.fires_24h||0)+'/'+(ag.fires_7d||0)+'/'+(ag.fires_30d||0);
+            return e('div',{key:ag.name,title:tip,style:{width:12,height:12,borderRadius:2,background:dotColor(ag),cursor:'help',
+              opacity:ag.status==='keep'?1:0.55,
+              border:ag.status==='keep'?'none':'1px dashed '+TEXT_D}});
+          })
+        );
+      })(),
+      // Gap analysis surface — surfaces what the dot grid alone can't show.
+      agentDetail&&agentDetail.gap_analysis?(function(){
+        var g=agentDetail.gap_analysis;
+        var rnf=g.registered_not_firing_7d||[];
+        var fnr=g.firing_not_registered||[];
+        var csf=g.cut_still_firing||[];
+        if(rnf.length===0 && fnr.length===0 && csf.length===0) return null;
+        return e('div',{style:{borderTop:'1px solid '+BORDER,paddingTop:6,marginBottom:6}},
+          e('div',{style:{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center',cursor:'pointer'},
+            onClick:function(){setGapOpen(!gapOpen)}},
+            e('span',{style:{fontSize:10,color:TEXT_D,letterSpacing:1}},'GAPS'),
+            rnf.length>0?e(Badge,{color:GOLD},rnf.length+' silent (keep)'):null,
+            fnr.length>0?e(Badge,{color:RED},fnr.length+' unregistered firing'):null,
+            csf.length>0?e(Badge,{color:RED},csf.length+' cut but firing'):null,
+            e('span',{style:{fontSize:10,color:TEXT_D,marginLeft:'auto'}},gapOpen?'▼':'▶')
+          ),
+          gapOpen?e('div',{style:{marginTop:6,fontSize:11,color:TEXT_D,maxHeight:150,overflowY:'auto'}},
+            rnf.length>0?e('div',{style:{marginBottom:4}},
+              e('span',{style:{color:GOLD}},'Silent (keep, 0 fires/7d): '),
+              rnf.join(', ')
+            ):null,
+            fnr.length>0?e('div',{style:{marginBottom:4}},
+              e('span',{style:{color:RED}},'Firing but not in registry: '),
+              fnr.join(', ')
+            ):null,
+            csf.length>0?e('div',{style:{marginBottom:4}},
+              e('span',{style:{color:RED}},'Cut but still firing: '),
+              csf.join(', ')
+            ):null
+          ):null
+        );
+      })():null,
       // Think Now + Last Think
       e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
         e('div',{style:{fontSize:11,color:TEXT_D}},
           lastCycle?'Last think: '+relTime(lastCycle):'No cycles recorded',
-          health?' · V'+(health.version||'').replace('V',''):''
+          health?' · V'+(health.version||'').replace('V',''):'',
+          agentDetail&&agentDetail.registry?' · src '+(sysStatus&&sysStatus.agents&&sysStatus.agents.source||'?'):''
         ),
         e(Btn,{onClick:triggerThink,disabled:thinking,small:true},thinking?'Running...':'Think Now')
       )
@@ -758,33 +853,54 @@ function Dashboard(p){
     // === TWO COLUMN: SCRAPER STATUS + QUICK START ===
     e('div',{style:{display:'grid',gridTemplateColumns:window.innerWidth<=768?'1fr':'1fr 1fr',gap:12,marginBottom:12}},
 
-      // Scraper Status (spec item 8 — enhanced with per-source cards)
+      // Scraper Status — S160 T4B F-097b frontend: backend now returns sources as
+      // {active:[{name,runs_24h,runs_7d,last_run,hours_since,found_7d,new_7d}], stale:[...]}
+      // (was strings + disabled). Render objects, color dot by recency, label "stale"
+      // for the dormant-but-not-disabled bucket. F-097b frontend close marker.
       e(Card,null,
-        e('div',{style:{fontSize:11,fontWeight:'bold',letterSpacing:2,color:GOLD,marginBottom:8}},'SCRAPER STATUS'),
-        scSources.active?scSources.active.map(function(src){
-          var key=src.replace(/[^a-z]/gi,'').toLowerCase();
-          var runs=0;
-          Object.keys(sourceMap).forEach(function(k){runs+=sourceMap[k].runs});
-          return e('div',{key:src,style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'5px 0',borderBottom:'1px solid '+BORDER,fontSize:12}},
-            e('div',{style:{display:'flex',alignItems:'center',gap:6}},
-              e('span',{style:{width:8,height:8,borderRadius:'50%',background:GREEN,display:'inline-block'}}),
-              e('span',null,src.replace(/\(.*\)/,'').trim())
+        e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}},
+          e('div',{style:{fontSize:11,fontWeight:'bold',letterSpacing:2,color:GOLD}},'SCRAPER STATUS'),
+          e('div',{style:{fontSize:10,color:TEXT_D}},'F-097b · live: hunt_runs')
+        ),
+        // Active sources (have at least 1 run in last 24h per backend filter)
+        (scSources.active && scSources.active.length>0)?scSources.active.map(function(src){
+          var name = src.name || String(src);
+          var hrs = (typeof src.hours_since==='number')?src.hours_since:null;
+          var dotColor = (hrs===null)?TEXT_D:(hrs<24?GREEN:hrs<168?GOLD:RED);
+          var ageStr = (hrs===null)?'—':(hrs<1?Math.round(hrs*60)+'m':hrs<48?Math.round(hrs)+'h':Math.round(hrs/24)+'d')+' ago';
+          var badgeColor = (hrs===null)?TEXT_D:(hrs<24?GREEN:hrs<168?GOLD:RED);
+          return e('div',{key:name,style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'5px 0',borderBottom:'1px solid '+BORDER,fontSize:12}},
+            e('div',{style:{display:'flex',alignItems:'center',gap:6,flex:1,minWidth:0}},
+              e('span',{title:'Last run '+ageStr+(src.runs_7d!=null?(' · '+src.runs_7d+' runs/7d · '+(src.found_7d||0)+' found, '+(src.new_7d||0)+' new'):''),
+                style:{width:8,height:8,borderRadius:'50%',background:dotColor,display:'inline-block',flexShrink:0,cursor:'help'}}),
+              e('span',{style:{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},name.replace(/\(.*\)/,'').trim())
             ),
-            e(Badge,{color:GREEN},'ACTIVE')
+            e('div',{style:{display:'flex',alignItems:'center',gap:6,flexShrink:0}},
+              e('span',{style:{fontSize:10,color:TEXT_D}},ageStr),
+              e(Badge,{color:badgeColor},(src.runs_24h||0)+'/24h')
+            )
           );
-        }):null,
-        scSources.disabled?scSources.disabled.map(function(src){
-          return e('div',{key:src,style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'5px 0',fontSize:12}},
-            e('div',{style:{display:'flex',alignItems:'center',gap:6}},
-              e('span',{style:{width:8,height:8,borderRadius:'50%',background:RED,display:'inline-block'}}),
-              e('span',{style:{color:TEXT_D}},src.replace(/\(.*\)/,'').trim())
+        }):e('div',{style:{fontSize:11,color:TEXT_D,padding:'5px 0'}},'No sources have run in the last 24h'),
+        // Stale sources (zero runs in last 24h but produced opps in lifetime)
+        (scSources.stale && scSources.stale.length>0)?scSources.stale.map(function(src){
+          var name = src.name || String(src);
+          var hrs = (typeof src.hours_since==='number')?src.hours_since:null;
+          var ageStr = (hrs===null)?'never':(hrs<48?Math.round(hrs)+'h':Math.round(hrs/24)+'d')+' ago';
+          return e('div',{key:'stale-'+name,style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'5px 0',borderBottom:'1px solid '+BORDER,fontSize:12}},
+            e('div',{style:{display:'flex',alignItems:'center',gap:6,flex:1,minWidth:0}},
+              e('span',{title:'Last run '+ageStr+' · stale (0 runs/24h)',
+                style:{width:8,height:8,borderRadius:'50%',background:RED,display:'inline-block',flexShrink:0,cursor:'help'}}),
+              e('span',{style:{color:TEXT_D,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},name.replace(/\(.*\)/,'').trim())
             ),
-            e(Badge,{color:RED},'DISABLED')
+            e('div',{style:{display:'flex',alignItems:'center',gap:6,flexShrink:0}},
+              e('span',{style:{fontSize:10,color:TEXT_D}},ageStr),
+              e(Badge,{color:RED},'STALE')
+            )
           );
         }):null,
         // Hunt run summary
         e('div',{style:{marginTop:8,fontSize:11,color:TEXT_D,borderTop:'1px solid '+BORDER,paddingTop:6}},
-          recentHunts.length>0?('Last hunt: '+relTime(recentHunts[0].run_at)+' · '+recentHunts.length+' runs in buffer'):
+          recentHunts.length>0?('Last hunt: '+relTime(recentHunts[0].run_at)+' · '+recentHunts.length+' runs in buffer · source: '+(scSources.source||'fallback')):
           'No recent hunt data'
         )
       ),
