@@ -681,7 +681,7 @@ if (url === '/' || url === '/dashboard' || url === '/interface' || url === '/int
 if (url.startsWith('/api/opportunity-detail')) {
   var oId = (req.url.split('?id=')[1]||'').split('&')[0];
   if (!oId) { res.writeHead(400); res.end(JSON.stringify({error:'id required'})); return; }
-  var dr = await supabase.from('opportunities').select('id,title,agency,vertical,opi_score,stage,status,due_date,estimated_value,scope_analysis,financial_analysis,research_brief,staffing_plan,capture_action,source_url,outcome,outcome_notes,rfp_text,proposal_content,proposal_complete,proposal_status,proposal_validated_at,rfp_document_retrieved,description,oral_presentation_date,award_notification_date,rfp_document_url,incumbent,why_hgi_wins,key_requirements').eq('id',oId).single();
+  var dr = await supabase.from('opportunities').select('id,title,agency,vertical,opi_score,stage,status,due_date,estimated_value,scope_analysis,financial_analysis,research_brief,staffing_plan,capture_action,source_url,outcome,outcome_notes,rfp_text,proposal_content,proposal_complete,proposal_status,proposal_validated_at,rfp_document_retrieved,description,oral_presentation_date,award_notification_date,rfp_document_url,incumbent,why_hgi_wins,key_requirements,proposal_doc_url,proposal_doc_generated_at,proposal_doc_size_bytes').eq('id',oId).single();
   res.writeHead(200, {'Content-Type':'application/json'});
   res.end(JSON.stringify(dr.data || {}));
   return;
