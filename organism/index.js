@@ -5190,12 +5190,24 @@ if (url === '/api/exec-brief') {
       },
       upcoming_deadlines: upcoming.slice(0, 5).map(function(o) {
         var d = o.due_date ? Math.ceil((new Date(o.due_date) - Date.now()) / 86400000) : null;
-        return { title: (o.title || ''), opi: o.opi_score, stage: o.stage, due: o.due_date, days_remaining: d };
+        // T2C F-106b backend (S159 commit 6): added id so the Dashboard UPCOMING DEADLINES rows
+        // can pre-select the opp via pl.select(matchedOpp) instead of falling back to title-match.
+        // Title match was the interim approach committed in S159 commit 5 (interface.html); this
+        // backend addition lets the frontend take the id-preferred path. Pre-fix (id absent) the
+        // frontend falls through to title-match against pl.pipeline — both paths coexist.
+        return { id: o.id, title: (o.title || ''), opi: o.opi_score, stage: o.stage, due: o.due_date, days_remaining: d };
       }),
       alerts: alerts,
       awaiting_award: submitted.map(function(o) { return { title: o.title, opi: o.opi_score }; }),
       recent_intel: briefMems,
-      agent_health: { active_agents: 42, version: 'V2.0-organism', last_cycle: briefMems.length > 0 ? briefMems[0].when : null }
+      agent_health: { active_agents: 29, version: 'V2.0-organism', last_cycle: briefMems.length > 0 ? briefMems[0].when : null }
+      // T2C S159 commit 6 cleanup: was active_agents:42 (stale F-091b residue — S158 fix only hit
+      // /health line 217 and /api/system-status agents.active line 4648; this third site at
+      // /api/exec-brief.agent_health.active_agents was missed). Now mirrors the 5+5+9+10=29 sum
+      // from /api/system-status. NOTE: 29 itself is a hand-maintained constant, NOT a real
+      // population census — /api/diagnostics shows ~25 distinct agents fired in last 24h with
+      // 11+ NOT in the named 29-list. T4B planned to compute all three sites from a shared
+      // registry derived from organism_memory writes (real ground truth) instead of hardcoded.
     }));
   } catch (e) { res.end(JSON.stringify({ error: e.message })); }
   return;
