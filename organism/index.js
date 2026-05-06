@@ -13809,6 +13809,34 @@ async function agentIntelligence(opp, state, cycleBrief) {
   return { agent: 'intelligence_engine', opp: opp.title, chars: out.length };
 }
 
+// S166 H8: stage advancement gate. Runs at end of per-opp orchestrate after agents
+// have written scope/financial/research/CRM/winnability. Rule (Option A, christopher-approved):
+//   identified -> qualifying  iff  OPI >= 70  AND  scope_analysis exists  AND  rfp_text >= 500 chars
+// Pairs with H5 (RFP gate on agentFinancial) — opps gated by H5 stay 'identified' until RFP arrives.
+// qualifying -> pursuing requires structured GO from winnability_agent (not yet structured) -- manual for now.
+async function maybeAdvanceStage(oppId) {
+  try {
+    var fr = await supabase.from('opportunities').select('id,title,stage,opi_score,scope_analysis,rfp_text').eq('id', oppId).single();
+    if (!fr.data) return;
+    var o = fr.data;
+    var curStage = (o.stage || 'identified').toLowerCase();
+    if (curStage !== 'identified' && curStage !== 'null' && o.stage !== null) return; // only advance from identified
+    var opi = o.opi_score || 0;
+    var hasScope = !!(o.scope_analysis && o.scope_analysis.length > 200);
+    var rfpLen = (o.rfp_text || '').length;
+    var hasRfp = rfpLen >= 500;
+    if (opi >= 70 && hasScope && hasRfp) {
+      await supabase.from('opportunities').update({ stage: 'qualifying', last_updated: new Date().toISOString() }).eq('id', oppId);
+      log('STAGE: identified -> qualifying for "' + (o.title||'').slice(0,50) + '" (OPI=' + opi + ', scope=' + (o.scope_analysis||'').length + 'c, rfp=' + rfpLen + 'c) [S166 H8]');
+      await storeMemory('stage_advancement', oppId, 'stage,advancement,qualifying',
+        'Auto-advanced identified -> qualifying. Rule: OPI>=70 AND scope_analysis>200c AND rfp_text>=500c. Actuals: OPI=' + opi + ', scope=' + (o.scope_analysis||'').length + 'c, rfp=' + rfpLen + 'c.',
+        'analysis', null, 'high');
+    } else if (opi >= 70 && (!hasScope || !hasRfp)) {
+      log('STAGE: hold identified for "' + (o.title||'').slice(0,50) + '" — OPI=' + opi + ' but scope=' + (hasScope?'Y':'N') + ', rfp=' + (hasRfp?'Y':'N'));
+    }
+  } catch (e) { log('STAGE advance err for ' + oppId + ': ' + (e.message||'').slice(0,100)); }
+}
+
 async function agentFinancial(opp, state, cycleBrief) {
   log('FINANCIAL: ' + (opp.title || '?').slice(0, 50));
 
@@ -17310,6 +17338,7 @@ async function runSession(trigger) {
           try { var r2 = await agentFinancial(eOpp, state, eCB); if (r2) allResults.push(r2); } catch(e){}
           try { var r3 = await agentWinnability(eOpp, state, eCB); if (r3) allResults.push(r3); } catch(e){}
           try { var r4 = await agentCRM(eOpp, state, eCB); if (r4) allResults.push(r4); } catch(e){}
+          try { await maybeAdvanceStage(eOpp.id); } catch(e){} // S166 H8
         }
       }
       
@@ -17366,6 +17395,7 @@ async function runSession(trigger) {
       try { var r3 = await agentWinnability(opp, state, cycleBrief); if (r3) allResults.push(r3); } catch (e) { log('Win err: ' + e.message); }
       try { var r4 = await agentCRM(opp, state, cycleBrief); if (r4) allResults.push(r4); } catch (e) { log('CRM err: ' + e.message); }
       try { var r5 = await agentQualityGate(opp, state, cycleBrief); if (r5) allResults.push(r5); } catch (e) { log('QG err: ' + e.message); }
+      try { await maybeAdvanceStage(opp.id); } catch (e) { log('Stage err: ' + e.message); } // S166 H8
       // STAFFING moved to gated second pass (Session 81 audit)
     }
 
