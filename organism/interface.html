@@ -89,29 +89,55 @@ function parseFlexibleDate(s){
 // Defaults: maxH=400 inline, '70vh' for variant='expanded'. Caller passes maxH (number/string)
 // to override. style prop merges over defaults for visual context (background/padding/font/etc).
 // Optional html prop renders via dangerouslySetInnerHTML for callsites that pre-build HTML strings.
+// T2C F-079 (S159 commit 3): added linkify prop — when true and children is a string, URLs are
+// auto-detected and rendered as clickable anchors via linkifyText.
 function LongScroll(p){
   p = p || {};
   var maxH = p.maxH != null ? p.maxH : (p.variant === 'expanded' ? '70vh' : 400);
   var style = Object.assign({fontSize:12, lineHeight:1.6, whiteSpace:'pre-wrap',
     maxHeight:maxH, overflowY:'auto'}, p.style || {});
   if(p.html != null) return e('div',{style:style, dangerouslySetInnerHTML:{__html:p.html}});
-  return e('div',{style:style}, p.children);
+  var content = p.children;
+  if(p.linkify && typeof content === 'string') content = linkifyText(content);
+  return e('div',{style:style}, content);
 }
 
 // T2C F-085 + F-117b + F-201 (S159 commit 2): collapsible expand affordance for long content
 // in tight cells (table rows, signal lists). Uses native <details>/<summary> for state — no JS
 // hooks, accessible by default. Preview shows first N chars with ellipsis; expand reveals full
 // content in a LongScroll. Replaces hard substring(0,N) display-path truncations.
+// T2C F-079 (S159 commit 3): linkify prop forwarded to inner LongScroll on expand.
 function LongScrollExpand(p){
   p = p || {};
   var preview = p.preview || 200;
   var s = String(p.children == null ? '' : p.children);
-  if(s.length <= preview) return e('span',{style:p.style||null}, s);
+  if(s.length <= preview) return e('span',{style:p.style||null}, p.linkify ? linkifyText(s) : s);
   return e('details',{style:Object.assign({margin:0},p.style||{})},
     e('summary',{style:{cursor:'pointer',color:p.summaryColor||'inherit',outline:'none',listStyle:'revert'}},
       s.substring(0,preview)+'...'),
-    e(LongScroll,{maxH:p.maxH||300, style:{padding:'6px 0',fontSize:p.fontSize||12,color:p.color||undefined}}, s)
+    e(LongScroll,{maxH:p.maxH||300, linkify:p.linkify, style:{padding:'6px 0',fontSize:p.fontSize||12,color:p.color||undefined}}, s)
   );
+}
+
+// T2C F-079 + F-140 (S159 commit 3): URL detection helper. Scans plain text for http(s):// URLs
+// and returns an array of strings + clickable anchor elements. Returns input unchanged for
+// non-strings (so React element children pass through). Used by LongScroll's linkify prop and
+// SystemChat's processInline to make URLs in agent observations, intel summaries, scope analyses,
+// proposals, and chat responses navigable. Color CYAN matches existing inline anchor styling.
+function linkifyText(text){
+  if(!text || typeof text !== 'string') return text;
+  var urlRe = /(https?:\/\/[^\s<>"'\]\)]+)/g;
+  var parts = [];
+  var last = 0;
+  var m;
+  while((m = urlRe.exec(text)) !== null){
+    if(m.index > last) parts.push(text.slice(last, m.index));
+    parts.push(e('a', {key:'u'+m.index, href:m[1], target:'_blank', rel:'noopener', style:{color:CYAN, textDecoration:'underline'}}, m[1]));
+    last = m.index + m[1].length;
+  }
+  if(last === 0) return text; // no URLs found — return original string
+  if(last < text.length) parts.push(text.slice(last));
+  return parts;
 }
 
 function Badge(p){
@@ -928,7 +954,7 @@ function PipelineTracker(p){
           color:activeTab.id===t.id?GOLD:TEXT_D,borderBottom:activeTab.id===t.id?'2px solid '+GOLD:'2px solid transparent'
         }},t.label)})
       ),
-      e(LongScroll,{maxH:500, style:{background:BG3, borderRadius:4, padding:12, fontFamily:'monospace', lineHeight:1.5}},
+      e(LongScroll,{maxH:500, linkify:true, style:{background:BG3, borderRadius:4, padding:12, fontFamily:'monospace', lineHeight:1.5}},
         (det[activeTab.field]||'')
       )
     );
@@ -1262,7 +1288,7 @@ function PipelineTracker(p){
               // LEFT: Details
               e('div',null,
                 e(Label,{text:'OPPORTUNITY DETAILS'}),
-                [{l:'Agency',v:o.agency},{l:'Type',v:o.type||o.vertical},{l:'Value',v:o.estimated_value},{l:'Deadline',v:o.due_date},{l:'Decision',v:det.capture_action?e(LongScrollExpand,{preview:200,maxH:300,summaryColor:TEXT_D},det.capture_action):''},{l:'OPI',v:sc},{l:'Added',v:o.discovered_at?new Date(o.discovered_at).toLocaleDateString():''},{l:'Source URL',v:o.source_url?e('a',{href:o.source_url,target:'_blank',style:{color:CYAN,textDecoration:'none'}},'View Original RFP ↗'):''},{l:'RFP Doc URL',v:det.rfp_document_url?e('a',{href:det.rfp_document_url,target:'_blank',style:{color:CYAN,textDecoration:'none'}},'Download ↗'):''}].map(function(d){
+                [{l:'Agency',v:o.agency},{l:'Type',v:o.type||o.vertical},{l:'Value',v:o.estimated_value},{l:'Deadline',v:o.due_date},{l:'Decision',v:det.capture_action?e(LongScrollExpand,{preview:200,maxH:300,summaryColor:TEXT_D,linkify:true},det.capture_action):''},{l:'OPI',v:sc},{l:'Added',v:o.discovered_at?new Date(o.discovered_at).toLocaleDateString():''},{l:'Source URL',v:o.source_url?e('a',{href:o.source_url,target:'_blank',style:{color:CYAN,textDecoration:'none'}},'View Original RFP ↗'):''},{l:'RFP Doc URL',v:det.rfp_document_url?e('a',{href:det.rfp_document_url,target:'_blank',style:{color:CYAN,textDecoration:'none'}},'Download ↗'):''}].map(function(d){
                   return d.v?e('div',{key:d.l,style:{display:'flex',justifyContent:'space-between',padding:'4px 0',fontSize:12,borderBottom:'1px solid '+BORDER}},
                     e('span',{style:{color:TEXT_D}},d.l),e('span',null,d.v)
                   ):null;
@@ -1590,7 +1616,7 @@ function OpportunityDetail(p){
             step.action?e('span',{onClick:function(ev){ev.stopPropagation();if(!step.action.disabled)step.action.fn()},style:{fontSize:10,color:step.action.disabled?TEXT_D:GOLD,cursor:step.action.disabled?'default':'pointer',border:'1px solid '+(step.action.disabled?BORDER:GOLD),padding:'2px 8px',borderRadius:3,marginRight:4}},step.action.label):null,
             step.data?e('span',{style:{color:CYAN,fontSize:10}},expandedStep===i?'▼':'▶'):null
           ),
-          expandedStep===i&&step.data?e(LongScroll,{style:{padding:'8px 32px',color:TEXT_D,background:BG3,borderRadius:4,margin:'4px 0'}},
+          expandedStep===i&&step.data?e(LongScroll,{linkify:true, style:{padding:'8px 32px',color:TEXT_D,background:BG3,borderRadius:4,margin:'4px 0'}},
             typeof step.data==='string'?step.data:JSON.stringify(step.data,null,2)
           ):null
         );
@@ -1619,8 +1645,8 @@ function OpportunityDetail(p){
 
     // Sub-tab content
     subTab==='overview'?e('div',null,
-      o.scope_analysis?(function(){var _fc=factCheckParse(o.scope_analysis);return e(Card,null,e(Label,{text:'SCOPE ANALYSIS'}),_fc.badge,e(LongScroll,null,_fc.body));})():null,
-      o.description?e(Card,null,e(Label,{text:'EXECUTIVE SUMMARY'}),e(LongScroll,null,o.description)):null,
+      o.scope_analysis?(function(){var _fc=factCheckParse(o.scope_analysis);return e(Card,null,e(Label,{text:'SCOPE ANALYSIS'}),_fc.badge,e(LongScroll,{linkify:true},_fc.body));})():null,
+      o.description?e(Card,null,e(Label,{text:'EXECUTIVE SUMMARY'}),e(LongScroll,{linkify:true},o.description)):null,
       e(Card,null,
         e(Label,{text:'ACTIONS'}),
         e('div',{style:{display:'flex',gap:8,flexWrap:'wrap'}},
@@ -1669,7 +1695,7 @@ function OpportunityDetail(p){
           if(o.proposal_content)parts.push(Math.round(o.proposal_content.length/1000)+'K chars');
           return e('div',{style:{fontSize:10,color:TEXT_D,marginBottom:8,fontFamily:'monospace'}},parts.join(' • '));
         })(),
-        e(LongScroll,{variant:'expanded'},o.proposal_content)
+        e(LongScroll,{variant:'expanded', linkify:true},o.proposal_content)
       ):e(Card,null,e('div',{style:{color:TEXT_D,textAlign:'center',padding:20}},'No proposal generated yet.'),
         e('div',{style:{textAlign:'center'}},e(Btn,{onClick:function(){if(!confirm('Run full proposal pipeline?\n\n~$5-10 cost, ~10 min runtime.\nRe-runs all 19 stages including Opus calls.\n\nProceed?'))return;fetch('/api/produce-proposal?id='+encodeURIComponent(o.id),{method:'POST'}).then(function(){detShowToast('Proposal pipeline started — ~10 min.')})}},'RUN PROPOSAL'))
       )
@@ -1958,12 +1984,35 @@ function SystemChat(p){
   }
   function processBold(text){
     if(!text||typeof text!=='string')return text;
+    // T2C F-140 (S159 commit 3): extended to handle URLs alongside bold markers.
+    // Splits text by bold markers first, then linkifies URLs within each plain segment.
+    // Result: bold spans preserve their formatting; URLs in plain text become clickable
+    // anchors with CYAN underline (matches existing inline anchor styling). No regression
+    // on bold-only or plain-only text.
     var parts=text.split(/(\*\*[^*]+\*\*)/g);
-    if(parts.length===1)return text;
-    return parts.map(function(p,i){
-      if(/^\*\*/.test(p))return e('span',{key:i,style:{color:GOLD,fontWeight:'bold'}},p.replace(/\*\*/g,''));
-      return p;
+    var hasBold=parts.length>1;
+    var hasUrl=/(https?:\/\/[^\s<>"]+)/.test(text);
+    if(!hasBold && !hasUrl) return text;
+    var out=[];
+    parts.forEach(function(seg, i){
+      if(/^\*\*/.test(seg)){
+        out.push(e('span',{key:'b'+i,style:{color:GOLD,fontWeight:'bold'}},seg.replace(/\*\*/g,'')));
+      } else {
+        // Linkify URLs within this plain segment
+        var urlRe=/(https?:\/\/[^\s<>"'\]\)]+)/g;
+        var lastIdx=0, m;
+        var foundUrl=false;
+        while((m=urlRe.exec(seg))!==null){
+          foundUrl=true;
+          if(m.index>lastIdx) out.push(seg.slice(lastIdx,m.index));
+          out.push(e('a',{key:'u'+i+'_'+m.index,href:m[1],target:'_blank',rel:'noopener',style:{color:CYAN,textDecoration:'underline'}},m[1]));
+          lastIdx=m.index+m[1].length;
+        }
+        if(!foundUrl){ out.push(seg); }
+        else if(lastIdx<seg.length) out.push(seg.slice(lastIdx));
+      }
     });
+    return out;
   }
 
   function handleKeyDown(ev){
@@ -2108,7 +2157,7 @@ function OpportunityBriefModule(p){
         ),
         e('span',{style:{color:TEXT_D}},isOpen?'▼':'▶')
       ),
-      isOpen?e(LongScroll,{maxH:600, style:{marginTop:8,paddingTop:8,borderTop:'1px solid '+BORDER}},content):null
+      isOpen?e(LongScroll,{maxH:600, linkify:true, style:{marginTop:8,paddingTop:8,borderTop:'1px solid '+BORDER}},content):null
     );
   }
 
@@ -2764,7 +2813,7 @@ function FinancialPricingModule(p){
     }},
       e('div',{style:{fontSize:11, color:CYAN, letterSpacing:2, marginBottom:8, fontWeight:'bold'}},
         'ORGANISM FINANCIAL ANALYSIS — '+pl.selected.financial_analysis.length.toLocaleString()+' chars'),
-      e(LongScroll,{maxH:400, style:{margin:0, fontFamily:'Georgia,serif', lineHeight:1.5}},
+      e(LongScroll,{maxH:400, linkify:true, style:{margin:0, fontFamily:'Georgia,serif', lineHeight:1.5}},
         pl.selected.financial_analysis)
     ) : null,
 
@@ -3375,7 +3424,7 @@ function DiscoverySignals(){
             e('span',null,(icons[s.agent]||'📡')+' ',e('strong',null,s.agent||'unknown')),
             e('span',{style:{color:TEXT_D,fontSize:10}},s.created_at?new Date(s.created_at).toLocaleDateString():'')
           ),
-          e('div',{style:{fontSize:11,color:TEXT_D,marginTop:2}},e(LongScrollExpand,{preview:300,maxH:300,fontSize:11,color:TEXT_D,summaryColor:TEXT_D},(s.observation||'')))
+          e('div',{style:{fontSize:11,color:TEXT_D,marginTop:2}},e(LongScrollExpand,{preview:300,maxH:300,fontSize:11,color:TEXT_D,summaryColor:TEXT_D,linkify:true},(s.observation||'')))
         );
       })
     )
@@ -3618,7 +3667,7 @@ function PipelineScannerModule(p){
       scannerMems.map(function(m,i){
         return e(Card,{key:i,style:{background:BG3}},
           e('div',{style:{fontSize:10,color:TEXT_D,marginBottom:4}},new Date(m.created_at).toLocaleString()),
-          e('div',{style:{fontSize:12,whiteSpace:'pre-wrap'}},e(LongScrollExpand,{preview:500,maxH:300,fontSize:12},(m.observation||'')))
+          e('div',{style:{fontSize:12,whiteSpace:'pre-wrap'}},e(LongScrollExpand,{preview:500,maxH:300,fontSize:12,linkify:true},(m.observation||'')))
         );
       })
     ):null,
