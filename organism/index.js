@@ -17566,15 +17566,16 @@ async function runSession(trigger) {
           var bam = recentBud.data[bai];
           if (!bam.observation || bam.observation.length < 200) continue;
           try {
-            var baResp = await claudeCall('Extract budget cycles. JSON array only.', 'Extract government budget cycle data. JSON array: agency_name, state, fiscal_year_start, fiscal_year_end, procurement_window, budget_amount, funding_sources, procurement_timeline, notes.\n\n' + (bam.observation || '').substring(0, 4000), 3000, { model: 'claude-haiku-4-5-20251001' });
+            // T3C R5 S161: aligned to budget_cycles schema (was agency_name, funding_sources, procurement_timeline — none exist; silent failures since cron deploy)
+            var baResp = await claudeCall('Extract budget cycles. JSON array only.', 'Extract government budget cycle data. JSON array fields: agency, state, fiscal_year_start, fiscal_year_end, budget_amount, procurement_window, rfp_timing, hgi_vertical, notes.\n\n' + (bam.observation || '').substring(0, 4000), 3000, { model: 'claude-haiku-4-5-20251001' });
             var baMatch = baResp.match(/\[[\s\S]*\]/);
             if (!baMatch) continue;
             var baBuds = JSON.parse(baMatch[0]);
             for (var bab = 0; bab < baBuds.length; bab++) {
               var bu2 = baBuds[bab];
-              if (!bu2.agency_name) continue;
-              var bu2Ex = await supabase.from('budget_cycles').select('id').eq('agency_name', bu2.agency_name).limit(1);
-              var bu2Rec = { agency_name: bu2.agency_name, state: bu2.state, fiscal_year_start: bu2.fiscal_year_start, fiscal_year_end: bu2.fiscal_year_end, procurement_window: bu2.procurement_window, budget_amount: bu2.budget_amount, funding_sources: bu2.funding_sources, procurement_timeline: bu2.procurement_timeline, notes: bu2.notes, source_agent: 'budget_auto_extract', updated_at: new Date().toISOString() };
+              if (!bu2.agency) continue;
+              var bu2Ex = await supabase.from('budget_cycles').select('id').eq('agency', bu2.agency).limit(1);
+              var bu2Rec = { agency: bu2.agency, state: bu2.state, fiscal_year_start: bu2.fiscal_year_start, fiscal_year_end: bu2.fiscal_year_end, budget_amount: bu2.budget_amount, procurement_window: bu2.procurement_window, rfp_timing: bu2.rfp_timing, hgi_vertical: bu2.hgi_vertical, notes: bu2.notes, source_agent: 'budget_auto_extract', updated_at: new Date().toISOString() };
               if (bu2Ex.data && bu2Ex.data.length > 0) { await supabase.from('budget_cycles').update(bu2Rec).eq('id', bu2Ex.data[0].id); }
               else { bu2Rec.id = 'bud-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6); bu2Rec.created_at = new Date().toISOString(); await supabase.from('budget_cycles').insert(bu2Rec); }
               budAutoTotal++;
@@ -17594,15 +17595,16 @@ async function runSession(trigger) {
           var ram2 = recentRec2.data[rai2];
           if (!ram2.observation || ram2.observation.length < 200) continue;
           try {
-            var raResp2 = await claudeCall('Extract recompete opportunities. JSON array only.', 'Extract contract recompete/expiration data. JSON array: contract_title, agency, incumbent, contract_value, end_date, recompete_window, hgi_verticals, competitive_landscape, notes.\n\n' + (ram2.observation || '').substring(0, 4000), 3000, { model: 'claude-haiku-4-5-20251001' });
+            // T3C R5 S161: aligned to recompete_tracker schema. Was contract_title (no col), incumbent (no col — schema has hgi_incumbent boolean + known_competitor text), contract_value (no col — schema has numeric estimated_value_annual), end_date (no col — schema has contract_end_date), recompete_window (no col), hgi_verticals (no col — schema has vertical), competitive_landscape (no col). Schema also requires `client` NOT NULL and uses `last_updated` not `updated_at`.
+            var raResp2 = await claudeCall('Extract recompete opportunities. JSON array only. Use exact field names.', 'Extract contract recompete/expiration data. JSON array fields: contract_name, client (the agency or organization the contract is with — REQUIRED), vertical, hgi_incumbent (boolean — true if HGI is incumbent), known_competitor (string — incumbent name if not HGI), contract_start_date, contract_end_date, estimated_value_annual (number, no $ or commas), procurement_contact, decision_maker, status, notes, rfp_expected_date.\n\n' + (ram2.observation || '').substring(0, 4000), 3000, { model: 'claude-haiku-4-5-20251001' });
             var raMatch2 = raResp2.match(/\[[\s\S]*\]/);
             if (!raMatch2) continue;
             var raRecs = JSON.parse(raMatch2[0]);
             for (var rar2 = 0; rar2 < raRecs.length; rar2++) {
               var rc2 = raRecs[rar2];
-              if (!rc2.contract_title) continue;
-              var rc2Ex = await supabase.from('recompete_tracker').select('id').eq('contract_title', rc2.contract_title).limit(1);
-              var rc2Rec = { contract_title: rc2.contract_title, agency: rc2.agency, incumbent: rc2.incumbent, contract_value: rc2.contract_value, end_date: rc2.end_date, recompete_window: rc2.recompete_window, hgi_verticals: rc2.hgi_verticals, competitive_landscape: rc2.competitive_landscape, notes: rc2.notes, source_agent: 'recompete_auto_extract', updated_at: new Date().toISOString() };
+              if (!rc2.contract_name || !rc2.client) continue;
+              var rc2Ex = await supabase.from('recompete_tracker').select('id').eq('contract_name', rc2.contract_name).limit(1);
+              var rc2Rec = { contract_name: rc2.contract_name, client: rc2.client, vertical: rc2.vertical, hgi_incumbent: rc2.hgi_incumbent === true, known_competitor: rc2.known_competitor, contract_start_date: rc2.contract_start_date, contract_end_date: rc2.contract_end_date, estimated_value_annual: typeof rc2.estimated_value_annual === 'number' ? rc2.estimated_value_annual : null, procurement_contact: rc2.procurement_contact, decision_maker: rc2.decision_maker, status: rc2.status, notes: rc2.notes, rfp_expected_date: rc2.rfp_expected_date, source_agent: 'recompete_auto_extract', last_updated: new Date().toISOString() };
               if (rc2Ex.data && rc2Ex.data.length > 0) { await supabase.from('recompete_tracker').update(rc2Rec).eq('id', rc2Ex.data[0].id); }
               else { rc2Rec.id = 'rec-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6); rc2Rec.created_at = new Date().toISOString(); await supabase.from('recompete_tracker').insert(rc2Rec); }
               recAutoTotal++;
