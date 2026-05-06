@@ -860,7 +860,7 @@ function PipelineTracker(p){
       {id:'winnability',label:'Winnability',field:'capture_action'},
       {id:'competitive',label:'Competitive Intel',field:'research_brief'},
       {id:'financial',label:'Financial',field:'financial_analysis'},
-      {id:'proposal',label:'Proposal Draft',field:'staffing_plan'},
+      {id:'proposal',label:'Proposal Draft',field:'proposal_content'},
       {id:'scope',label:'Scope Analysis',field:'scope_analysis'}
     ];
     var availTabs=tabs.filter(function(t){var v=det[t.field];return v&&v.length>50});
@@ -908,9 +908,13 @@ function PipelineTracker(p){
     callClaude('Generate a capture strategy for: '+opp.title+' ('+opp.agency+', '+(opp.vertical||'')+', value: '+(opp.estimated_value||'Unknown')+', deadline: '+(opp.deadline||'Unknown')+'). Include: 3 immediate capture actions, intel gaps to fill, teaming partners, Pwin estimate, and recommended next steps.'
     ).then(function(r){
       setCaptureStrategy(r);setCsLoading(false);
-      // Write back to opportunity
+      // T2C F-089 (S158 close, opportunistic): write to capture_action — the real DB column.
+      // capture_strategy doesn't exist in schema (verified S158: 74 columns, capture_action only).
+      // /api/update-opportunity whitelist accepts both, but only capture_action persists. Pre-fix,
+      // every Capture Strategy click generated fresh content via callClaude (~$0.05) and lost it
+      // on page reload — burning API spend with zero accumulation.
       fetch('/api/update-opportunity',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({id:opp.id,capture_strategy:r})
+        body:JSON.stringify({id:opp.id,capture_action:r})
       }).catch(function(){});
     });
   }
@@ -1203,7 +1207,7 @@ function PipelineTracker(p){
               // LEFT: Details
               e('div',null,
                 e(Label,{text:'OPPORTUNITY DETAILS'}),
-                [{l:'Agency',v:o.agency},{l:'Type',v:o.type||o.vertical},{l:'Value',v:o.estimated_value},{l:'Deadline',v:o.due_date},{l:'Decision',v:det.capture_action?det.capture_action.substring(0,200):''},{l:'OPI',v:sc},{l:'Added',v:o.created_at?new Date(o.created_at).toLocaleDateString():''},{l:'Source URL',v:o.source_url?e('a',{href:o.source_url,target:'_blank',style:{color:CYAN,textDecoration:'none'}},'View Original RFP ↗'):''},{l:'RFP Doc URL',v:det.rfp_document_url?e('a',{href:det.rfp_document_url,target:'_blank',style:{color:CYAN,textDecoration:'none'}},'Download ↗'):''}].map(function(d){
+                [{l:'Agency',v:o.agency},{l:'Type',v:o.type||o.vertical},{l:'Value',v:o.estimated_value},{l:'Deadline',v:o.due_date},{l:'Decision',v:det.capture_action?det.capture_action.substring(0,200):''},{l:'OPI',v:sc},{l:'Added',v:o.discovered_at?new Date(o.discovered_at).toLocaleDateString():''},{l:'Source URL',v:o.source_url?e('a',{href:o.source_url,target:'_blank',style:{color:CYAN,textDecoration:'none'}},'View Original RFP ↗'):''},{l:'RFP Doc URL',v:det.rfp_document_url?e('a',{href:det.rfp_document_url,target:'_blank',style:{color:CYAN,textDecoration:'none'}},'Download ↗'):''}].map(function(d){
                   return d.v?e('div',{key:d.l,style:{display:'flex',justifyContent:'space-between',padding:'4px 0',fontSize:12,borderBottom:'1px solid '+BORDER}},
                     e('span',{style:{color:TEXT_D}},d.l),e('span',null,d.v)
                   ):null;
@@ -1469,7 +1473,7 @@ function OpportunityDetail(p){
   }
 
   var steps=[
-    {name:'INTAKE',done:true,data:o.source_url||o.created_at||'Discovered'},
+    {name:'INTAKE',done:true,data:o.source_url||o.discovered_at||'Discovered'},
     {name:'SCOPE ANALYSIS',done:!!(o.scope_analysis||o.has_scope),data:o.scope_analysis},
     {name:'FINANCIAL ANALYSIS',done:!!(o.financial_analysis||o.has_financial),data:o.financial_analysis},
     {name:'COMPETITIVE RESEARCH',done:!!(o.research_brief||o.has_intel),data:o.research_brief},
