@@ -328,7 +328,8 @@ function usePipeline(){
         research:d.research_brief||'',
         staffing:d.staffing_plan||'',
         financial:d.financial_analysis||'',
-        capture:d.capture_action||'',
+        // S164 T3A: capture fallback chain — typed columns first, then legacy capture_action
+        capture:d.capture_strategy_text||d.capture_pwin_analysis_text||d.capture_organism_text||d.capture_action||'',
         proposal:d.proposal_content||'',
         value:d.estimated_value||o.estimated_value||'',
         // F-046 newly-available rich JSONB
@@ -1076,14 +1077,17 @@ function PipelineTracker(p){
   // IntelPanel: 5 tabbed views
   function IntelPanel(pp){
     var o=pp.opp,det=oppDetails[o.id]||o;
+    // S164 T3A: pre-compute best capture content from typed columns + legacy capture_action.
+    var captureBest=det.capture_strategy_text||det.capture_pwin_analysis_text||det.capture_organism_text||det.capture_action||'';
+    var detWithCapture=Object.assign({},det,{_capture_best:captureBest});
     var tabs=[
-      {id:'winnability',label:'Winnability',field:'capture_action'},
+      {id:'winnability',label:'Winnability',field:'_capture_best'},
       {id:'competitive',label:'Competitive Intel',field:'research_brief'},
       {id:'financial',label:'Financial',field:'financial_analysis'},
       {id:'proposal',label:'Proposal Draft',field:'proposal_content'},
       {id:'scope',label:'Scope Analysis',field:'scope_analysis'}
     ];
-    var availTabs=tabs.filter(function(t){var v=det[t.field];return v&&v.length>50});
+    var availTabs=tabs.filter(function(t){var v=detWithCapture[t.field];return v&&v.length>50});
     if(availTabs.length===0)return e('div',{style:{fontSize:11,color:TEXT_D,padding:8}},'No intel data available yet. Run analysis to populate.');
     var activeTab=availTabs.find(function(t){return t.id===expIntelTab})||availTabs[0];
     return e('div',null,
@@ -1094,7 +1098,7 @@ function PipelineTracker(p){
         }},t.label)})
       ),
       e(LongScroll,{maxH:500, linkify:true, style:{background:BG3, borderRadius:4, padding:12, fontFamily:'monospace', lineHeight:1.5}},
-        (det[activeTab.field]||'')
+        (detWithCapture[activeTab.field]||'')
       )
     );
   }
@@ -1128,13 +1132,13 @@ function PipelineTracker(p){
     callClaude('Generate a capture strategy for: '+opp.title+' ('+opp.agency+', '+(opp.vertical||'')+', value: '+(opp.estimated_value||'Unknown')+', deadline: '+(opp.deadline||'Unknown')+'). Include: 3 immediate capture actions, intel gaps to fill, teaming partners, Pwin estimate, and recommended next steps.'
     ).then(function(r){
       setCaptureStrategy(r);setCsLoading(false);
-      // T2C F-089 (S158 close, opportunistic): write to capture_action — the real DB column.
-      // capture_strategy doesn't exist in schema (verified S158: 74 columns, capture_action only).
-      // /api/update-opportunity whitelist accepts both, but only capture_action persists. Pre-fix,
-      // every Capture Strategy click generated fresh content via callClaude (~$0.05) and lost it
-      // on page reload — burning API spend with zero accumulation.
+      // S164 T3A Decision 2A: write to capture_strategy_text typed column (was capture_action).
+      // Stops F-151 drift where strategic content was clobbered by Pwin Calculate clicks.
+      // Pre-S158 fix wrote to capture_strategy (didn't exist in schema), persisted nothing.
+      // S158 fix wrote to capture_action (real column but overloaded with 5 writers).
+      // S164 fix writes to capture_strategy_text (typed column dedicated to this writer).
       fetch('/api/update-opportunity',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({id:opp.id,capture_action:r})
+        body:JSON.stringify({id:opp.id,capture_strategy_text:r})
       }).catch(function(){});
     });
   }
@@ -1148,13 +1152,19 @@ function PipelineTracker(p){
 
   // Edit opportunity
   function openEdit(opp){
-    setEditForm({title:opp.title||'',agency:opp.agency||'',type:opp.type||opp.vertical||'',value:opp.estimated_value||'',deadline:opp.deadline||'',notes:opp.description||'',stage:opp.stage||'identified',opi:opp.opi_score||50});
+    // S164 T3A Decision 3A: track initial opi value + source so save can omit opi_score from
+    // the PATCH when user didn't actually change it (prevents save-without-edit looking like a manual override).
+    setEditForm({title:opp.title||'',agency:opp.agency||'',type:opp.type||opp.vertical||'',value:opp.estimated_value||'',deadline:opp.deadline||'',notes:opp.description||'',stage:opp.stage||'identified',opi:opp.opi_score||50,_opi_initial:opp.opi_score||50,_opi_source:opp.opi_source||'initial'});
     setEditModal(opp);
   }
   function saveEdit(){
     if(!editModal)return;
+    // S164 T3A Decision 3A: conditional opi_score — only PATCH if user actually changed it.
+    var saveBody={id:editModal.id,title:editForm.title,agency:editForm.agency,vertical:editForm.type,estimated_value:editForm.value,due_date:editForm.deadline,description:editForm.notes,stage:editForm.stage};
+    var opiNow=parseInt(editForm.opi)||50;
+    if(opiNow!==editForm._opi_initial){saveBody.opi_score=opiNow;}
     fetch('/api/update-opportunity',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({id:editModal.id,title:editForm.title,agency:editForm.agency,vertical:editForm.type,estimated_value:editForm.value,due_date:editForm.deadline,description:editForm.notes,stage:editForm.stage,opi_score:parseInt(editForm.opi)||50})
+      body:JSON.stringify(saveBody)
     }).then(function(){pl.refresh();setEditModal(null);showToast('Opportunity updated.')}).catch(function(){showToast('Update failed — check API.')});
   }
 
@@ -1243,7 +1253,7 @@ function PipelineTracker(p){
           e('div',null,e(Label,{text:'TYPE / VERTICAL'}),e(Input,{value:editForm.type,onChange:function(ev){setEditForm(Object.assign({},editForm,{type:ev.target.value}))}})),
           e('div',null,e(Label,{text:'EST. VALUE'}),e(Input,{value:editForm.value,onChange:function(ev){setEditForm(Object.assign({},editForm,{value:ev.target.value}))}})),
           e('div',null,e(Label,{text:'DEADLINE'}),e(Input,{value:editForm.deadline,onChange:function(ev){setEditForm(Object.assign({},editForm,{deadline:ev.target.value}))}})),
-          e('div',null,e(Label,{text:'OPI SCORE'}),e(Input,{value:editForm.opi,onChange:function(ev){setEditForm(Object.assign({},editForm,{opi:ev.target.value}))}})),
+          e('div',null,e(Label,{text:'OPI SCORE'}),e(Input,{value:editForm.opi,onChange:function(ev){setEditForm(Object.assign({},editForm,{opi:ev.target.value}))}}),editForm._opi_source==='organism'?e('div',{style:{fontSize:10,color:CYAN,marginTop:2}},'🤖 organism-calculated — editing marks as manual override'):editForm._opi_source==='manual'?e('div',{style:{fontSize:10,color:GOLD,marginTop:2}},'✋ manual override (yours)'):null),
           e('div',null,e(Label,{text:'STAGE'}),e(Sel,{value:editForm.stage,onChange:function(ev){setEditForm(Object.assign({},editForm,{stage:ev.target.value}))},options:stages.filter(function(s){return s!=='all'}).map(function(s){return{value:s,label:s.charAt(0).toUpperCase()+s.slice(1)}})}))
         ),
         e('div',{key:'n',style:{marginTop:12}},e(Label,{text:'NOTES'}),e(Textarea,{value:editForm.notes,onChange:function(ev){setEditForm(Object.assign({},editForm,{notes:ev.target.value}))},rows:3})),
@@ -1427,7 +1437,7 @@ function PipelineTracker(p){
               // LEFT: Details
               e('div',null,
                 e(Label,{text:'OPPORTUNITY DETAILS'}),
-                [{l:'Agency',v:o.agency},{l:'Type',v:o.type||o.vertical},{l:'Value',v:o.estimated_value},{l:'Deadline',v:o.due_date},{l:'Decision',v:det.capture_action?e(LongScrollExpand,{preview:200,maxH:300,summaryColor:TEXT_D,linkify:true},det.capture_action):''},{l:'OPI',v:sc},{l:'Added',v:o.discovered_at?new Date(o.discovered_at).toLocaleDateString():''},{l:'Source URL',v:o.source_url?e('a',{href:o.source_url,target:'_blank',style:{color:CYAN,textDecoration:'none'}},'View Original RFP ↗'):''},{l:'RFP Doc URL',v:det.rfp_document_url?e('a',{href:det.rfp_document_url,target:'_blank',style:{color:CYAN,textDecoration:'none'}},'Download ↗'):''}].map(function(d){
+                [{l:'Agency',v:o.agency},{l:'Type',v:o.type||o.vertical},{l:'Value',v:o.estimated_value},{l:'Deadline',v:o.due_date},{l:'Decision',v:(function(){var c=det.capture_strategy_text||det.capture_pwin_analysis_text||det.capture_organism_text||det.capture_action;return c?e(LongScrollExpand,{preview:200,maxH:300,summaryColor:TEXT_D,linkify:true},c):''})()},{l:'OPI',v:sc},{l:'Added',v:o.discovered_at?new Date(o.discovered_at).toLocaleDateString():''},{l:'Source URL',v:o.source_url?e('a',{href:o.source_url,target:'_blank',style:{color:CYAN,textDecoration:'none'}},'View Original RFP ↗'):''},{l:'RFP Doc URL',v:det.rfp_document_url?e('a',{href:det.rfp_document_url,target:'_blank',style:{color:CYAN,textDecoration:'none'}},'Download ↗'):''}].map(function(d){
                   return d.v?e('div',{key:d.l,style:{display:'flex',justifyContent:'space-between',padding:'4px 0',fontSize:12,borderBottom:'1px solid '+BORDER}},
                     e('span',{style:{color:TEXT_D}},d.l),e('span',null,d.v)
                   ):null;
@@ -1703,7 +1713,7 @@ function OpportunityDetail(p){
     {name:'COMPETITIVE RESEARCH',done:!!(o.research_brief||o.has_intel),data:o.research_brief},
     {name:'PURSUIT RESEARCH',done:prStepDone,data:prStepData,action:{label:prGenerating?'Running...':(prStepDone?'Refresh':'Generate'),fn:generatePursuitResearch,disabled:prGenerating}},
     {name:'DISCRIMINATORS',done:discriminators&&discriminators.length>0,data:discStepData,action:{label:discGenerating?'Generating...':'Generate',fn:generateDiscriminators,disabled:discGenerating}},
-    {name:'WINNABILITY',done:!!(o.capture_action||o.winnability_score),data:o.capture_action},
+    {name:'WINNABILITY',done:!!(o.capture_strategy_text||o.capture_pwin_analysis_text||o.capture_organism_text||o.capture_action||o.winnability_score),data:(o.capture_strategy_text||o.capture_pwin_analysis_text||o.capture_organism_text||o.capture_action)},
     {name:'PROPOSAL',done:o.proposal_complete===true,data:o.proposal_content},
     {name:'REFINEMENT',done:refStepDone,data:refStepData},
     {name:'RED TEAM',done:false,data:null}
@@ -2344,18 +2354,19 @@ function OpportunityBriefModule(p){
 
     // Embedded sections (expandable)
     e(Fragment,null,det.scope_analysis?factCheckParse(det.scope_analysis).badge:null,e(Section,{skey:'scope',label:'SCOPE ANALYSIS',content:det.scope_analysis?factCheckParse(det.scope_analysis).body:det.scope_analysis})),
-    e(Section,{skey:'exec',label:'EXECUTIVE SUMMARY',content:det.description||det.capture_action}),
+    // S164 T3A: capture readers use fallback chain — typed columns first, legacy capture_action last.
+    e(Section,{skey:'exec',label:'EXECUTIVE SUMMARY',content:det.description||det.capture_strategy_text||det.capture_pwin_analysis_text||det.capture_organism_text||det.capture_action}),
     e(Section,{skey:'research',label:'RESEARCH & COMPETITIVE INTEL',content:det.research_brief}),
     e(Section,{skey:'financial',label:'FINANCIAL ANALYSIS',content:det.financial_analysis}),
     e(Section,{skey:'staffing',label:'STAFFING PLAN',content:det.staffing_plan}),
 
-    // GO/NO-GO
-    (det.capture_action||det.why_hgi_wins)?e(Card,null,
+    // GO/NO-GO  (S164 T3A: best capture content from typed columns + legacy fallback)
+    (function(){var captureContent=det.capture_strategy_text||det.capture_pwin_analysis_text||det.capture_organism_text||det.capture_action;return (captureContent||det.why_hgi_wins)?e(Card,null,
       e(Label,{text:'GO / NO-GO ASSESSMENT'}),
       det.why_hgi_wins?e('div',{style:{marginBottom:8}},e('strong',{style:{color:GREEN}},'WHY HGI WINS: '),det.why_hgi_wins):null,
       det.key_requirements?e('div',{style:{marginBottom:8}},e('strong',{style:{color:ORANGE}},'KEY REQUIREMENTS: '),det.key_requirements):null,
-      det.capture_action?e('div',{style:{whiteSpace:'pre-wrap'}},e('strong',{style:{color:CYAN}},'CAPTURE ACTION: '),det.capture_action):null
-    ):null,
+      captureContent?e('div',{style:{whiteSpace:'pre-wrap'}},e('strong',{style:{color:CYAN}},'CAPTURE: '),captureContent):null
+    ):null;})(),
 
     // HGI Fit Analysis
     fitAnalysis?e(AIOut,{content:fitAnalysis,loading:fitLoading,label:'HGI FIT ANALYSIS'}):null,
@@ -2478,7 +2489,12 @@ function WinnabilityScoringModule(p){
       // Fetch full detail to get scope_analysis for winnability prompt
       fetch('/api/opportunity-detail?id='+encodeURIComponent(pl.selected.id)).then(function(r){return r.json()}).then(function(det){
         if(det.scope_analysis)pl.selected.scope_analysis=det.scope_analysis;
+        // S164 T3A: propagate typed capture columns + legacy capture_action for any reader.
         if(det.capture_action)pl.selected.capture_action=det.capture_action;
+        if(det.capture_strategy_text)pl.selected.capture_strategy_text=det.capture_strategy_text;
+        if(det.capture_pwin_analysis_text)pl.selected.capture_pwin_analysis_text=det.capture_pwin_analysis_text;
+        if(det.capture_organism_text)pl.selected.capture_organism_text=det.capture_organism_text;
+        if(det.opi_source)pl.selected.opi_source=det.opi_source;
         if(det.research_brief)pl.selected.research_brief=det.research_brief;
       }).catch(function(){});
     }
@@ -2504,8 +2520,16 @@ function WinnabilityScoringModule(p){
         if(opiMatch){
           var newOpi=parseInt(opiMatch[1]);
           if(newOpi>=0&&newOpi<=100){
-            pl.writeBack(pl.selected.id,{opi_score:newOpi,capture_action:r});
+            // S164 T3A Decisions 1A + 2A: split into typed-column write + organism-flagged opi.
+            // _provenance:'organism' tells backend to set opi_source='organism' + record opi_organism_calculated*
+            // (and respect recent manual overrides via 30-day guard). capture_pwin_analysis_text
+            // gets the full PWIN analysis text — no longer clobbers capture_strategy_text.
+            pl.writeBack(pl.selected.id,{opi_score:newOpi,_provenance:'organism',capture_pwin_analysis_text:r});
+          } else {
+            pl.writeBack(pl.selected.id,{capture_pwin_analysis_text:r});
           }
+        } else {
+          pl.writeBack(pl.selected.id,{capture_pwin_analysis_text:r});
         }
       }
     });
