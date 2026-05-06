@@ -587,7 +587,23 @@ function Dashboard(p){
       deadlines.map(function(dl){
         var daysLeft=dl.days_remaining;
         var urgColor=daysLeft<=0?RED:daysLeft<=5?RED:daysLeft<=10?ORANGE:CYAN;
-        return e('div',{key:dl.title,style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 0',borderBottom:'1px solid '+BORDER,fontSize:12}},
+        // T2C F-106b (S159 commit 5): rows clickable to pre-select opp in PipelineTracker.
+        // Backend /api/exec-brief.upcoming_deadlines surfaces id post-S159-c5 backend fix; pre-fix
+        // (or for any deadline missing id) we fall through to title-match against pl.pipeline.
+        // Title match is reasonable because intake enforces uniqueness; if missing entirely (opp
+        // outside current pipeline window) we still navigate to tracker — user can search there.
+        var matchedOpp = dl.id ? p.pl.pipeline.find(function(o){return o.id===dl.id})
+                                : p.pl.pipeline.find(function(o){return o.title===dl.title});
+        function clickDeadline(){
+          if(matchedOpp){ p.pl.select(matchedOpp); }
+          else if(dl.id){ p.pl.select({id:dl.id, title:dl.title||'', agency:''}); }
+          // No id and no title match → just navigate to tracker
+          p.nav('tracker');
+        }
+        return e('div',{key:dl.title,onClick:clickDeadline,style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 0',borderBottom:'1px solid '+BORDER,fontSize:12,cursor:'pointer'},
+          onMouseEnter:function(ev){ev.currentTarget.style.background=GOLD+'11'},
+          onMouseLeave:function(ev){ev.currentTarget.style.background='transparent'}
+        },
           e('div',{style:{flex:1}},
             e('span',{style:{fontWeight:'bold',color:TEXT}},dl.title),
             e(OPIBadge,{score:dl.opi}),
@@ -690,16 +706,23 @@ function Dashboard(p){
     sysStatus&&sysStatus.intelligence?e(Card,{style:{marginBottom:12}},
       e('div',{style:{fontSize:11,fontWeight:'bold',letterSpacing:2,color:GOLD,marginBottom:8}},'📡 MARKET PULSE'),
       e('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(110px,1fr))',gap:8}},
-        [{l:'Competitors',v:sysStatus.intelligence.competitive_intelligence,c:ORANGE},
-         {l:'Contacts',v:sysStatus.intelligence.relationship_contacts,c:GREEN},
-         {l:'Disasters',v:sysStatus.intelligence.disaster_alerts,c:RED},
-         {l:'Budget Signals',v:sysStatus.intelligence.budget_cycles,c:CYAN},
-         {l:'Recompetes',v:sysStatus.intelligence.recompete_tracker,c:GOLD},
-         {l:'Regulations',v:sysStatus.intelligence.regulatory_changes,c:'#5B9BD5'},
-         {l:'Teaming',v:sysStatus.intelligence.teaming_partners,c:GREEN},
-         {l:'Agencies',v:sysStatus.intelligence.agency_profiles,c:GOLD}
+        // T2C F-109b (S159 commit 5): each tile is clickable, navigates to the module that surfaces
+        // the underlying records. Mod choices: relationship/competitive data → 'crm', discovery/intel
+        // sources (disasters, budgets, recompetes, regulations, agencies) → 'discovery'. No
+        // pendingFilter set — these are full-module entries, not pre-filtered slices.
+        [{l:'Competitors',v:sysStatus.intelligence.competitive_intelligence,c:ORANGE,mod:'crm'},
+         {l:'Contacts',v:sysStatus.intelligence.relationship_contacts,c:GREEN,mod:'crm'},
+         {l:'Disasters',v:sysStatus.intelligence.disaster_alerts,c:RED,mod:'discovery'},
+         {l:'Budget Signals',v:sysStatus.intelligence.budget_cycles,c:CYAN,mod:'discovery'},
+         {l:'Recompetes',v:sysStatus.intelligence.recompete_tracker,c:GOLD,mod:'discovery'},
+         {l:'Regulations',v:sysStatus.intelligence.regulatory_changes,c:'#5B9BD5',mod:'discovery'},
+         {l:'Teaming',v:sysStatus.intelligence.teaming_partners,c:GREEN,mod:'crm'},
+         {l:'Agencies',v:sysStatus.intelligence.agency_profiles,c:GOLD,mod:'discovery'}
         ].map(function(s){
-          return e('div',{key:s.l,style:{background:BG3,padding:'8px',borderRadius:4,textAlign:'center'}},
+          return e('div',{key:s.l,onClick:function(){p.nav(s.mod)},title:'Open '+s.l+' in '+s.mod,style:{background:BG3,padding:'8px',borderRadius:4,textAlign:'center',cursor:'pointer'},
+            onMouseEnter:function(ev){ev.currentTarget.style.background=GOLD+'22'},
+            onMouseLeave:function(ev){ev.currentTarget.style.background=BG3}
+          },
             e('div',{style:{fontSize:16,fontWeight:'bold',color:s.c}},s.v),
             e('div',{style:{fontSize:9,color:TEXT_D,letterSpacing:1}},s.l)
           );
