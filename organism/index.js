@@ -9092,7 +9092,13 @@ async function claudeCall(system, prompt, maxTokens, opts) {
 
   var response = await anthropic.messages.create(params);
   var wsHits = useSearch ? countWebSearches(response) : 0;
-  trackCost(opts.agent || system.slice(0, 40), model, response.usage, { web_searches: wsHits, endpoint: opts.endpoint || null });
+  // S165 OBS-1: Stable fallback label. Prior code used system.slice(0,40), which fragmented
+  // 69 of 73 unlabeled claudeCall sites into ~50+ unique prompt-prefix buckets per cron,
+  // making /api/cost byAgent aggregation nearly useless. Now all unlabeled calls aggregate
+  // under one bucket. Future cleanup: add `agent: 'X'` to opts at each unlabeled call site
+  // for fine-grained per-agent cost attribution.
+  var agentLabel = opts.agent || 'unlabeled_claudeCall';
+  trackCost(agentLabel, model, response.usage, { web_searches: wsHits, endpoint: opts.endpoint || null });
   var texts = [];
   for (var i = 0; i < (response.content || []).length; i++) {
     if (response.content[i].type === 'text') texts.push(response.content[i].text);
