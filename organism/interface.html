@@ -839,17 +839,36 @@ function PipelineTracker(p){
     }
   }
 
+  // T2C F-119+F-057 (S159): WinPathBar honesty.
+  // Steps array indices: 0 Discovered | 1 Scored | 2 Researched | 3 Financial | 4 Proposal |
+  //                      5 Red Team | 6 Export | 7 Submitted | 8 WON
+  // Bar fills indices 0..floor(step)-1 fully; if step is fractional (e.g. 4.5), the floor pip is half-lit GOLD.
+  // F-119 fix: terminal returns bumped so the terminal pip itself lights (won 8→9, submitted 7→8); 'lost' also terminal.
+  // F-057 fix: proposal_content >1000 chars but proposal_complete=false → step 4.5 (Proposal pip half-lit GOLD,
+  //           communicating "draft exists, not yet marked complete" without lying about completion state).
   function winPathStep(o){
-    if(o.stage==='won')return 8;if(o.stage==='submitted')return 7;
-    if(o.proposal_complete===true)return 5;if(o.has_financial||o.financial_analysis)return 4;
-    if(o.has_intel||o.research_brief)return 3;if(o.has_scope||o.scope_analysis)return 2;return 1;
+    if(o.stage==='won')return 9;
+    if(o.stage==='lost')return 9; // also terminal — bar fills full
+    if(o.stage==='submitted')return 8;
+    if(o.proposal_complete===true)return 5;
+    if(o.proposal_content && o.proposal_content.length > 1000) return 4.5; // F-057 draft-not-complete
+    if(o.has_financial||o.financial_analysis)return 4;
+    if(o.has_intel||o.research_brief)return 3;
+    if(o.has_scope||o.scope_analysis)return 2;
+    return 1;
   }
 
   function WinPathBar(pp){
     var o=pp.opp,step=winPathStep(o);
     var steps=['Discovered','Scored','Researched','Financial','Proposal','Red Team','Export','Submitted','WON'];
+    var floorStep=Math.floor(step), partial=step>floorStep;
     return e('div',{style:{display:'flex',gap:2,margin:'4px 0'}},
-      steps.map(function(s,i){var active=i<step;return e('div',{key:s,title:s,style:{flex:1,height:4,borderRadius:2,background:active?GREEN:BORDER}})})
+      steps.map(function(s,i){
+        var fullLit=i<floorStep, halfLit=partial&&i===floorStep;
+        var bg=fullLit?GREEN:(halfLit?GOLD:BORDER);
+        var ttl=halfLit?(s+' (in progress)'):s;
+        return e('div',{key:s,title:ttl,style:{flex:1,height:4,borderRadius:2,background:bg}});
+      })
     );
   }
 
