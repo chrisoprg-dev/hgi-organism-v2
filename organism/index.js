@@ -4907,8 +4907,18 @@ if (url === '/api/agents') {
     var registeredNames = {};
     registry.forEach(function (r) { registeredNames[r.agent_name] = true; });
 
+    // S163 H3-new: gated agents (category='gated') legitimately don't fire when AUTO_ORCH_ENABLED
+    // is false — they're behind the orchestration gate, not actually dormant. Surface them as
+    // gap only when AUTO_ORCH is on. system_core, utility, system_intel, per_opp dormancy stays
+    // visible regardless of gate state (e.g. opi_calibration is a real dormancy gap).
+    var autoOrchOn = (process.env.AUTO_ORCH_ENABLED === 'true');
     var registered_not_firing_7d = canonRows
-      .filter(function (r) { return r.status === 'keep' && (counts7[r.agent_name] || 0) === 0; })
+      .filter(function (r) {
+        if (r.status !== 'keep') return false;
+        if ((counts7[r.agent_name] || 0) > 0) return false;
+        if (!autoOrchOn && r.category === 'gated') return false;
+        return true;
+      })
       .map(function (r) { return r.agent_name; });
 
     var firing_not_registered = [];
