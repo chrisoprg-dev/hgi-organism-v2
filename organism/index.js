@@ -17673,6 +17673,44 @@ process.on('unhandledRejection', function(reason) {
   } catch (e2) {}
 });
 
+// === V2 CRON ARCHITECTURE (T3C R4 S161 — documented from T3B investigation) ===
+// V2 has exactly ONE cron, this one. Daily 7 AM CST weekdays only.
+//
+// What runs every cron firing (always):
+//   - autoExpireOpportunities
+//   - agentHunting (ALL scrapers via apify_central_bidding, sam_gov, grants_gov,
+//     web_search, lapac_v2, federal_register, usaspending, openfema, etc.)
+//   - autoRetrieveRFPs (rfp_retrieval_agent against active+!rfp_document_retrieved)
+//   - System meta-agents writing to organism_memory each cycle (~25 agents:
+//     self_awareness, dashboard_agent, scraper_insights, executive_brief_agent,
+//     learning_loop, knowledge_base_agent, disaster_monitor, budget_cycle,
+//     recompete_agent, etc.)
+//
+// What runs ONLY if process.env.AUTO_ORCH_ENABLED === 'true' (gate at L17062):
+//   - Orchestration chain: agentDeepCapture, agentScope, agentFinancial,
+//     agentResearch, agentWinnability, agentProposal
+//   - L6 specialists: l6_executive_summary, l6_technical_approach, l6_qa_compliance,
+//     l6_staffing, l6_pricing_narrative, l6_past_performance, l6_cover_letter
+//   - quality_gate, red_team, refinement_loop, methodology_researcher
+//   - Hard cap: 1 orchestration per session (L17072 needsOrch.slice(0,1))
+//
+// History (per S160 T3B investigation):
+//   - April 11, 2026: V1 plumbing repo (chrisoprg-dev/hgi-capture-system) had 3
+//     vercel.json edits removing all V1 cron jobs except /api/process-kb (every
+//     30 min). The hunt_runs source named "cron" (5,877 runs Mar 2-Apr 11) was
+//     the V1 Vercel pathway; it died Apr 11.
+//   - April 16, 2026: AUTO_ORCH_ENABLED env gate added in commit 871c0ff0db
+//     ("Session 107 COST CONTROL"). Defaulted false. V2 Railway scrapers
+//     (centralbidding_v2, lapac_v2, federal_register, web_search, usaspending)
+//     began firing the same day.
+//   - V1 endpoint agents (organism_think, sonnet_work, opus_build, proposal_loop,
+//     research_analysis, react_*, etc.) are intentional corpses post-migration.
+//
+// Ghost detection below: queries last 2h of agent='v2' session-summary writes
+// (note: that label is itself a write-bug — these are runSession session
+// summaries, should be agent='runSession' or 'session_summary'; flagged S161 R1).
+// If another instance ran recently with lower uptime, this instance is stale
+// (older deploy still running) — skip cron, reschedule.
 // === WEEKDAY DAILY CRON — 7 AM CST (13:00 UTC) ===
 function scheduleWeekdayCron() {
   var now = new Date();
