@@ -16606,7 +16606,7 @@ async function orchestrateOpp(opp) {
     results.pwin = pwinMatch ? parseInt(pwinMatch[1]) : 0;
     results.recommendation = recMatch ? recMatch[1] : 'UNDETERMINED';
     if (winText.length > 50) {
-      await supabase.from('opportunities').update({ capture_action: ('PWIN: ' + results.pwin + '% | ' + results.recommendation + '\n\n' + winText).slice(0, 2000), last_updated: new Date().toISOString() }).eq('id', oppId);
+      await supabase.from('opportunities').update({ capture_action: ('PWIN: ' + results.pwin + '% | ' + results.recommendation + '\n\n' + winText).slice(0, 60000), last_updated: new Date().toISOString() }).eq('id', oppId);
       results.steps.push('winnability');
       log('ORCHESTRATE: Winnability done — PWIN ' + results.pwin + '% ' + results.recommendation);
     }
