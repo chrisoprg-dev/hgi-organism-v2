@@ -13812,6 +13812,27 @@ async function agentIntelligence(opp, state, cycleBrief) {
 async function agentFinancial(opp, state, cycleBrief) {
   log('FINANCIAL: ' + (opp.title || '?').slice(0, 50));
 
+  // S166 H5: RFP-retrieval gate. Without the actual solicitation, this agent produces
+  // ~14K chars of disclaimered market speculation per call — well-written but pre-decisional.
+  // Cost: ~$0.12/call * N orchestrate cycles * M opps = real money on un-actionable output.
+  // Pre-S166: agent ran on every opp regardless of RFP status, inflating spend without value.
+  // Now: stub-and-defer when RFP is missing. Forces upstream (autoRetrieveRFPs) to do its job.
+  var rfpChars = (opp.rfp_text || '').length;
+  var hasRfp = rfpChars >= 500;
+  if (!hasRfp) {
+    var stub = 'PRICING ANALYSIS DEFERRED — RFP DOCUMENT NOT YET RETRIEVED.\n\n' +
+      'Pricing requires actual scope, term, quantity, and rate-instructions from the solicitation. ' +
+      'Web-research-based market analogues produce well-disclaimered speculation, not a defensible model.\n\n' +
+      'STATUS: rfp_document_retrieved=' + (!!opp.rfp_document_retrieved) +
+      ', rfp_text_chars=' + rfpChars + ', documents_fetched=' + (!!opp.documents_fetched) + '\n' +
+      'RESOLUTION: queue for /api/fetch-rfp on next cycle. agentFinancial will run automatically once RFP is in hand.\n\n' +
+      'Generated: ' + new Date().toISOString() + ' | S166 H5 RFP gate.';
+    log('FINANCIAL: gate — no RFP, deferred (' + rfpChars + ' chars rfp_text)');
+    await storeMemory('financial_agent', opp.id, (opp.agency || '') + ',pricing,deferred', stub, 'pricing_benchmark', null, 'high');
+    await supabase.from('opportunities').update({ financial_analysis: stub, last_updated: new Date().toISOString() }).eq('id', opp.id);
+    return stub;
+  }
+
   // MATERIAL CHANGE CHECK: skip if pricing landscape hasn't shifted
   var lastFin = state.memories.filter(function(m) { return m.agent === 'financial_agent' && m.opportunity_id === opp.id; })[0];
   if (lastFin) {
@@ -16064,6 +16085,37 @@ async function agentHunting(state, trigger) {
       }
 
       if (score.vertical === 'FILTER' || score.opi < 45) continue;
+
+      // S166 H6: solicitation-number dedup. Catches case where same RFP is discovered
+      // via two different web_search queries (e.g. North Texas WSNT RFP #2026-002 was
+      // intaked twice, costing $1.94 of duplicate orchestrate work tonight).
+      // Conservative match: extract \d{2,4}-\d{2,5} pattern from title, compare to existing
+      // active opps. If solicitation # match AND agency name shares >=3 chars run, skip.
+      try {
+        var solMatch = (cand.title || '').match(/\b(\d{2,4}-\d{2,5})\b/);
+        if (solMatch) {
+          var solNum = solMatch[1];
+          var agencyWords = (cand.agency || '').toLowerCase().split(/\s+/).filter(function(w){return w.length>=3;});
+          var dupCheck = await supabase.from('opportunities')
+            .select('id,title,agency')
+            .eq('status','active')
+            .ilike('title','%' + solNum + '%')
+            .limit(5);
+          if (dupCheck.data && dupCheck.data.length > 0) {
+            var matched = dupCheck.data.filter(function(e) {
+              var ea = (e.agency || '').toLowerCase();
+              for (var w = 0; w < agencyWords.length; w++) {
+                if (agencyWords[w].length >= 4 && ea.indexOf(agencyWords[w]) !== -1) return true;
+              }
+              return false;
+            });
+            if (matched.length > 0) {
+              log('HUNTING: DUP-SKIP — "' + (cand.title||'').slice(0,50) + '" matches existing ' + matched[0].id.slice(0,30) + ' (sol#=' + solNum + ')');
+              continue;
+            }
+          }
+        }
+      } catch (_de) { /* dedup is best-effort, never block intake */ }
 
       var newId = cand.source + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
       await supabase.from('opportunities').insert({
