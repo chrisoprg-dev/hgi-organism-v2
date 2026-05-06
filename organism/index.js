@@ -155,11 +155,15 @@ var WEB_SEARCH_USD_PER_CALL = 0.01; // S154: $10/1000 web_search tool invocation
 // response, including direct calls that bypass claudeCall(). Caller passes the count to trackCost
 // via the extra.web_searches field so per-call cost rows include tool fees.
 function countWebSearches(response) {
+  // S166 H1: count only server_tool_use blocks (specifically web_search). Pre-S166
+  // counted both server_tool_use AND web_search_tool_result, so every real search
+  // counted as 2 — Anthropic emits both blocks per invocation. This 2x bug inflated
+  // web_searches column and tool_cost_usd in api_cost_log. Token cost was unaffected.
   if (!response || !response.content || !response.content.length) return 0;
   var n = 0;
   for (var i = 0; i < response.content.length; i++) {
     var b = response.content[i];
-    if (b && (b.type === 'server_tool_use' || b.type === 'web_search_tool_result')) n++;
+    if (b && b.type === 'server_tool_use' && b.name === 'web_search') n++;
   }
   return n;
 }
