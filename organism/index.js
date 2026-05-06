@@ -717,7 +717,15 @@ if (url === '/' || url === '/dashboard' || url === '/interface' || url === '/int
 if (url.startsWith('/api/opportunity-detail')) {
   var oId = (req.url.split('?id=')[1]||'').split('&')[0];
   if (!oId) { res.writeHead(400); res.end(JSON.stringify({error:'id required'})); return; }
-  var dr = await supabase.from('opportunities').select('id,title,agency,vertical,opi_score,stage,status,due_date,estimated_value,scope_analysis,financial_analysis,research_brief,staffing_plan,capture_action,source_url,outcome,outcome_notes,rfp_text,proposal_content,proposal_complete,proposal_status,proposal_validated_at,rfp_document_retrieved,description,oral_presentation_date,award_notification_date,rfp_document_url,incumbent,why_hgi_wins,key_requirements,proposal_doc_url,proposal_doc_generated_at,proposal_doc_size_bytes').eq('id',oId).single();
+  // T2B F-046 + F-072 + F-121 (S158 close): always-full response per Phase 6 Q3 Option A.
+  // Surfaces all 74 columns: 7 section_* JSONB (with content + quality_score + tier1_anchor_gate +
+  // canon_violations + evidence_anchors + cost_usd + wall_time_seconds), rfp_requirements (jsonb),
+  // addendum_coverage (jsonb), strategic_thesis (jsonb), pwin_at_submission, and 8 timestamps the
+  // prior whitelist hid (analyzed_at, last_analyzed_at, learning_loop_last_run, pwin_captured_at,
+  // submitted_at, outcome_recorded_at, discovered_at, last_updated). Worst-case payload ~660K (OPSB);
+  // typical ~50-100K. Browser handles fine on desktop. If size becomes a problem later, can split
+  // into _summary/_full pair as backend-only change without touching UI.
+  var dr = await supabase.from('opportunities').select('*').eq('id',oId).single();
   res.writeHead(200, {'Content-Type':'application/json'});
   res.end(JSON.stringify(dr.data || {}));
   return;
