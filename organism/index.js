@@ -223,10 +223,38 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url === '/api/pipeline') {
-      const r = await supabase.from('opportunities').select('id,title,agency,vertical,opi_score,stage,status,due_date,estimated_value,source_url,outcome,rfp_document_retrieved,proposal_complete,proposal_status').eq('status','active').order('opi_score', { ascending: false }).limit(20);
+      // F-041 (S157 T1A): query params — limit (default 20, max 200), offset (default 0), status (whitelist), sort (field:dir whitelist).
+      // Default behavior preserved: with no params, returns 20 active opps sorted by opi_score desc.
+      var _plParams = new URL(req.url, 'http://x').searchParams;
+      var _plLimit = parseInt(_plParams.get('limit')) || 20;
+      if (_plLimit < 1) _plLimit = 20;
+      if (_plLimit > 200) _plLimit = 200;
+      var _plOffset = parseInt(_plParams.get('offset')) || 0;
+      if (_plOffset < 0) _plOffset = 0;
+      var _plStatusAllowed = ['active','submitted','won','lost','archived','filtered','pending','all'];
+      var _plStatus = (_plParams.get('status') || 'active').toLowerCase();
+      if (_plStatusAllowed.indexOf(_plStatus) < 0) _plStatus = 'active';
+      var _plSortFields = ['opi_score','due_date','discovered_at','last_updated','estimated_value','title'];
+      var _plSortField = 'opi_score';
+      var _plSortAsc = false;
+      var _plSortRaw = _plParams.get('sort');
+      if (_plSortRaw) {
+        var _plSortParts = String(_plSortRaw).split(':');
+        if (_plSortParts.length === 2 && _plSortFields.indexOf(_plSortParts[0]) >= 0) {
+          _plSortField = _plSortParts[0];
+          _plSortAsc = _plSortParts[1] === 'asc';
+        }
+      }
+      var _plQ = supabase.from('opportunities').select('id,title,agency,vertical,opi_score,stage,status,due_date,estimated_value,source_url,outcome,rfp_document_retrieved,proposal_complete,proposal_status');
+      if (_plStatus !== 'all') _plQ = _plQ.eq('status', _plStatus);
+      _plQ = _plQ.order(_plSortField, { ascending: _plSortAsc });
+      _plQ = _plQ.range(_plOffset, _plOffset + _plLimit - 1);
+      const r = await _plQ;
       // Add lightweight flags for completeness indicators without sending full text
       if (r.data) {
-        var fullR = await supabase.from('opportunities').select('id,capture_action,scope_analysis,research_brief,staffing_plan,financial_analysis,proposal_content').eq('status','active');
+        var _plFullQ = supabase.from('opportunities').select('id,capture_action,scope_analysis,research_brief,staffing_plan,financial_analysis,proposal_content');
+        if (_plStatus !== 'all') _plFullQ = _plFullQ.eq('status', _plStatus);
+        var fullR = await _plFullQ;
         var fullMap = {};
         (fullR.data || []).forEach(function(o) { fullMap[o.id] = o; });
         r.data.forEach(function(o) {
