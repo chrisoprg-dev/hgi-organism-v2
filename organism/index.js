@@ -528,7 +528,13 @@ const server = http.createServer(async (req, res) => {
 
     if (url === '/api/cost' || url.startsWith('/api/cost?')) {
       try {
-        var capParam = parseFloat(new URL(req.url, 'http://x').searchParams.get('cap')) || 5;
+        // S164 H5-A: default cap raised from 5 to 25, matching the S161 cost-disclosure
+        // reframed kill-switch threshold ("Daily total cap: $25 (~2× May 4 active-day baseline)").
+        // The cap is display-only — drives the cost widget border color (red OVER_CAP, orange
+        // NEAR_CAP, green OK). At $5 the orange/red signal fired on every normal busy day
+        // (V2 ledger $11-13 active). $25 makes the signal meaningful — only fires on actual
+        // runaway. Caller can override via ?cap= URL param.
+        var capParam = parseFloat(new URL(req.url, 'http://x').searchParams.get('cap')) || 25;
         var nowMs = Date.now();
         // CT (CST/CDT) today-midnight in UTC ms — DST-safe via Intl
         var ctParts = {};
@@ -5538,6 +5544,10 @@ if (url === '/api/intake' && req.method === 'POST') {
 
 // === UPDATE OPPORTUNITY — /api/update-opportunity ===
 // Generic field update for any opportunity fields (edit, save-on-blur, archive/delete)
+// S164 T3A: opi_score now has provenance tracking. New typed capture columns
+// (capture_strategy_text, capture_pwin_analysis_text, capture_organism_text) replace
+// the overloaded capture_action. Callers can pass _provenance:'organism' to mark
+// organism-driven OPI writes (Pwin Calculate button, agent flows); default is manual.
 if (url === '/api/update-opportunity' && req.method === 'POST') {
   var body = '';
   req.on('data', function(c) { body += c; });
@@ -5548,6 +5558,9 @@ if (url === '/api/update-opportunity' && req.method === 'POST') {
       if (!params.id) { res.end(JSON.stringify({ error: 'id required' })); return; }
       var id = params.id;
       delete params.id;
+      // S164 T3A: extract provenance signal before whitelist filtering
+      var provenance = params._provenance;
+      delete params._provenance;
       // S160 T3D: validate stage/status if present in payload. Light enforcement —
       // closes F-019/F-020/F-068 cleanup gap (UI was bypassing /api/update-stage's
       // validation by calling /api/update-opportunity which had no value validation).
@@ -5559,15 +5572,73 @@ if (url === '/api/update-opportunity' && req.method === 'POST') {
         var _xc = validateStatus(params.status);
         if (!_xc.ok) { res.end(JSON.stringify({ error: _xc.error })); return; }
       }
-      // Whitelist allowed fields
+      // S164 T3A: opi_score provenance handling. If opi_score is in payload:
+      //  - Fetch current row to compare and inspect prior provenance
+      //  - If provenance==='organism': mark organism-set, record opi_organism_calculated*.
+      //    Honor recent (<30d) manual override by NOT overwriting opi_score, but still
+      //    update opi_organism_calculated for calibration learning.
+      //  - Otherwise (user-driven default): mark manual ONLY if value actually changed;
+      //    write delta to pwin_calibration so the calibration loop sees the disagreement.
+      var opiAction = null;
+      if (params.opi_score !== undefined && params.opi_score !== null) {
+        var newOpi = parseInt(params.opi_score, 10);
+        if (isNaN(newOpi) || newOpi < 0 || newOpi > 100) {
+          res.end(JSON.stringify({ error: 'opi_score must be 0-100' })); return;
+        }
+        var _curOpi = await supabase.from('opportunities')
+          .select('opi_score,opi_source,opi_organism_calculated,opi_manual_override_at')
+          .eq('id', id).single();
+        var _co = (_curOpi && _curOpi.data) || {};
+        var _nowIso = new Date().toISOString();
+        if (provenance === 'organism') {
+          params.opi_organism_calculated = newOpi;
+          params.opi_organism_calculated_at = _nowIso;
+          var _ovAge = _co.opi_manual_override_at ? (Date.now() - new Date(_co.opi_manual_override_at).getTime()) / 86400000 : Infinity;
+          if (_co.opi_source === 'manual' && _ovAge < 30) {
+            delete params.opi_score;
+            opiAction = 'organism_calc_recorded_manual_override_active_' + _ovAge.toFixed(1) + 'd';
+            log('OPI: organism calc ' + newOpi + ' recorded but opi_score preserved (manual override age ' + _ovAge.toFixed(1) + 'd) for ' + id.slice(0,40));
+          } else {
+            params.opi_source = 'organism';
+            opiAction = 'organism_calc_applied';
+            log('OPI: organism calc ' + newOpi + ' applied for ' + id.slice(0,40));
+          }
+        } else {
+          if (_co.opi_score === newOpi) {
+            delete params.opi_score;
+            opiAction = 'no_change';
+          } else {
+            params.opi_source = 'manual';
+            params.opi_manual_override_at = _nowIso;
+            opiAction = 'manual_override';
+            if (_co.opi_organism_calculated != null) {
+              try {
+                await supabase.from('pwin_calibration').insert({
+                  opportunity_id: id,
+                  predicted_pwin: _co.opi_organism_calculated,
+                  actual_outcome: 'manual_override',
+                  prediction_source: 'organism_vs_manual',
+                  recorded_at: _nowIso,
+                  notes: JSON.stringify({ prior_opi: _co.opi_score, manual_value: newOpi, delta: newOpi - _co.opi_organism_calculated })
+                });
+              } catch (_pe) { /* non-blocking */ }
+            }
+            log('OPI: manual override ' + (_co.opi_score==null?'?':_co.opi_score) + ' -> ' + newOpi + ' for ' + id.slice(0,40));
+          }
+        }
+      }
+      // Whitelist allowed fields. S164 T3A: added typed capture columns + opi provenance columns.
+      // Old capture_action remains writable for backward compat; new writers should use the typed columns.
       var allowed = ['title','agency','vertical','opi_score','stage','status','estimated_value','due_date','description',
         'source_url','rfp_document_url','oral_presentation_date','award_notification_date','outcome_notes',
-        'capture_strategy','capture_action','incumbent','notes'];
+        'capture_strategy','capture_action','capture_strategy_text','capture_pwin_analysis_text','capture_organism_text',
+        'opi_source','opi_organism_calculated','opi_organism_calculated_at','opi_manual_override_at','opi_manual_override_reason',
+        'incumbent','notes'];
       var upd = { last_updated: new Date().toISOString() };
       allowed.forEach(function(f) { if (params[f] !== undefined) upd[f] = params[f]; });
       await supabase.from('opportunities').update(upd).eq('id', id);
-      log('UPDATE-OPP: ' + id.slice(0, 40) + ' fields: ' + Object.keys(upd).join(','));
-      res.end(JSON.stringify({ success: true, updated: Object.keys(upd) }));
+      log('UPDATE-OPP: ' + id.slice(0, 40) + ' fields: ' + Object.keys(upd).join(',') + (opiAction ? ' opi:' + opiAction : ''));
+      res.end(JSON.stringify({ success: true, updated: Object.keys(upd), opi_action: opiAction }));
     } catch (e) { res.end(JSON.stringify({ error: e.message })); }
   });
   return;
@@ -7187,10 +7258,15 @@ if (url.startsWith('/api/proposal-doc')) {
     // at generation time, which is the correct layer for a semantic rule.
 
     if (!proposalText || proposalText.length < 500) {
+      // S164 T3A: flag now considers typed capture columns + legacy capture_action.
+      var _hasCap = (opp.capture_action && opp.capture_action.length > 500) ||
+                    (opp.capture_strategy_text && opp.capture_strategy_text.length > 500) ||
+                    (opp.capture_pwin_analysis_text && opp.capture_pwin_analysis_text.length > 500) ||
+                    (opp.capture_organism_text && opp.capture_organism_text.length > 500);
       res.writeHead(400); res.end(JSON.stringify({
         error: 'No proposal content found. Run /api/produce-proposal first to generate submission-ready content.',
-        has_capture_action: !!(opp.capture_action && opp.capture_action.length > 500),
-        note: 'capture_action contains the organism internal analysis (GO/NO-GO brief), not proposal content.'
+        has_capture_action: !!_hasCap,
+        note: 'capture content (capture_strategy_text/pwin/organism, or legacy capture_action) holds organism internal analysis, not proposal content.'
       })); return;
     }
 
@@ -13818,7 +13894,9 @@ async function agentWinnability(opp, state, cycleBrief) {
   }
   log('WINNABILITY: ' + out.length + ' chars');
   await storeMemory('winnability_agent', opp.id, (opp.agency || '') + ',winnability', out, 'winnability', null, 'medium');
-  await supabase.from('opportunities').update({ capture_action: out.slice(0, 60000), last_updated: new Date().toISOString() }).eq('id', opp.id);
+  // S164 T3A: organism-generated strategic winnability text → capture_organism_text typed column.
+  // capture_action no longer written here; readers fall back to capture_action for backward compat.
+  await supabase.from('opportunities').update({ capture_organism_text: out.slice(0, 60000), last_updated: new Date().toISOString() }).eq('id', opp.id);
   return { agent: 'winnability_agent', opp: opp.title, chars: out.length };
 }
 
@@ -15983,7 +16061,13 @@ async function agentHunting(state, trigger) {
         opi_score: score.opi, status: 'active', stage: 'identified', source: cand.source,
         source_url: cand.source_url, estimated_value: 'unknown', due_date: cand.due_date || null,
         solicitation_number: cand.solicitation_number || null,
-        capture_action: score.capture_action + ': ' + score.why,
+        // S164 T3A: organism-generated initial scoring rationale → capture_organism_text typed column.
+        // opi_source='organism' tags the scored value as organism-derived. opi_organism_calculated
+        // mirrors opi_score so the calibration loop has a baseline if user later overrides.
+        capture_organism_text: score.capture_action + ': ' + score.why,
+        opi_source: 'organism',
+        opi_organism_calculated: score.opi,
+        opi_organism_calculated_at: new Date().toISOString(),
         discovered_at: new Date().toISOString(), last_updated: new Date().toISOString()
       });
       qualified.push({ title: cand.title, opi: score.opi, source: cand.source });
@@ -17027,7 +17111,8 @@ async function orchestrateOpp(opp) {
     results.pwin = pwinMatch ? parseInt(pwinMatch[1]) : 0;
     results.recommendation = recMatch ? recMatch[1] : 'UNDETERMINED';
     if (winText.length > 50) {
-      await supabase.from('opportunities').update({ capture_action: ('PWIN: ' + results.pwin + '% | ' + results.recommendation + '\n\n' + winText).slice(0, 60000), last_updated: new Date().toISOString() }).eq('id', oppId);
+      // S164 T3A: organism PWIN/recommendation → capture_pwin_analysis_text typed column.
+      await supabase.from('opportunities').update({ capture_pwin_analysis_text: ('PWIN: ' + results.pwin + '% | ' + results.recommendation + '\n\n' + winText).slice(0, 60000), last_updated: new Date().toISOString() }).eq('id', oppId);
       results.steps.push('winnability');
       log('ORCHESTRATE: Winnability done — PWIN ' + results.pwin + '% ' + results.recommendation);
     }
