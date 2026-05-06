@@ -91,6 +91,48 @@ function getAgentLists() {
 refreshAgentRegistry();
 setInterval(refreshAgentRegistry, 60 * 1000);
 
+// === S160 T3D LIFECYCLE CANON ===
+// Canonical stage and status sets — used by /api/update-stage, /api/update-opportunity,
+// and auto-expire. Closes F-019/F-020/F-021/F-050/F-068/F-139/F-199 by giving the
+// lifecycle a single source of truth instead of a stage-validation list that excluded
+// 5 stages used in production. Light enforcement: the application layer validates,
+// Postgres has no CHECK constraint (Decision 3 light path).
+//
+// 9 canonical stages (per design Decision 2):
+//   identified, pursuing, proposal, submitted, won, lost, no_bid, archived,
+//   declaration_tracking
+// Dropped: pending_rfp (retired pathway), watching/closed (zero records),
+//          auto_expired (collapsed into archived). filtered handled via status.
+//
+// 7 canonical statuses (per design Decision 3):
+//   active, inactive (declaration_tracking), archived, filtered, no_bid,
+//   closed (legacy), merged_duplicate
+//
+// S160 T3D canon-marker: lifecycle-validation-deployed
+var T3D_VALID_STAGES = [
+  'identified', 'pursuing', 'proposal', 'submitted',
+  'won', 'lost', 'no_bid', 'archived', 'declaration_tracking'
+];
+var T3D_VALID_STATUSES = [
+  'active', 'inactive', 'archived', 'filtered',
+  'no_bid', 'closed', 'merged_duplicate'
+];
+function validateStage(stage) {
+  // null/undefined accepted (legacy records have null stage; not breaking that).
+  if (stage === null || stage === undefined || stage === '') return { ok: true };
+  if (T3D_VALID_STAGES.indexOf(stage) < 0) {
+    return { ok: false, error: 'stage must be one of: ' + T3D_VALID_STAGES.join(', ') };
+  }
+  return { ok: true };
+}
+function validateStatus(status) {
+  if (status === null || status === undefined || status === '') return { ok: true };
+  if (T3D_VALID_STATUSES.indexOf(status) < 0) {
+    return { ok: false, error: 'status must be one of: ' + T3D_VALID_STATUSES.join(', ') };
+  }
+  return { ok: true };
+}
+
 // Ring buffer for in-memory log access
 var logBuffer = [];
 var LOG_MAX = 500;
@@ -5495,6 +5537,17 @@ if (url === '/api/update-opportunity' && req.method === 'POST') {
       if (!params.id) { res.end(JSON.stringify({ error: 'id required' })); return; }
       var id = params.id;
       delete params.id;
+      // S160 T3D: validate stage/status if present in payload. Light enforcement —
+      // closes F-019/F-020/F-068 cleanup gap (UI was bypassing /api/update-stage's
+      // validation by calling /api/update-opportunity which had no value validation).
+      if (params.stage !== undefined) {
+        var _sc = validateStage(params.stage);
+        if (!_sc.ok) { res.end(JSON.stringify({ error: _sc.error })); return; }
+      }
+      if (params.status !== undefined) {
+        var _xc = validateStatus(params.status);
+        if (!_xc.ok) { res.end(JSON.stringify({ error: _xc.error })); return; }
+      }
       // Whitelist allowed fields
       var allowed = ['title','agency','vertical','opi_score','stage','status','estimated_value','due_date','description',
         'source_url','rfp_document_url','oral_presentation_date','award_notification_date','outcome_notes',
@@ -5538,8 +5591,12 @@ if (url === '/api/update-stage' && req.method === 'POST') {
     try {
       var params = JSON.parse(body);
       if (!params.id || !params.stage) { res.end(JSON.stringify({ error: 'id and stage required' })); return; }
-      var validStages = ['identified', 'pursuing', 'proposal', 'submitted', 'watching', 'no_bid', 'closed'];
-      if (validStages.indexOf(params.stage) < 0) { res.end(JSON.stringify({ error: 'stage must be: ' + validStages.join(', ') })); return; }
+      // S160 T3D: stage validation reads from canonical T3D_VALID_STAGES.
+      // Replaced hardcoded list ['identified','pursuing','proposal','submitted','watching','no_bid','closed']
+      // which was missing 5 stages used in production (archived, won, lost, declaration_tracking, etc.)
+      // and included 2 zero-row stages (watching, closed).
+      var _stageCheck = validateStage(params.stage);
+      if (!_stageCheck.ok) { res.end(JSON.stringify({ error: _stageCheck.error })); return; }
       await supabase.from('opportunities').update({ stage: params.stage, last_updated: new Date().toISOString() }).eq('id', params.id);
       log('STAGE UPDATE: ' + params.id.slice(0,40) + ' -> ' + params.stage);
 
@@ -14683,14 +14740,16 @@ async function autoExpireOpportunities(dryRun) {
       }
 
       try {
+        // S160 T3D: write canonical archived+archived instead of inactive+auto_expired
+        // (auto_expired stage was non-canonical and never appeared in production truth table).
         await supabase.from('opportunities').update({
-          status: 'inactive',
-          stage: 'auto_expired',
+          status: 'archived',
+          stage: 'archived',
           last_updated: new Date().toISOString()
         }).eq('id', opp.id);
         summary.expired++;
         summary.expired_titles.push((opp.title || '').slice(0, 60) + ' (due ' + opp.due_date + ')');
-        log('AUTO-EXPIRE: closed ' + (opp.title || '').slice(0,55) + ' | due:' + opp.due_date);
+        log('AUTO-EXPIRE: archived ' + (opp.title || '').slice(0,55) + ' | due:' + opp.due_date);
       } catch (updErr) {
         summary.skipped++;
         summary.skip_reasons['update_failed'] = (summary.skip_reasons['update_failed'] || 0) + 1;
