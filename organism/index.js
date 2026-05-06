@@ -211,7 +211,10 @@ const server = http.createServer(async (req, res) => {
 
     if (url === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'alive', uptime_seconds: Math.floor(process.uptime()), timestamp: new Date().toISOString(), version: 'V2.0-organism', agents_active: 42 }));
+      // F-091b (S158 T2A): agents_active was hardcoded 42 (stale). Truthful count is 29
+      // (5 per_opp + 5 gated + 9 system_core + 10 system_intel — see /api/system-status agents block).
+      // T4B will refactor both endpoints to compute from a shared registry; for now mirror /api/system-status.
+      res.end(JSON.stringify({ status: 'alive', uptime_seconds: Math.floor(process.uptime()), timestamp: new Date().toISOString(), version: 'V2.0-organism', agents_active: 29 }));
       return;
     }
 
