@@ -3720,7 +3720,7 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
             '\n\n=== FULL PROPOSAL ===\n' + proposalText.slice(0, 20000) +
             '\n\nExtract every section that passed red team review without critical/major issues. Include full text. Start each with === SECTION: [name] ===',
             6000,
-            { model: 'claude-haiku-4-5-20251001' }
+            { model: 'claude-haiku-4-5-20251001', agent: 'kb_section_extractor' }
           );
           
           if (extractResult && extractResult.length >= 200) {
@@ -3980,7 +3980,7 @@ if (url.startsWith('/api/extract-ci')) {
         'Intelligence brief:\n' + combined;
       
       try {
-        var ciResp = await claudeCall('Extract structured competitor data from intelligence briefs. Return ONLY valid JSON arrays.', extractPrompt, 4000, { model: 'claude-haiku-4-5-20251001' });
+        var ciResp = await claudeCall('Extract structured competitor data from intelligence briefs. Return ONLY valid JSON arrays.', extractPrompt, 4000, { model: 'claude-haiku-4-5-20251001', agent: 'extract_competitor_intel' });
         
         log('CI EXTRACT: Haiku response length=' + ciResp.length + ' for opp ' + oppId.slice(0, 30));
         
@@ -4154,7 +4154,7 @@ if (url.startsWith('/api/extract-contacts')) {
           '- hgi_relationship: "warm" | "cold" | "unknown"\n' +
           '- notes: string (1-2 sentence strategic note about this contact)\n\n' +
           'Opportunity context: ' + oppTitle + '\n\nCRM Brief:\n' + cCombined,
-          4000, { model: 'claude-haiku-4-5-20251001' }
+          4000, { model: 'claude-haiku-4-5-20251001', agent: 'extract_crm_contacts' }
         );
         
         var cMatch = cResp.match(/\[[\s\S]*\]/);
@@ -4307,7 +4307,7 @@ if (url.startsWith('/api/extract-disasters')) {
       try {
         var dResp = await claudeCall('Extract disaster declarations. Return ONLY JSON array.',
           'Extract ALL disaster declarations mentioned. JSON array with: disaster_number, disaster_name, state, declaration_date, incident_type, counties, fema_programs, procurement_window, hgi_recommendation, hgi_vertical, threat_level (critical/high/medium/low).\n\n' + (dm.observation || '').substring(0, 6000),
-          4000, { model: 'claude-haiku-4-5-20251001' });
+          4000, { model: 'claude-haiku-4-5-20251001', agent: 'extract_disaster_decl' });
         var dMatch = dResp.match(/\[[\s\S]*\]/);
         if (!dMatch) continue;
         var disasters = JSON.parse(dMatch[0]);
@@ -4349,7 +4349,7 @@ if (url.startsWith('/api/extract-budgets')) {
       try {
         var bResp = await claudeCall('Extract budget cycle data. Return ONLY JSON array.',
           'Extract ALL agency budget cycles. JSON array with: agency, state, fiscal_year_start, fiscal_year_end, budget_amount, procurement_window, rfp_timing, hgi_vertical, notes.\n\n' + (bm.observation || '').substring(0, 6000),
-          4000, { model: 'claude-haiku-4-5-20251001' });
+          4000, { model: 'claude-haiku-4-5-20251001', agent: 'extract_budget_cycle' });
         var bMatch = bResp.match(/\[[\s\S]*\]/);
         if (!bMatch) continue;
         var budgets = JSON.parse(bMatch[0]);
@@ -4391,7 +4391,7 @@ if (url.startsWith('/api/extract-regulatory')) {
       try {
         var regResp = await claudeCall('Extract regulatory changes. Return ONLY JSON array.',
           'Extract ALL regulatory changes, policy updates, and rule modifications mentioned. JSON array with: regulation_name, agency_source, effective_date, category (fema_policy/state_procurement/cdbg_dr/hud/insurance/workforce), impact_level (critical/high/medium/low), affected_verticals (comma-separated), summary, hgi_action_required.\n\n' + (rm.observation || '').substring(0, 6000),
-          4000, { model: 'claude-haiku-4-5-20251001' });
+          4000, { model: 'claude-haiku-4-5-20251001', agent: 'extract_regulatory_change' });
         var regMatch = regResp.match(/\[[\s\S]*\]/);
         if (!regMatch) continue;
         var regs = JSON.parse(regMatch[0]);
@@ -4438,7 +4438,7 @@ if (url.startsWith('/api/extract-teaming')) {
       try {
         var teamResp = await claudeCall('Extract teaming partners and subcontractors. Return ONLY JSON array.',
           'Extract ALL potential teaming partners, subcontractors, and joint venture candidates mentioned. JSON array with: partner_name, capability, location, certifications (DBE/MBE/SBE/8a/HUBZone etc), past_teaming (previous work with HGI or others), verticals (comma-separated), fit_score (strong/medium/speculative), contact_info, notes.\n\n' + (tm.observation || '').substring(0, 6000),
-          4000, { model: 'claude-haiku-4-5-20251001' });
+          4000, { model: 'claude-haiku-4-5-20251001', agent: 'extract_teaming_partner' });
         var teamMatch = teamResp.match(/\[[\s\S]*\]/);
         if (!teamMatch) continue;
         var partners = JSON.parse(teamMatch[0]);
@@ -4480,7 +4480,7 @@ if (url.startsWith('/api/extract-agencies')) {
       try {
         var agResp = await claudeCall('Extract agency profiles. Return ONLY JSON array.',
           'Extract ALL agency/client profiles mentioned. JSON array with: agency_name, state, agency_type (parish/city/state_agency/housing_authority/school_board/federal), annual_budget, key_contacts, procurement_process, incumbent_contractors, hgi_relationship (active/warm/cold/none), hgi_history, verticals (comma-separated), notes.\n\n' + (am.observation || '').substring(0, 6000),
-          4000, { model: 'claude-haiku-4-5-20251001' });
+          4000, { model: 'claude-haiku-4-5-20251001', agent: 'extract_agency_profile' });
         var agMatch = agResp.match(/\[[\s\S]*\]/);
         if (!agMatch) continue;
         var agencies = JSON.parse(agMatch[0]);
@@ -4600,7 +4600,7 @@ if (url.startsWith('/api/kb-extract')) {
         if (!kChunks.data || kChunks.data.length === 0) { kbErrors.push(kDoc.filename + ': no chunks'); continue; }
         var kFullText = kChunks.data.map(function(c) { return c.chunk_text; }).join('\n\n');
         var kExtractPrompt = 'You are extracting structured institutional knowledge from an HGI proposal or corporate document.\nDocument: "' + (kDoc.filename || '') + '"\nType: "' + (kDoc.document_class || 'unknown') + '"\n\nExtract ALL of the following. Return ONLY valid JSON.\n{\n  "client": "client/agency name",\n  "contract_name": "contract or program name",\n  "vertical": "disaster_recovery|tpa_claims|property_tax|workforce|construction|housing|grant|federal|general",\n  "summary": "2-3 sentence summary",\n  "doctrine": {\n    "past_performance": [{"program":"","client":"","scope":"","scale":"","period":"","outcome":"","geography":""}],\n    "win_themes": [""],\n    "methodology": [""],\n    "differentiators": [""]\n  },\n  "winning_dna": {\n    "staff": [{"name":"","title":"","credentials":"","experience":"","years":"","historical":true,"availability_note":"Historical — confirm current availability"}],\n    "rates": [{"role":"","rate":"","rate_type":"hourly","historical":true,"rate_note":"Historical — confirm current rates"}],\n    "references": [{"name":"","title":"","organization":"","email":"","phone":""}],\n    "staffing_patterns": [{"role":"","qualifications":"","responsibilities":""}]\n  }\n}\nIf no data for a field, use null or []. Flag all staff/rates as historical.\n\nDOCUMENT TEXT:\n' + kFullText.substring(0, 12000);
-        var kResult = await claudeCall('Extract KB doctrine from ' + (kDoc.filename || '').slice(0, 40), kExtractPrompt, 4000, { model: SONNET });
+        var kResult = await claudeCall('Extract KB doctrine from ' + (kDoc.filename || '').slice(0, 40), kExtractPrompt, 4000, { model: SONNET, agent: 'extract_kb_doctrine' });
         var kClean = (kResult || '').replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
         var kJson = JSON.parse(kClean.match(/\{[\s\S]*\}/)[0]);
         await supabase.from('knowledge_documents').update({
@@ -4635,7 +4635,7 @@ if (url.startsWith('/api/extract-analytics')) {
       try {
         var anResp = await claudeCall('Extract pipeline analytics insights. Return ONLY JSON array.',
           'Extract ALL analytical insights, patterns, and recommendations. JSON array with: category (win_pattern/loss_pattern/opi_calibration/competitive_pattern/pricing_insight/market_trend), title (short label), insight (the finding), affected_verticals (comma-separated), affected_agencies, confidence (high/medium/low/speculative), source_data (what evidence), recommendation (what HGI should do).\n\n' + (anm.observation || '').substring(0, 6000),
-          4000, { model: 'claude-haiku-4-5-20251001' });
+          4000, { model: 'claude-haiku-4-5-20251001', agent: 'extract_pipeline_analytics' });
         var anMatch = anResp.match(/\[[\s\S]*\]/);
         if (!anMatch) continue;
         var insights = JSON.parse(anMatch[0]);
@@ -5322,10 +5322,10 @@ if (url.startsWith('/api/disaster-response')) {
       log('DISASTER RESPONSE PROTOCOL: Generating capture package for ' + drName + ' (' + drState + ')');
       var drPromptBase = 'Disaster: ' + drName + ' in ' + drState + '. Incident: ' + drType + '. Declaration: ' + drDate + '. Estimated damage: ' + drDamage + '. FEMA #: ' + drNumber + '.';
       var drResults = await Promise.all([
-        claudeCall('Generate 48-hour disaster response brief', drPromptBase + ' Generate a 48-hour disaster response brief for HGI. Cover: immediate HGI positioning, which agencies will issue RFPs, estimated contract values, HGI past performance most relevant, immediate actions in next 48 hours.', 2000, { model: SONNET, system: drSystem }),
-        claudeCall('Draft outreach letter', drPromptBase + ' Draft a capability outreach letter from HGI to the Governor Office and state emergency management agency. Professional, specific, offers concrete HGI capabilities. Reference Road Home and relevant past performance.', 2000, { model: SONNET, system: drSystem }),
-        claudeCall('List procurement opportunities', drPromptBase + ' List every procurement opportunity that will emerge over the next 6-18 months. For each: agency, contract type, estimated value, timeline, HGI fit score 1-10, and specific HGI win strategy.', 2000, { model: SONNET, system: drSystem }),
-        claudeCall('Build 90-day capture timeline', drPromptBase + ' Build a 90-day capture timeline for HGI. Week by week: what to do, who to contact, what to submit, what intelligence to gather.', 2000, { model: SONNET, system: drSystem })
+        claudeCall('Generate 48-hour disaster response brief', drPromptBase + ' Generate a 48-hour disaster response brief for HGI. Cover: immediate HGI positioning, which agencies will issue RFPs, estimated contract values, HGI past performance most relevant, immediate actions in next 48 hours.', 2000, { model: SONNET, system: drSystem, agent: 'disaster_response_brief_48hr' }),
+        claudeCall('Draft outreach letter', drPromptBase + ' Draft a capability outreach letter from HGI to the Governor Office and state emergency management agency. Professional, specific, offers concrete HGI capabilities. Reference Road Home and relevant past performance.', 2000, { model: SONNET, system: drSystem, agent: 'disaster_outreach_letter' }),
+        claudeCall('List procurement opportunities', drPromptBase + ' List every procurement opportunity that will emerge over the next 6-18 months. For each: agency, contract type, estimated value, timeline, HGI fit score 1-10, and specific HGI win strategy.', 2000, { model: SONNET, system: drSystem, agent: 'disaster_procurement_list' }),
+        claudeCall('Build 90-day capture timeline', drPromptBase + ' Build a 90-day capture timeline for HGI. Week by week: what to do, who to contact, what to submit, what intelligence to gather.', 2000, { model: SONNET, system: drSystem, agent: 'disaster_capture_timeline_90day' })
       ]);
       var drPackage = { disaster_name: drName, state: drState, fema_number: drNumber, brief_48hr: drResults[0] || '', outreach_letter: drResults[1] || '', opportunity_forecast: drResults[2] || '', capture_timeline_90day: drResults[3] || '', generated_at: new Date().toISOString() };
       await storeMemory('disaster_response', null, 'disaster,capture_package,' + drState.toLowerCase(), 'CAPTURE PACKAGE generated for ' + drName + ' (' + drState + '). 48hr brief: ' + (drResults[0]||'').length + ' chars, outreach: ' + (drResults[1]||'').length + ' chars, forecast: ' + (drResults[2]||'').length + ' chars, timeline: ' + (drResults[3]||'').length + ' chars.', 'analysis', null, 'high');
@@ -6629,7 +6629,7 @@ if (url.startsWith('/api/compliance-check')) {
     
     var ccPrompt = 'You are a compliance analyst. Extract EVERY submission requirement from this RFP. Return ONLY a JSON array where each item has: requirement (text), section (RFP section reference), category (one of: format, content, certification, insurance, legal, pricing, personnel, deadline, delivery), mandatory (true/false), hgi_status (one of: ready, needs_action, unknown).\n\nFor hgi_status: mark "ready" for standard items HGI can easily provide (insurance certs, W-9, drug-free workplace, etc). Mark "needs_action" for items requiring specific preparation (past performance refs with contacts, specific certifications, project-specific methodology). Mark "unknown" for items you cannot assess.\n\nRFP TEXT:\n' + rfpText;
     log('COMPLIANCE-CHECK: Calling Haiku with ' + rfpText.length + ' chars...');
-    var ccOut = await claudeCall('compliance extraction', ccPrompt, 8000, { model: 'claude-haiku-4-5-20251001' });
+    var ccOut = await claudeCall('compliance extraction', ccPrompt, 8000, { model: 'claude-haiku-4-5-20251001', agent: 'compliance_extract' });
     log('COMPLIANCE-CHECK: Haiku returned ' + (ccOut ? ccOut.length : 0) + ' chars');
     var requirements = [];
     if (ccOut && ccOut.length > 50) {
@@ -6779,12 +6779,12 @@ if (url.startsWith('/api/proposal-improve') && req.method === 'POST') {
     var piCtx = 'RFP: ' + (piData.rfp_context || '') + '\nAgency: ' + (piData.agency || '') + '\nVertical: ' + (piData.vertical || '') + '\nSection: ' + (piData.section_name || '');
     var piResult = {};
     if (piAction === 'improve' || piAction === 'both') {
-      var piImproved = await claudeCall('Improve proposal section', piCtx + '\n\nSection to improve:\n' + piSection, 2000, { model: SONNET, system: 'You are a senior proposal writer for HGI. Improve this section: more specific, more compelling, evaluator-aligned. Use real HGI past performance. Remove generic language. Add metrics and outcomes. Return only the improved section text.' });
+      var piImproved = await claudeCall('Improve proposal section', piCtx + '\n\nSection to improve:\n' + piSection, 2000, { model: SONNET, system: 'You are a senior proposal writer for HGI. Improve this section: more specific, more compelling, evaluator-aligned. Use real HGI past performance. Remove generic language. Add metrics and outcomes. Return only the improved section text.', agent: 'proposal_improve_section' });
       piResult.improved = piImproved;
       if (piAction === 'both') piSection = piImproved;
     }
     if (piAction === 'redteam' || piAction === 'both') {
-      var piFindings = await claudeCall('Red team proposal section', piCtx + '\n\nSection to red team:\n' + piSection, 2000, { model: SONNET, system: 'You are a ruthless proposal evaluator. Find every weakness, vague claim, gap, and missing requirement. Return a numbered list of specific issues with fixes.' });
+      var piFindings = await claudeCall('Red team proposal section', piCtx + '\n\nSection to red team:\n' + piSection, 2000, { model: SONNET, system: 'You are a ruthless proposal evaluator. Find every weakness, vague claim, gap, and missing requirement. Return a numbered list of specific issues with fixes.', agent: 'proposal_red_team_section' });
       piResult.redteam_findings = piFindings;
     }
     if (!piResult.improved && !piResult.redteam_findings) { res.end(JSON.stringify({ error: 'action must be improve, redteam, or both' })); return; }
@@ -14247,7 +14247,7 @@ async function agentSourceExpansion(state) {
   log('SOURCE EXPANSION...');
   var task = 'TASK: Map procurement portals for LA, MS, TX, FL, AL, GA. For each: URL, verticals covered, access requirements, estimated volume. Focus on portals not currently monitored.';
   var prompt = task;
-  var out = await claudeCall(task, prompt, 1200, { webSearch: true, model: HAIKU });
+  var out = await claudeCall(task, prompt, 1200, { webSearch: true, model: HAIKU, agent: 'agentSourceExpansion' });
   if (!out || out.length < 100) return null;
   await storeMemory('source_expansion', null, 'sources', out, 'analysis', null, 'medium');
   return { agent: 'source_expansion', opp: 'system', chars: out.length };
@@ -14258,7 +14258,7 @@ async function agentContractExpiration(state) {
   var ctx = buildAgentCtx(state, 'contract_expiration', null);
   var task = 'TASK: Search USAspending and state portals for expiring contracts in HGI verticals. Recompete window = 6-12 months before expiration. For each: holder, agency, value, end date, recompete timeline.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1200, { webSearch: true, model: HAIKU });
+  var out = await claudeCall(task, prompt, 1200, { webSearch: true, model: HAIKU, agent: 'agentContractExpiration' });
   if (!out || out.length < 100) return null;
   var hasUrl = /https?:\/\//.test(out);
   await storeMemory('contract_expiration', null, 'recompete', out, 'analysis', hasUrl ? 'web_search' : null, hasUrl ? 'high' : 'inferred');
@@ -14282,7 +14282,7 @@ async function agentAmendmentTracker(state) {
   var oppList = pursuing.map(function(o) { return (o.title || '?') + ' | Source: ' + (o.source_url || 'none'); }).join('\n');
   var task = 'TASK: Check each pursuing-stage opportunity for RFP amendments, addenda, Q&A postings, deadline changes. Flag any competitor activity visible on bid boards (questions asked, firms registered). This is CRITICAL — if a competitor asked a question on a bid board, that is confirmed competitive intelligence.';
   var prompt = 'OPPORTUNITIES:\n' + oppList + preResearch + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1200, { webSearch: true, model: HAIKU });
+  var out = await claudeCall(task, prompt, 1200, { webSearch: true, model: HAIKU, agent: 'agentAmendmentTracker' });
   if (!out || out.length < 100) return null;
   await storeMemory('amendment_tracker', null, 'amendments', out, 'analysis', null, 'medium');
   return { agent: 'amendment_tracker', opp: 'system', chars: out.length };
@@ -14292,7 +14292,7 @@ async function agentRegulatoryMonitor(state) {
   log('REGULATORY MONITOR...');
   var task = 'TASK: Search Federal Register, FEMA policy updates, HUD notices, LA legislature for regulatory changes affecting HGI verticals. For each: change, effective date, impact, recommended response.';
   var prompt = task;
-  var out = await claudeCall(task, prompt, 1200, { webSearch: true, model: HAIKU });
+  var out = await claudeCall(task, prompt, 1200, { webSearch: true, model: HAIKU, agent: 'agentRegulatoryMonitor' });
   if (!out || out.length < 100) return null;
   var hasUrl = /https?:\/\//.test(out);
   await storeMemory('regulatory_monitor', null, 'regulatory', out, 'analysis', hasUrl ? 'web_search' : null, hasUrl ? 'high' : 'inferred');
@@ -14304,7 +14304,7 @@ async function agentEntrepreneurial(state) {
   var ctx = buildAgentCtx(state, 'entrepreneurial_agent', null);
   var task = 'TASK: Find unsolicited opportunities where HGI creates demand. THE NOLA MODEL: HGI identified S&WB $2B crisis + $222M deficit, created concept paper without waiting for RFP. Search for: agencies in crisis, infrastructure failures, audit findings, new federal funding agencies haven\'t accessed, DR situations needing capacity. Each: agency pain point (sourced), available funding, HGI fit, approach.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1500, { webSearch: true, model: HAIKU });
+  var out = await claudeCall(task, prompt, 1500, { webSearch: true, model: HAIKU, agent: 'agentEntrepreneurial' });
   if (!out || out.length < 100) return null;
   var hasUrl = /https?:\/\//.test(out);
   await storeMemory('entrepreneurial_agent', null, 'unsolicited', out, 'analysis', hasUrl ? 'web_search' : null, hasUrl ? 'high' : 'inferred');
@@ -14316,7 +14316,7 @@ async function agentRecompete(state) {
   var ctx = buildAgentCtx(state, 'recompete_agent', null);
   var task = 'TASK: Monitor for recompete opportunities. Search for competitor contracts approaching expiration in HGI verticals. Timeline, threats, defense strategy.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1200, { webSearch: true, model: HAIKU });
+  var out = await claudeCall(task, prompt, 1200, { webSearch: true, model: HAIKU, agent: 'agentRecompete' });
   if (!out || out.length < 100) return null;
   await storeMemory('recompete_agent', null, 'recompete', out, 'analysis', null, 'medium');
   return { agent: 'recompete_agent', opp: 'system', chars: out.length };
@@ -14327,7 +14327,7 @@ async function agentCompetitorDeepDive(state) {
   var ctx = buildAgentCtx(state, 'competitor_deep_dive', null);
   var task = 'TASK: Build profiles of HGI top competitors: CDR Maguire, IEM, Tetra Tech, Hagerty. For each: recent wins (sourced), key personnel, geographic footprint, strengths/weaknesses. Source every claim.';
   var prompt = 'MEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1500, { webSearch: true, model: HAIKU });
+  var out = await claudeCall(task, prompt, 1500, { webSearch: true, model: HAIKU, agent: 'agentCompetitorDeepDive' });
   if (!out || out.length < 100) return null;
   var hasUrl = /https?:\/\//.test(out);
   await storeMemory('competitor_deep_dive', null, 'competitors', out, 'competitive_intel', hasUrl ? 'web_search' : null, hasUrl ? 'high' : 'inferred');
@@ -14340,7 +14340,7 @@ async function agentAgencyProfile(state) {
   var agencies = state.pipeline.map(function(o) { return o.agency || ''; }).filter(function(a, i, arr) { return a && arr.indexOf(a) === i; }).join(', ');
   var task = 'TASK: Build profiles of target agencies: ' + agencies + '. Org chart, procurement patterns, budget cycle, current contracts, strategic priorities.';
   var prompt = 'MEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1500, { webSearch: true, model: HAIKU });
+  var out = await claudeCall(task, prompt, 1500, { webSearch: true, model: HAIKU, agent: 'agentAgencyProfile' });
   if (!out || out.length < 100) return null;
   var hasUrl = /https?:\/\//.test(out);
   await storeMemory('agency_profile_agent', null, 'agencies', out, 'analysis', hasUrl ? 'web_search' : null, hasUrl ? 'high' : 'inferred');
@@ -14355,7 +14355,7 @@ async function agentPipelineScanner(state) {
   var ctx = buildAgentCtx(state, 'pipeline_scanner', null);
   var task = 'TASK: (1) Deadlines within 14 days (2) Stale pursuits >14 days no activity (3) OPI/stage inconsistencies (4) Missing critical fields (5) Priority order for the President this week.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1200, { model: HAIKU });
+  var out = await claudeCall(task, prompt, 1200, { model: HAIKU, agent: 'agentPipelineScanner' });
   if (!out || out.length < 100) return null;
   await storeMemory('pipeline_scanner', null, 'pipeline,deadlines', out, 'analysis', null, 'high');
   return { agent: 'pipeline_scanner', opp: 'system', chars: out.length };
@@ -14376,7 +14376,7 @@ async function agentOPICalibration(state) {
   } catch(e) {}
   var task = 'TASK: Review OPI scores vs accumulated intelligence AND recorded outcomes. HTHA lost at OPI 78 — what does this teach about Housing/HUD scoring? Any opps scored too high or low? Recommend specific OPI adjustments with rationale. If an outcome shows OPI was wrong, explain why and how to fix the model.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + outcomeData + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1200, { model: HAIKU });
+  var out = await claudeCall(task, prompt, 1200, { model: HAIKU, agent: 'agentOPICalibration' });
   if (!out || out.length < 100) return null;
   await storeMemory('scanner_opi', null, 'opi', out, 'analysis', null, 'medium');
   return { agent: 'scanner_opi', opp: 'system', chars: out.length };
@@ -14387,7 +14387,7 @@ async function agentContentEngine(state) {
   var ctx = buildAgentCtx(state, 'content_engine', null);
   var task = 'TASK: Review proposal content quality. Active voice % (target 80%+), specific vs generic language, metric-backed claims. Provide specific rewrites for worst offenders.';
   var prompt = 'MEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1200, { model: HAIKU });
+  var out = await claudeCall(task, prompt, 1200, { model: HAIKU, agent: 'agentContentEngine' });
   if (!out || out.length < 100) return null;
   await storeMemory('content_engine', null, 'content', out, 'analysis', null, 'medium');
   return { agent: 'content_engine', opp: 'system', chars: out.length };
@@ -14398,7 +14398,7 @@ async function agentRecruiting(state) {
   var ctx = buildAgentCtx(state, 'recruiting_bench', null);
   var task = 'TASK: Staffing gap matrix across all pursuits. Position needed, which opp, when, HGI availability, recruitment action. Flag shared resource risks.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1200, { model: HAIKU });
+  var out = await claudeCall(task, prompt, 1200, { model: HAIKU, agent: 'agentRecruiting' });
   if (!out || out.length < 100) return null;
   await storeMemory('recruiting_bench', null, 'recruiting', out, 'analysis', null, 'medium');
   return { agent: 'recruiting_bench', opp: 'system', chars: out.length };
@@ -14409,7 +14409,7 @@ async function agentKnowledgeBase(state) {
   var ctx = buildAgentCtx(state, 'knowledge_base_agent', null);
   var task = 'TASK: KB gap analysis. What documents strengthen proposals? Prioritized: doc needed, who provides, which opp it helps. NOTE: CEO KB doc request outstanding since March 18 2026.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1200, { model: HAIKU });
+  var out = await claudeCall(task, prompt, 1200, { model: HAIKU, agent: 'agentKnowledgeBase' });
   if (!out || out.length < 100) return null;
   await storeMemory('knowledge_base_agent', null, 'kb', out, 'analysis', null, 'medium');
   return { agent: 'knowledge_base_agent', opp: 'system', chars: out.length };
@@ -14420,7 +14420,7 @@ async function agentScraperInsights(state) {
   var ctx = buildAgentCtx(state, 'scraper_insights', null);
   var task = 'TASK: Source health assessment. Which sources produce real opps, which are dead? Central Bidding (Apify 24/7), LaPAC, SAM.gov, Grants.gov. ROI by source.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1200, { model: HAIKU });
+  var out = await claudeCall(task, prompt, 1200, { model: HAIKU, agent: 'agentScraperInsights' });
   if (!out || out.length < 100) return null;
   await storeMemory('scraper_insights', null, 'sources', out, 'analysis', null, 'medium');
   return { agent: 'scraper_insights', opp: 'system', chars: out.length };
@@ -14431,7 +14431,7 @@ async function agentDesignVisual(state) {
   var ctx = buildAgentCtx(state, 'design_visual', null);
   var task = 'TASK: Visual content needs across proposals. For each: graphic type (org chart, flowchart, timeline, map), proposal section, specific content. Must be specific enough to produce.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1200, { model: HAIKU });
+  var out = await claudeCall(task, prompt, 1200, { model: HAIKU, agent: 'agentDesignVisual' });
   if (!out || out.length < 100) return null;
   await storeMemory('design_visual', null, 'design', out, 'analysis', null, 'medium');
   return { agent: 'design_visual', opp: 'system', chars: out.length };
@@ -14442,7 +14442,7 @@ async function agentTeaming(state) {
   var ctx = buildAgentCtx(state, 'teaming_agent', null);
   var task = 'TASK: Teaming needs. 1099 SME model: grants/tax credits/loans under HGI brand, teaming on JP SOQ and NOLA. For each staffing gap: potential partner type, arrangement (sub, 1099, JV), capability rationale.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1200, { model: HAIKU });
+  var out = await claudeCall(task, prompt, 1200, { model: HAIKU, agent: 'agentTeaming' });
   if (!out || out.length < 100) return null;
   await storeMemory('teaming_agent', null, 'teaming', out, 'analysis', null, 'medium');
   return { agent: 'teaming_agent', opp: 'system', chars: out.length };
@@ -14452,7 +14452,7 @@ async function agentBudgetCycle(state) {
   log('BUDGET CYCLE...');
   var task = 'TASK: Track budget cycles for target agencies. Search budget documents, fiscal year calendars. When do agencies release RFPs relative to budget cycle? Timing recommendations.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1200, { webSearch: true, model: HAIKU });
+  var out = await claudeCall(task, prompt, 1200, { webSearch: true, model: HAIKU, agent: 'agentBudgetCycle' });
   if (!out || out.length < 100) return null;
   await storeMemory('budget_cycle', null, 'budget', out, 'analysis', null, 'medium');
   return { agent: 'budget_cycle', opp: 'system', chars: out.length };
@@ -14963,7 +14963,7 @@ async function agentOutreachAutomation(state) {
   var ctx = buildAgentCtx(state, 'outreach_automation', null);
   var task = 'TASK: Outreach recommendations for pursuing-stage opps. Who to contact, what to say, channel, outcome to drive. Draft text. NOTHING goes outbound without President approval.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1200, { model: HAIKU });
+  var out = await claudeCall(task, prompt, 1200, { model: HAIKU, agent: 'agentOutreachAutomation' });
   if (!out || out.length < 100) return null;
   await storeMemory('outreach_automation', null, 'outreach', out, 'analysis', null, 'medium');
   return { agent: 'outreach_automation', opp: 'system', chars: out.length };
@@ -15002,7 +15002,7 @@ async function agentSubcontractorDB(state) {
   var ctx = buildAgentCtx(state, 'subcontractor_db', null);
   var task = 'TASK: Identify potential subcontractors for capability gaps. Required capability, firms, certifications, geography. Prioritize DBE/MBE for set-aside compliance.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1200, { model: HAIKU });
+  var out = await claudeCall(task, prompt, 1200, { model: HAIKU, agent: 'agentSubcontractorDB' });
   if (!out || out.length < 100) return null;
   await storeMemory('subcontractor_db', null, 'subcontractors', out, 'analysis', null, 'medium');
   return { agent: 'subcontractor_db', opp: 'system', chars: out.length };
@@ -15015,7 +15015,7 @@ async function agentExecutiveBrief(state) {
   var ctx = buildAgentCtx(state, 'executive_brief_agent', null);
   var task = 'TASK: Weekly digest for CEO and Chairman. (1) Pipeline: new/active/won/lost (2) Top 3 priority actions (3) Risk alerts (4) Competitive intel highlights (5) Resource needs. 1 page. Decision-oriented.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 2000, { model: HAIKU });
+  var out = await claudeCall(task, prompt, 2000, { model: HAIKU, agent: 'agentExecutiveBrief' });
   if (!out || out.length < 100) return null;
   await storeMemory('executive_brief_agent', null, 'executive', out, 'analysis', null, 'medium');
   return { agent: 'executive_brief_agent', opp: 'system', chars: out.length };
@@ -15026,7 +15026,7 @@ async function agentDashboard(state) {
   var ctx = buildAgentCtx(state, 'dashboard_agent', null);
   var task = 'TASK: Morning briefing for the President. Top 3 things to know. Top 3 actions needed. Alerts. Concise. Decision-oriented. No fluff.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1500, { model: HAIKU });
+  var out = await claudeCall(task, prompt, 1500, { model: HAIKU, agent: 'agentDashboard' });
   if (!out || out.length < 100) return null;
   await storeMemory('dashboard_agent', null, 'dashboard', out, 'analysis', null, 'medium');
   return { agent: 'dashboard_agent', opp: 'system', chars: out.length };
@@ -15108,7 +15108,7 @@ async function agentSelfAwareness(state, sessionResults, evalScores) {
   
   var task = 'TASK: You see everything. (1) Patterns across opps individual agents missed (2) Which agents produced highest-value intelligence (3) SINGLE improvement to most raise next proposal score (4) Costliest data gaps (5) ONE thing the President must do this week.' + evalSummary;
   var prompt = 'SESSION RESULTS:\n' + resultsSummary + '\n\nPIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 3000, { model: HAIKU });
+  var out = await claudeCall(task, prompt, 3000, { model: HAIKU, agent: 'agentSelfAwareness' });
   if (!out || out.length < 100) return null;
   await storeMemory('self_awareness', null, 'self_assessment', out, 'analysis', null, 'medium');
   return { agent: 'self_awareness', opp: 'system', chars: out.length };
@@ -17495,7 +17495,7 @@ async function runSession(trigger) {
           try {
             var coResp = await claudeCall('Extract competitor data. Return ONLY a JSON array.', 
               'Extract ALL competitors. Return JSON array with: competitor_name, hq_location, hq_state, strengths, weaknesses, threat_level (primary/secondary/emerging/watch), contract_value, active_verticals (array), active_states (array), certifications (array), key_personnel, price_intelligence, strategic_notes.\n\n' + coCombined, 
-              4000, { model: 'claude-haiku-4-5-20251001' });
+              4000, { model: 'claude-haiku-4-5-20251001', agent: 'runSession_extract_competitor' });
             var coMatch = coResp.match(/\[[\s\S]*\]/);
             if (!coMatch) continue;
             var coComps = JSON.parse(coMatch[0]);
@@ -17541,7 +17541,7 @@ async function runSession(trigger) {
           try {
             var crResp = await claudeCall('Extract contacts. Return ONLY JSON array.',
               'Extract ALL named contacts. JSON array with: contact_name, title, organization, agency, email, phone, role_in_procurement, contact_type (decision_maker/evaluator/procurement/technical/political/influencer/engineer_of_record/other), priority (critical/high/medium/low), hgi_relationship (warm/cold/unknown), notes.\n\nContext: '+oppCtx+'\n\n'+crCombined,
-              4000, { model: 'claude-haiku-4-5-20251001' });
+              4000, { model: 'claude-haiku-4-5-20251001', agent: 'runSession_extract_contacts' });
             var crMatch = crResp.match(/\[[\s\S]*\]/);
             if (!crMatch) continue;
             var crContacts = JSON.parse(crMatch[0]);
@@ -17571,7 +17571,7 @@ async function runSession(trigger) {
           var drm = recentDis[dri];
           if (!drm.observation || drm.observation.length < 200) continue;
           try {
-            var drResp = await claudeCall('Extract disasters. JSON array only.', 'Extract disaster declarations. JSON array: disaster_number, disaster_name, state, incident_type, threat_level.\n\n' + (drm.observation || '').substring(0, 4000), 3000, { model: 'claude-haiku-4-5-20251001' });
+            var drResp = await claudeCall('Extract disasters. JSON array only.', 'Extract disaster declarations. JSON array: disaster_number, disaster_name, state, incident_type, threat_level.\n\n' + (drm.observation || '').substring(0, 4000), 3000, { model: 'claude-haiku-4-5-20251001', agent: 'runSession_extract_disaster' });
             var drMatch = drResp.match(/\[[\s\S]*\]/);
             if (!drMatch) continue;
             var drDis = JSON.parse(drMatch[0]);
@@ -17602,7 +17602,7 @@ async function runSession(trigger) {
           var ram = recentReg.data[rai];
           if (!ram.observation || ram.observation.length < 200) continue;
           try {
-            var raResp = await claudeCall('Extract regulatory changes. JSON array only.', 'Extract regulatory changes. JSON array: regulation_name, agency_source, category (fema_policy/state_procurement/cdbg_dr/hud/insurance/workforce), impact_level (critical/high/medium/low), affected_verticals, summary.\n\n' + (ram.observation || '').substring(0, 4000), 3000, { model: 'claude-haiku-4-5-20251001' });
+            var raResp = await claudeCall('Extract regulatory changes. JSON array only.', 'Extract regulatory changes. JSON array: regulation_name, agency_source, category (fema_policy/state_procurement/cdbg_dr/hud/insurance/workforce), impact_level (critical/high/medium/low), affected_verticals, summary.\n\n' + (ram.observation || '').substring(0, 4000), 3000, { model: 'claude-haiku-4-5-20251001', agent: 'runSession_extract_regulatory' });
             var raMatch = raResp.match(/\[[\s\S]*\]/);
             if (!raMatch) continue;
             var raRegs = JSON.parse(raMatch[0]);
@@ -17630,7 +17630,7 @@ async function runSession(trigger) {
           var tam = recentTeam.data[tai];
           if (!tam.observation || tam.observation.length < 200) continue;
           try {
-            var taResp = await claudeCall('Extract teaming partners. JSON array only.', 'Extract teaming partners and subcontractors. JSON array: partner_name, capability, location, certifications, verticals, fit_score (strong/medium/speculative), notes.\n\n' + (tam.observation || '').substring(0, 4000), 3000, { model: 'claude-haiku-4-5-20251001' });
+            var taResp = await claudeCall('Extract teaming partners. JSON array only.', 'Extract teaming partners and subcontractors. JSON array: partner_name, capability, location, certifications, verticals, fit_score (strong/medium/speculative), notes.\n\n' + (tam.observation || '').substring(0, 4000), 3000, { model: 'claude-haiku-4-5-20251001', agent: 'runSession_extract_teaming' });
             var taMatch = taResp.match(/\[[\s\S]*\]/);
             if (!taMatch) continue;
             var taParts = JSON.parse(taMatch[0]);
@@ -17658,7 +17658,7 @@ async function runSession(trigger) {
           var aam = recentAg.data[aai];
           if (!aam.observation || aam.observation.length < 200) continue;
           try {
-            var aaResp = await claudeCall('Extract agency profiles. JSON array only.', 'Extract agency/client profiles. JSON array: agency_name, state, agency_type (parish/city/state_agency/housing_authority/school_board/federal), annual_budget, incumbent_contractors, hgi_relationship (active/warm/cold/none), hgi_history, verticals, notes.\n\n' + (aam.observation || '').substring(0, 4000), 3000, { model: 'claude-haiku-4-5-20251001' });
+            var aaResp = await claudeCall('Extract agency profiles. JSON array only.', 'Extract agency/client profiles. JSON array: agency_name, state, agency_type (parish/city/state_agency/housing_authority/school_board/federal), annual_budget, incumbent_contractors, hgi_relationship (active/warm/cold/none), hgi_history, verticals, notes.\n\n' + (aam.observation || '').substring(0, 4000), 3000, { model: 'claude-haiku-4-5-20251001', agent: 'runSession_extract_agency' });
             var aaMatch = aaResp.match(/\[[\s\S]*\]/);
             if (!aaMatch) continue;
             var aaAgs = JSON.parse(aaMatch[0]);
@@ -17686,7 +17686,7 @@ async function runSession(trigger) {
           var nam = recentAn.data[nai];
           if (!nam.observation || nam.observation.length < 200) continue;
           try {
-            var naResp = await claudeCall('Extract analytics insights. JSON array only.', 'Extract analytical insights. JSON array: category (win_pattern/loss_pattern/opi_calibration/competitive_pattern/pricing_insight/market_trend), title, insight, affected_verticals, confidence (high/medium/low), recommendation.\n\n' + (nam.observation || '').substring(0, 4000), 3000, { model: 'claude-haiku-4-5-20251001' });
+            var naResp = await claudeCall('Extract analytics insights. JSON array only.', 'Extract analytical insights. JSON array: category (win_pattern/loss_pattern/opi_calibration/competitive_pattern/pricing_insight/market_trend), title, insight, affected_verticals, confidence (high/medium/low), recommendation.\n\n' + (nam.observation || '').substring(0, 4000), 3000, { model: 'claude-haiku-4-5-20251001', agent: 'runSession_extract_analytics' });
             var naMatch = naResp.match(/\[[\s\S]*\]/);
             if (!naMatch) continue;
             var naIns = JSON.parse(naMatch[0]);
@@ -17715,7 +17715,7 @@ async function runSession(trigger) {
           if (!bam.observation || bam.observation.length < 200) continue;
           try {
             // T3C R5 S161: aligned to budget_cycles schema (was agency_name, funding_sources, procurement_timeline — none exist; silent failures since cron deploy)
-            var baResp = await claudeCall('Extract budget cycles. JSON array only.', 'Extract government budget cycle data. JSON array fields: agency, state, fiscal_year_start, fiscal_year_end, budget_amount, procurement_window, rfp_timing, hgi_vertical, notes.\n\n' + (bam.observation || '').substring(0, 4000), 3000, { model: 'claude-haiku-4-5-20251001' });
+            var baResp = await claudeCall('Extract budget cycles. JSON array only.', 'Extract government budget cycle data. JSON array fields: agency, state, fiscal_year_start, fiscal_year_end, budget_amount, procurement_window, rfp_timing, hgi_vertical, notes.\n\n' + (bam.observation || '').substring(0, 4000), 3000, { model: 'claude-haiku-4-5-20251001', agent: 'runSession_extract_budget' });
             var baMatch = baResp.match(/\[[\s\S]*\]/);
             if (!baMatch) continue;
             var baBuds = JSON.parse(baMatch[0]);
@@ -17744,7 +17744,7 @@ async function runSession(trigger) {
           if (!ram2.observation || ram2.observation.length < 200) continue;
           try {
             // T3C R5 S161: aligned to recompete_tracker schema. Was contract_title (no col), incumbent (no col — schema has hgi_incumbent boolean + known_competitor text), contract_value (no col — schema has numeric estimated_value_annual), end_date (no col — schema has contract_end_date), recompete_window (no col), hgi_verticals (no col — schema has vertical), competitive_landscape (no col). Schema also requires `client` NOT NULL and uses `last_updated` not `updated_at`.
-            var raResp2 = await claudeCall('Extract recompete opportunities. JSON array only. Use exact field names.', 'Extract contract recompete/expiration data. JSON array fields: contract_name, client (the agency or organization the contract is with — REQUIRED), vertical, hgi_incumbent (boolean — true if HGI is incumbent), known_competitor (string — incumbent name if not HGI), contract_start_date, contract_end_date, estimated_value_annual (number, no $ or commas), procurement_contact, decision_maker, status, notes, rfp_expected_date.\n\n' + (ram2.observation || '').substring(0, 4000), 3000, { model: 'claude-haiku-4-5-20251001' });
+            var raResp2 = await claudeCall('Extract recompete opportunities. JSON array only. Use exact field names.', 'Extract contract recompete/expiration data. JSON array fields: contract_name, client (the agency or organization the contract is with — REQUIRED), vertical, hgi_incumbent (boolean — true if HGI is incumbent), known_competitor (string — incumbent name if not HGI), contract_start_date, contract_end_date, estimated_value_annual (number, no $ or commas), procurement_contact, decision_maker, status, notes, rfp_expected_date.\n\n' + (ram2.observation || '').substring(0, 4000), 3000, { model: 'claude-haiku-4-5-20251001', agent: 'runSession_extract_recompete' });
             var raMatch2 = raResp2.match(/\[[\s\S]*\]/);
             if (!raMatch2) continue;
             var raRecs = JSON.parse(raMatch2[0]);
