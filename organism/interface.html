@@ -32,6 +32,24 @@ TEXT='#E8E0D0',TEXT_D='#888070',BORDER='#2A2520',RED='#C0392B',GREEN='#27AE60',B
 
 var HGI_CONTEXT='HGI Global (Hammerman & Gainer LLC) — 97-year-old, 100% minority-owned program management firm in Kenner, LA. 8 verticals: Disaster Recovery, TPA/Claims, Property Tax Appeals, Workforce/WIOA, Construction Management, Program Administration, Housing/HUD, Grant Management. SAM UEI: DL4SJEVKZ6H4.';
 
+// F-217 (S157 T1A): Detect FACT-CHECK warning prefix on scope_analysis and split into a prominent
+// red badge + clean body. Status alternation includes FLAGGED/FAILED/REVIEW/CONTAMINATED — the
+// fact-check agent emits any of these (Washington Parish uses CONTAMINATED, OPSB+St.James use FLAGGED).
+// Returns {badge: ReactElement|null, body: string}. When prefix absent, body = original text.
+function factCheckParse(text){
+  if(!text || typeof text !== 'string') return {badge:null, body:text||''};
+  var m = text.match(/^⚠️\s*FACT[-\s]*CHECK[:\s]*(FLAGGED|FAILED|REVIEW|CONTAMINATED)\s*[—–-]?\s*([^\n]+)/);
+  if(!m) return {badge:null, body:text};
+  var status = m[1];
+  var desc = (m[2] || '').trim();
+  var body = text.substring(m[0].length).replace(/^[\s\n]+/, '');
+  var bg = (status==='FAILED') ? '#8E0000' : (status==='REVIEW' ? '#D68910' : '#C0392B');
+  var badge = e('div', {
+    style:{background:bg, color:'#fff', padding:'10px 14px', borderRadius:6, fontWeight:700, marginBottom:10, minHeight:40, display:'flex', alignItems:'center', fontSize:13, lineHeight:1.4}
+  }, '⚠️ FACT-CHECK ' + status + ': ' + desc);
+  return {badge:badge, body:body};
+}
+
 function Badge(p){
   var c=p.color||GOLD;
   return e('span',{style:{display:'inline-block',padding:'2px 8px',borderRadius:10,fontSize:10,fontWeight:'bold',letterSpacing:1,textTransform:'uppercase',background:c+'22',color:c,border:'1px solid '+c+'44'}},p.children);
@@ -105,7 +123,7 @@ var _plCache={data:null,ts:0};
 function fetchPipelineData(){
   var now=Date.now();
   if(_plCache.data&&now-_plCache.ts<60000)return Promise.resolve(_plCache.data);
-  return fetch('/api/pipeline').then(function(r){return r.json()}).then(function(d){
+  return fetch('/api/pipeline?limit=200').then(function(r){return r.json()}).then(function(d){
     var opps=(d.opportunities||d||[]).filter(function(o){return o.status==='active'||!o.status});
     _plCache={data:opps,ts:Date.now()};
     return opps;
@@ -1349,7 +1367,7 @@ function OpportunityDetail(p){
 
     // Sub-tab content
     subTab==='overview'?e('div',null,
-      o.scope_analysis?e(Card,null,e(Label,{text:'SCOPE ANALYSIS'}),e('div',{style:{fontSize:12,whiteSpace:'pre-wrap',maxHeight:400,overflowY:'auto'}},o.scope_analysis)):null,
+      o.scope_analysis?(function(){var _fc=factCheckParse(o.scope_analysis);return e(Card,null,e(Label,{text:'SCOPE ANALYSIS'}),_fc.badge,e('div',{style:{fontSize:12,whiteSpace:'pre-wrap',maxHeight:400,overflowY:'auto'}},_fc.body));})():null,
       o.description?e(Card,null,e(Label,{text:'EXECUTIVE SUMMARY'}),e('div',{style:{fontSize:12,whiteSpace:'pre-wrap',maxHeight:400,overflowY:'auto'}},o.description)):null,
       e(Card,null,
         e(Label,{text:'ACTIONS'}),
@@ -1884,7 +1902,7 @@ function OpportunityBriefModule(p){
     ),
 
     // Embedded sections (expandable)
-    e(Section,{skey:'scope',label:'SCOPE ANALYSIS',content:det.scope_analysis}),
+    e(Fragment,null,det.scope_analysis?factCheckParse(det.scope_analysis).badge:null,e(Section,{skey:'scope',label:'SCOPE ANALYSIS',content:det.scope_analysis?factCheckParse(det.scope_analysis).body:det.scope_analysis})),
     e(Section,{skey:'exec',label:'EXECUTIVE SUMMARY',content:det.description||det.capture_action}),
     e(Section,{skey:'research',label:'RESEARCH & COMPETITIVE INTEL',content:det.research_brief}),
     e(Section,{skey:'financial',label:'FINANCIAL ANALYSIS',content:det.financial_analysis}),
@@ -2372,13 +2390,31 @@ function FinancialPricingModule(p){
   var pl=p.pl;
   var st1=useState('intelligence'),tab=st1[0],setTab=st1[1];
 
+  // F-108a (S157 T1A): HGI canon rate card — fully-burdened, per hour. Used by category dropdown to auto-fill rate.
+  var HGI_RATE_CARD=[
+    {cat:'Principal',rate:220},
+    {cat:'Program Director',rate:210},
+    {cat:'SME',rate:200},
+    {cat:'Sr Grant Mgr',rate:180},
+    {cat:'Sr PM',rate:180},
+    {cat:'Grant Mgr',rate:175},
+    {cat:'PM',rate:155},
+    {cat:'Grant Writer',rate:145},
+    {cat:'Appeals Specialist',rate:145},
+    {cat:'Architect/Engineer',rate:135},
+    {cat:'Cost Estimator',rate:125},
+    {cat:'Sr Damage Assessor',rate:115},
+    {cat:'Damage Assessor',rate:105},
+    {cat:'Admin Support',rate:65}
+  ];
+
   // Price Intelligence state
   var st2=useState({contractType:'Best Value — Tradeoff',setAside:'Full & Open Competition',priceWeight:30,value:'',years:3,geography:'Louisiana',incumbent:'',incumbentAdv:'Unknown',hgiIncumbent:'No',competitors:'ICF, Hagerty, Witt O\'Brien\'s, Dewberry',marginTarget:12,protestRisk:'Low'}),intel=st2[0],setIntel=st2[1];
 
-  // Cost Buildup state
+  // Cost Buildup state — F-108a: defaults use HGI canon roles (PM $155, Sr Grant Mgr $180), not the deprecated 'Senior Analyst'
   var st3=useState([
-    {cat:'Program Manager',hours:2080,rate:155,fringe:0.32,oh:0.15,ga:0.08,fee:0.07},
-    {cat:'Senior Analyst',hours:2080,rate:125,fringe:0.32,oh:0.15,ga:0.08,fee:0.07}
+    {cat:'PM',hours:2080,rate:155,fringe:0.32,oh:0.15,ga:0.08,fee:0.07},
+    {cat:'Sr Grant Mgr',hours:2080,rate:180,fringe:0.32,oh:0.15,ga:0.08,fee:0.07}
   ]),labor=st3[0],setLabor=st3[1];
   var st4=useState([{desc:'Travel',amount:25000},{desc:'Other Direct Costs',amount:10000}]),odcs=st4[0],setOdcs=st4[1];
 
@@ -2410,7 +2446,9 @@ function FinancialPricingModule(p){
   },[pl.selected?pl.selected.id:null]);
 
   function calcLoaded(row){
-    var loaded=row.rate*(1+row.fringe)*(1+row.oh)*(1+row.ga)*(1+row.fee);
+    // F-165 (S157 T1A): HGI rate card is already fully-burdened (canon — includes fringe+OH+G&A+fee).
+    // Removing multipliers fixes ~75% bid inflation. Multiplier columns retained as informational only.
+    var loaded=row.rate;
     return Math.round(loaded*100)/100;
   }
   function calcRowTotal(row){return Math.round(calcLoaded(row)*row.hours)}
@@ -2537,7 +2575,26 @@ function FinancialPricingModule(p){
           e('tbody',null,
             labor.map(function(row,i){
               return e('tr',{key:i},
-                e('td',{style:{padding:4}},e('input',{value:row.cat,onChange:function(ev){updateLabor(i,'cat',ev.target.value)},style:{background:BG3,color:TEXT,border:'1px solid '+BORDER,padding:'4px 6px',width:140,fontSize:11}})),
+                e('td',{style:{padding:4}},(function(){
+                  var matchedCanon=HGI_RATE_CARD.filter(function(c){return c.cat===row.cat&&c.rate===row.rate})[0];
+                  var selValue=matchedCanon?matchedCanon.cat:'__custom__';
+                  return e('div',{style:{display:'flex',gap:4,alignItems:'center'}},
+                    e('select',{
+                      value:selValue,
+                      onChange:function(ev){
+                        var v=ev.target.value;
+                        if(v==='__custom__'){updateLabor(i,'cat','');return;}
+                        var c=HGI_RATE_CARD.filter(function(x){return x.cat===v})[0];
+                        if(c){setLabor(function(prev){var n=prev.slice();n[i]=Object.assign({},n[i],{cat:c.cat,rate:c.rate});return n});}
+                      },
+                      style:{background:BG3,color:TEXT,border:'1px solid '+BORDER,padding:'4px 6px',width:140,fontSize:11}
+                    },
+                      HGI_RATE_CARD.map(function(c){return e('option',{key:c.cat,value:c.cat},c.cat+' ($'+c.rate+')');}),
+                      e('option',{key:'__custom__',value:'__custom__'},'Custom...')
+                    ),
+                    selValue==='__custom__'?e('input',{value:row.cat,placeholder:'Role',onChange:function(ev){updateLabor(i,'cat',ev.target.value)},style:{background:BG3,color:TEXT,border:'1px solid '+BORDER,padding:'4px 6px',width:90,fontSize:11}}):null
+                  );
+                })()),
                 e('td',{style:{padding:4}},e('input',{type:'number',value:row.hours,onChange:function(ev){updateLabor(i,'hours',ev.target.value)},style:{background:BG3,color:TEXT,border:'1px solid '+BORDER,padding:'4px 6px',width:60,fontSize:11}})),
                 e('td',{style:{padding:4}},e('input',{type:'number',value:row.rate,onChange:function(ev){updateLabor(i,'rate',ev.target.value)},style:{background:BG3,color:TEXT,border:'1px solid '+BORDER,padding:'4px 6px',width:60,fontSize:11}})),
                 e('td',{style:{padding:4,color:TEXT_D}},Math.round(row.fringe*100)+'%'),
