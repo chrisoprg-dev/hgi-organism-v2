@@ -83,6 +83,37 @@ function parseFlexibleDate(s){
   return null;
 }
 
+// T2C F-074..F-077, F-087, F-122, F-145 (S159 commit 2): unified scrollable content block.
+// Replaces ad-hoc maxHeight clip values (300/400/500/600/800) used across modules with a single
+// component that owns the scroll contract (maxHeight + overflowY:'auto' + whiteSpace:'pre-wrap').
+// Defaults: maxH=400 inline, '70vh' for variant='expanded'. Caller passes maxH (number/string)
+// to override. style prop merges over defaults for visual context (background/padding/font/etc).
+// Optional html prop renders via dangerouslySetInnerHTML for callsites that pre-build HTML strings.
+function LongScroll(p){
+  p = p || {};
+  var maxH = p.maxH != null ? p.maxH : (p.variant === 'expanded' ? '70vh' : 400);
+  var style = Object.assign({fontSize:12, lineHeight:1.6, whiteSpace:'pre-wrap',
+    maxHeight:maxH, overflowY:'auto'}, p.style || {});
+  if(p.html != null) return e('div',{style:style, dangerouslySetInnerHTML:{__html:p.html}});
+  return e('div',{style:style}, p.children);
+}
+
+// T2C F-085 + F-117b + F-201 (S159 commit 2): collapsible expand affordance for long content
+// in tight cells (table rows, signal lists). Uses native <details>/<summary> for state — no JS
+// hooks, accessible by default. Preview shows first N chars with ellipsis; expand reveals full
+// content in a LongScroll. Replaces hard substring(0,N) display-path truncations.
+function LongScrollExpand(p){
+  p = p || {};
+  var preview = p.preview || 200;
+  var s = String(p.children == null ? '' : p.children);
+  if(s.length <= preview) return e('span',{style:p.style||null}, s);
+  return e('details',{style:Object.assign({margin:0},p.style||{})},
+    e('summary',{style:{cursor:'pointer',color:p.summaryColor||'inherit',outline:'none',listStyle:'revert'}},
+      s.substring(0,preview)+'...'),
+    e(LongScroll,{maxH:p.maxH||300, style:{padding:'6px 0',fontSize:p.fontSize||12,color:p.color||undefined}}, s)
+  );
+}
+
 function Badge(p){
   var c=p.color||GOLD;
   return e('span',{style:{display:'inline-block',padding:'2px 8px',borderRadius:10,fontSize:10,fontWeight:'bold',letterSpacing:1,textTransform:'uppercase',background:c+'22',color:c,border:'1px solid '+c+'44'}},p.children);
@@ -663,8 +694,13 @@ function Dashboard(p){
             ),
             e('span',{style:{fontSize:10,color:TEXT_D}},relTime(m.when||m.created_at))
           ),
+          // T2C F-104a (S159): removed redundant substring(0,200)+'...'. The maxHeight:40px clip
+          // already provides visual truncation when collapsed; the substring was double-truncating
+          // (200 chars cut mid-word, then maxHeight clipped to ~2 lines anyway, making '...'
+          // misleading because what's visible was already shorter). Now renders full content;
+          // click row to toggle isExp which removes the maxHeight clip.
           e('div',{style:{fontSize:12,color:TEXT_D,marginTop:4,whiteSpace:'pre-wrap',maxHeight:isExp?'none':'40px',overflow:'hidden'}},
-            isExp?(m.summary||m.observation||''):(m.summary||m.observation||'').substring(0,200)+'...'
+            (m.summary||m.observation||'')
           )
         );
       })
@@ -892,7 +928,7 @@ function PipelineTracker(p){
           color:activeTab.id===t.id?GOLD:TEXT_D,borderBottom:activeTab.id===t.id?'2px solid '+GOLD:'2px solid transparent'
         }},t.label)})
       ),
-      e('div',{style:{fontSize:12,whiteSpace:'pre-wrap',maxHeight:500,overflowY:'auto',background:BG3,borderRadius:4,padding:12,fontFamily:'monospace',lineHeight:1.5}},
+      e(LongScroll,{maxH:500, style:{background:BG3, borderRadius:4, padding:12, fontFamily:'monospace', lineHeight:1.5}},
         (det[activeTab.field]||'')
       )
     );
@@ -1226,7 +1262,7 @@ function PipelineTracker(p){
               // LEFT: Details
               e('div',null,
                 e(Label,{text:'OPPORTUNITY DETAILS'}),
-                [{l:'Agency',v:o.agency},{l:'Type',v:o.type||o.vertical},{l:'Value',v:o.estimated_value},{l:'Deadline',v:o.due_date},{l:'Decision',v:det.capture_action?det.capture_action.substring(0,200):''},{l:'OPI',v:sc},{l:'Added',v:o.discovered_at?new Date(o.discovered_at).toLocaleDateString():''},{l:'Source URL',v:o.source_url?e('a',{href:o.source_url,target:'_blank',style:{color:CYAN,textDecoration:'none'}},'View Original RFP ↗'):''},{l:'RFP Doc URL',v:det.rfp_document_url?e('a',{href:det.rfp_document_url,target:'_blank',style:{color:CYAN,textDecoration:'none'}},'Download ↗'):''}].map(function(d){
+                [{l:'Agency',v:o.agency},{l:'Type',v:o.type||o.vertical},{l:'Value',v:o.estimated_value},{l:'Deadline',v:o.due_date},{l:'Decision',v:det.capture_action?e(LongScrollExpand,{preview:200,maxH:300,summaryColor:TEXT_D},det.capture_action):''},{l:'OPI',v:sc},{l:'Added',v:o.discovered_at?new Date(o.discovered_at).toLocaleDateString():''},{l:'Source URL',v:o.source_url?e('a',{href:o.source_url,target:'_blank',style:{color:CYAN,textDecoration:'none'}},'View Original RFP ↗'):''},{l:'RFP Doc URL',v:det.rfp_document_url?e('a',{href:det.rfp_document_url,target:'_blank',style:{color:CYAN,textDecoration:'none'}},'Download ↗'):''}].map(function(d){
                   return d.v?e('div',{key:d.l,style:{display:'flex',justifyContent:'space-between',padding:'4px 0',fontSize:12,borderBottom:'1px solid '+BORDER}},
                     e('span',{style:{color:TEXT_D}},d.l),e('span',null,d.v)
                   ):null;
@@ -1300,7 +1336,7 @@ function PipelineTracker(p){
                   '⚠ '+actionCount+' ACTION REQUIRED items need attention'
                 ):null;
               })(),
-              e('div',{style:{fontSize:12,whiteSpace:'pre-wrap',maxHeight:600,overflowY:'auto',lineHeight:1.6,background:BG3,padding:12,borderRadius:4}},
+              e(LongScroll,{maxH:600, style:{background:BG3, borderRadius:4, padding:12}},
                 (det.proposal_content||o.proposal_content||'').split(/(ACTION REQUIRED[^\n]*)/gi).map(function(chunk,i){
                   return /ACTION REQUIRED/i.test(chunk)?e('span',{key:i,style:{background:ORANGE+'33',color:ORANGE,fontWeight:'bold',padding:'2px 4px',borderRadius:2}},chunk):e('span',{key:i},chunk);
                 })
@@ -1475,9 +1511,13 @@ function OpportunityDetail(p){
       'Plan items: '+(prLatestRun.plan_item_count||'?')+' | Findings: '+prFindings.length+
       ' (H:'+(cd.high||0)+' M:'+(cd.medium||0)+' L:'+(cd.low||0)+')\n'+
       'Cost: $'+(prLatestRun.cost_usd||0)+' | Wall time: '+(prLatestRun.wall_time_seconds||'?')+'s\n\n';
-    var findingsText = prFindings.slice(0,25).map(function(f){
+    // T2C F-080 (S159): removed prFindings.slice(0,25) and per-finding String(...).slice(0,500) caps.
+    // Pre-fix: at most 25 findings shown, each clipped to 500 chars. Real pursuit runs can produce
+    // 30+ findings totalling 30K+ chars of intel. expandedStep render uses LongScroll which scrolls,
+    // so showing all findings is safe. Source URLs preserved.
+    var findingsText = prFindings.map(function(f){
       return '['+String(f.category||'other').toUpperCase()+' | '+(f.confidence||'medium')+'] '+
-        String(f.finding||'').slice(0,500)+
+        String(f.finding||'')+
         (f.source_url?'\n   Source: '+(f.source_title?f.source_title+' — ':'')+f.source_url:'');
     }).join('\n\n');
     prStepData = header + findingsText;
@@ -1550,7 +1590,7 @@ function OpportunityDetail(p){
             step.action?e('span',{onClick:function(ev){ev.stopPropagation();if(!step.action.disabled)step.action.fn()},style:{fontSize:10,color:step.action.disabled?TEXT_D:GOLD,cursor:step.action.disabled?'default':'pointer',border:'1px solid '+(step.action.disabled?BORDER:GOLD),padding:'2px 8px',borderRadius:3,marginRight:4}},step.action.label):null,
             step.data?e('span',{style:{color:CYAN,fontSize:10}},expandedStep===i?'▼':'▶'):null
           ),
-          expandedStep===i&&step.data?e('div',{style:{padding:'8px 32px',fontSize:12,whiteSpace:'pre-wrap',color:TEXT_D,maxHeight:300,overflowY:'auto',background:BG3,borderRadius:4,margin:'4px 0'}},
+          expandedStep===i&&step.data?e(LongScroll,{style:{padding:'8px 32px',color:TEXT_D,background:BG3,borderRadius:4,margin:'4px 0'}},
             typeof step.data==='string'?step.data:JSON.stringify(step.data,null,2)
           ):null
         );
@@ -1579,8 +1619,8 @@ function OpportunityDetail(p){
 
     // Sub-tab content
     subTab==='overview'?e('div',null,
-      o.scope_analysis?(function(){var _fc=factCheckParse(o.scope_analysis);return e(Card,null,e(Label,{text:'SCOPE ANALYSIS'}),_fc.badge,e('div',{style:{fontSize:12,whiteSpace:'pre-wrap',maxHeight:400,overflowY:'auto'}},_fc.body));})():null,
-      o.description?e(Card,null,e(Label,{text:'EXECUTIVE SUMMARY'}),e('div',{style:{fontSize:12,whiteSpace:'pre-wrap',maxHeight:400,overflowY:'auto'}},o.description)):null,
+      o.scope_analysis?(function(){var _fc=factCheckParse(o.scope_analysis);return e(Card,null,e(Label,{text:'SCOPE ANALYSIS'}),_fc.badge,e(LongScroll,null,_fc.body));})():null,
+      o.description?e(Card,null,e(Label,{text:'EXECUTIVE SUMMARY'}),e(LongScroll,null,o.description)):null,
       e(Card,null,
         e(Label,{text:'ACTIONS'}),
         e('div',{style:{display:'flex',gap:8,flexWrap:'wrap'}},
@@ -1629,7 +1669,7 @@ function OpportunityDetail(p){
           if(o.proposal_content)parts.push(Math.round(o.proposal_content.length/1000)+'K chars');
           return e('div',{style:{fontSize:10,color:TEXT_D,marginBottom:8,fontFamily:'monospace'}},parts.join(' • '));
         })(),
-        e('div',{style:{fontSize:12,whiteSpace:'pre-wrap',maxHeight:800,overflowY:'auto',lineHeight:1.6}},o.proposal_content)
+        e(LongScroll,{variant:'expanded'},o.proposal_content)
       ):e(Card,null,e('div',{style:{color:TEXT_D,textAlign:'center',padding:20}},'No proposal generated yet.'),
         e('div',{style:{textAlign:'center'}},e(Btn,{onClick:function(){if(!confirm('Run full proposal pipeline?\n\n~$5-10 cost, ~10 min runtime.\nRe-runs all 19 stages including Opus calls.\n\nProceed?'))return;fetch('/api/produce-proposal?id='+encodeURIComponent(o.id),{method:'POST'}).then(function(){detShowToast('Proposal pipeline started — ~10 min.')})}},'RUN PROPOSAL'))
       )
@@ -2068,7 +2108,7 @@ function OpportunityBriefModule(p){
         ),
         e('span',{style:{color:TEXT_D}},isOpen?'▼':'▶')
       ),
-      isOpen?e('div',{style:{fontSize:12,whiteSpace:'pre-wrap',maxHeight:600,overflowY:'auto',lineHeight:1.6,marginTop:8,paddingTop:8,borderTop:'1px solid '+BORDER}},content):null
+      isOpen?e(LongScroll,{maxH:600, style:{marginTop:8,paddingTop:8,borderTop:'1px solid '+BORDER}},content):null
     );
   }
 
@@ -2550,7 +2590,7 @@ function ProposalEngineModule(p){
 
           // Full view
           wsView==='full'?e(Card,null,
-            e('div',{style:{fontSize:12,whiteSpace:'pre-wrap',maxHeight:800,overflowY:'auto',lineHeight:1.6},dangerouslySetInnerHTML:{__html:content.replace(/\[ACTION REQUIRED[^\]]*\]/gi,function(m){return '<span style="background:#E67E2233;color:#E67E22;padding:2px 6px;border-radius:3px;font-weight:bold">'+m+'</span>'}).replace(/\*\*ACTION REQUIRED[^*]*\*\*/gi,function(m){return '<span style="background:#E67E2233;color:#E67E22;padding:2px 6px;border-radius:3px;font-weight:bold">'+m+'</span>'}).replace(/\n/g,'<br>')}})
+            e(LongScroll,{variant:'expanded', html:content.replace(/\[ACTION REQUIRED[^\]]*\]/gi,function(m){return '<span style="background:#E67E2233;color:#E67E22;padding:2px 6px;border-radius:3px;font-weight:bold">'+m+'</span>'}).replace(/\*\*ACTION REQUIRED[^*]*\*\*/gi,function(m){return '<span style="background:#E67E2233;color:#E67E22;padding:2px 6px;border-radius:3px;font-weight:bold">'+m+'</span>'}).replace(/\n/g,'<br>')})
           ):
 
           // Section view
@@ -2574,7 +2614,7 @@ function ProposalEngineModule(p){
                   if(pl.selected){pl.writeBack(pl.selected.id,{proposal_content:allContent});pl.selected.proposal_content=allContent}
                   setWsEditing(null);
                 },style:{width:'100%',minHeight:200,background:BG3,color:TEXT,border:'1px solid '+GOLD+'44',borderRadius:4,padding:12,fontSize:12,fontFamily:'monospace',lineHeight:1.6,resize:'vertical'}}):
-                e('div',{style:{fontSize:12,whiteSpace:'pre-wrap',lineHeight:1.6,maxHeight:500,overflowY:'auto'},dangerouslySetInnerHTML:{__html:sec.content.replace(/\[ACTION REQUIRED[^\]]*\]/gi,function(m){return '<span style="background:#E67E2233;color:#E67E22;padding:2px 6px;border-radius:3px;font-weight:bold">'+m+'</span>'}).replace(/\*\*ACTION REQUIRED[^*]*\*\*/gi,function(m){return '<span style="background:#E67E2233;color:#E67E22;padding:2px 6px;border-radius:3px;font-weight:bold">'+m+'</span>'}).replace(/\n/g,'<br>')}}),
+                e(LongScroll,{maxH:500, html:sec.content.replace(/\[ACTION REQUIRED[^\]]*\]/gi,function(m){return '<span style="background:#E67E2233;color:#E67E22;padding:2px 6px;border-radius:3px;font-weight:bold">'+m+'</span>'}).replace(/\*\*ACTION REQUIRED[^*]*\*\*/gi,function(m){return '<span style="background:#E67E2233;color:#E67E22;padding:2px 6px;border-radius:3px;font-weight:bold">'+m+'</span>'}).replace(/\n/g,'<br>')}),
                 e('div',{style:{display:'flex',gap:6,marginTop:8}},
                   e(Btn,{onClick:function(){setWsEditing(isEditing?null:idx)},variant:'ghost',small:true},isEditing?'💾 Done':'✏️ Edit'),
                   e(Btn,{onClick:function(){improveSection(sec.title,'improve')},variant:'ghost',small:true,disabled:!!generating},'✨ Improve'),
@@ -2724,7 +2764,7 @@ function FinancialPricingModule(p){
     }},
       e('div',{style:{fontSize:11, color:CYAN, letterSpacing:2, marginBottom:8, fontWeight:'bold'}},
         'ORGANISM FINANCIAL ANALYSIS — '+pl.selected.financial_analysis.length.toLocaleString()+' chars'),
-      e('pre',{style:{whiteSpace:'pre-wrap', fontSize:12, lineHeight:1.5, maxHeight:400, overflowY:'auto', margin:0, fontFamily:'Georgia,serif'}},
+      e(LongScroll,{maxH:400, style:{margin:0, fontFamily:'Georgia,serif', lineHeight:1.5}},
         pl.selected.financial_analysis)
     ) : null,
 
@@ -3335,7 +3375,7 @@ function DiscoverySignals(){
             e('span',null,(icons[s.agent]||'📡')+' ',e('strong',null,s.agent||'unknown')),
             e('span',{style:{color:TEXT_D,fontSize:10}},s.created_at?new Date(s.created_at).toLocaleDateString():'')
           ),
-          e('div',{style:{fontSize:11,color:TEXT_D,marginTop:2}},(s.observation||'').substring(0,300))
+          e('div',{style:{fontSize:11,color:TEXT_D,marginTop:2}},e(LongScrollExpand,{preview:300,maxH:300,fontSize:11,color:TEXT_D,summaryColor:TEXT_D},(s.observation||'')))
         );
       })
     )
@@ -3578,7 +3618,7 @@ function PipelineScannerModule(p){
       scannerMems.map(function(m,i){
         return e(Card,{key:i,style:{background:BG3}},
           e('div',{style:{fontSize:10,color:TEXT_D,marginBottom:4}},new Date(m.created_at).toLocaleString()),
-          e('div',{style:{fontSize:12,whiteSpace:'pre-wrap'}},(m.observation||'').substring(0,500))
+          e('div',{style:{fontSize:12,whiteSpace:'pre-wrap'}},e(LongScrollExpand,{preview:500,maxH:300,fontSize:12},(m.observation||'')))
         );
       })
     ):null,
