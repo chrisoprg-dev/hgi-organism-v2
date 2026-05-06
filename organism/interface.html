@@ -173,8 +173,46 @@ function usePipeline(){
   },[]);
 
   function select(o){
+    // F-209 (S158 close T2B): /api/pipeline returns shallow records (just metadata + boolean has_*
+    // flags), so the previous one-liner populated sharedCtx with mostly-undefined fields. Now we
+    // optimistically set the shallow record (UI moves immediately), then fire /api/opportunity-detail
+    // (post-F-046 always-full) to populate sharedCtx with rfp_text, scope_analysis, research_brief,
+    // financial_analysis, capture_action, proposal_content, AND the 7 section_* JSONB + rfp_requirements
+    // + addendum_coverage + strategic_thesis. Modules that read sharedCtx (Research, Winnability,
+    // Financial Cost Narrative, etc.) now get fully-populated content for the selected opp.
     setSelected(o);
-    store.set('sharedCtx',{rfpText:o.rfp_text||'',decomposition:o.scope_analysis||'',execBrief:o.description||'',title:o.title,agency:o.agency,vertical:o.vertical,research:o.research_brief||'',value:o.estimated_value||''});
+    if(!o || !o.id) return;
+    // Optimistic minimal context from shallow record
+    store.set('sharedCtx',{rfpText:'',decomposition:'',execBrief:o.description||'',title:o.title,agency:o.agency,vertical:o.vertical,research:'',value:o.estimated_value||''});
+    fetch('/api/opportunity-detail?id='+encodeURIComponent(o.id)).then(function(r){return r.json()}).then(function(d){
+      // Replace selected with full record so consumers (Financial, Tracker, etc.) see all 74 fields
+      setSelected(Object.assign({},o,d));
+      store.set('sharedCtx',{
+        rfpText:d.rfp_text||'',
+        decomposition:d.scope_analysis||'',
+        execBrief:d.description||'',
+        title:d.title||o.title,
+        agency:d.agency||o.agency,
+        vertical:d.vertical||o.vertical,
+        research:d.research_brief||'',
+        staffing:d.staffing_plan||'',
+        financial:d.financial_analysis||'',
+        capture:d.capture_action||'',
+        proposal:d.proposal_content||'',
+        value:d.estimated_value||o.estimated_value||'',
+        // F-046 newly-available rich JSONB
+        sectionExec:d.section_executive_summary||null,
+        sectionTech:d.section_technical_approach||null,
+        sectionPP:d.section_past_performance||null,
+        sectionStaff:d.section_staffing||null,
+        sectionPrice:d.section_pricing_narrative||null,
+        sectionQA:d.section_qa_compliance||null,
+        sectionCover:d.section_cover_letter||null,
+        rfpRequirements:d.rfp_requirements||null,
+        addendums:d.addendum_coverage||null,
+        thesis:d.strategic_thesis||null
+      });
+    }).catch(function(err){ /* silent: optimistic shallow ctx remains */ });
   }
 
   function writeBack(id,updates){
@@ -2540,6 +2578,19 @@ function FinancialPricingModule(p){
 
     pl.pipeline.length>0?e(OpportunitySelector,{pipeline:pl.pipeline,selected:pl.selected,onSelect:pl.select,loading:pl.loading}):null,
 
+    // F-167 (S158 close T2B): render existing organism financial_analysis. Module already auto-fetches
+    // it via /api/opportunity-detail (line 2484-2488); pre-T2B it was set on pl.selected but never
+    // rendered. For OPSB this surfaces the 19,336-char organism analysis above the buildup form so the
+    // user reads the organism's reasoning first, then builds on it.
+    pl.selected && pl.selected.financial_analysis ? e('div',{style:{
+      marginBottom:12, padding:12, background:BG2, borderLeft:'3px solid '+CYAN, borderRadius:4
+    }},
+      e('div',{style:{fontSize:11, color:CYAN, letterSpacing:2, marginBottom:8, fontWeight:'bold'}},
+        'ORGANISM FINANCIAL ANALYSIS — '+pl.selected.financial_analysis.length.toLocaleString()+' chars'),
+      e('pre',{style:{whiteSpace:'pre-wrap', fontSize:12, lineHeight:1.5, maxHeight:400, overflowY:'auto', margin:0, fontFamily:'Georgia,serif'}},
+        pl.selected.financial_analysis)
+    ) : null,
+
     // Live summary bar
     e('div',{style:{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:8,margin:'12px 0'}},
       [{l:'BASE YEAR',v:'$'+baseYear.toLocaleString()},{l:'CONTRACT TOTAL',v:'$'+contractTotal.toLocaleString()},{l:'PROFIT MARGIN',v:profitMargin+'%',c:profitMargin>=intel.marginTarget?GREEN:RED},
@@ -3223,8 +3274,13 @@ function DiscoveryModule(p){
   }
 
   function refreshDB(){
-    fetch('/api/pipeline').then(function(r){return r.json()}).then(function(d){
-      setResults((d.opportunities||d||[]).slice(0,20));
+    // S158 T2A close (Hunt Engine investigation): button label is "Refresh from Database",
+    // so user expectation is "show what's in the database", not "show top 20". Pre-S157 the
+    // DB only had ~20 active so the .slice(0,20) was effectively no-op; post-S157 it under-shows
+    // 40 of 60 active records. Switched to ?limit=200 to match the rest of the system. Results
+    // tab still has its own .slice(0,15) display cap — unchanged.
+    fetch('/api/pipeline?limit=200').then(function(r){return r.json()}).then(function(d){
+      setResults(d.opportunities||d||[]);
     });
   }
 
