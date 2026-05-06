@@ -50,6 +50,39 @@ function factCheckParse(text){
   return {badge:badge, body:body};
 }
 
+// F-061 + F-012-mitigation (S158 T2A): parse both ISO and Central Bidding text date formats.
+// DB column is TEXT and contains a mix of: ISO ('2026-05-07', '2026-04-29T17:39:44.602+00:00'),
+// Central Bidding DD-MMM-YYYY ('08-May-2026 10:00:00 AM CDT'), and MMM DD YYYY ('Apr 24 2026 10:00 AM').
+// Browser Date() parsing is lenient on most of these but has historically failed on the CDT/CST
+// timezone suffix, silently filtering records out of STALE checks, daysLeft computation, and sort
+// comparisons. Returns a Date object or null. Schema migration to DATE type is deferred (T5+).
+function parseFlexibleDate(s){
+  if(!s) return null;
+  var d = new Date(s);
+  if(!isNaN(d.getTime())) return d;
+  var months = {Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
+  var ss = String(s);
+  // DD-MMM-YYYY (Central Bidding)
+  var m1 = ss.match(/(\d{1,2})[\s\-]+([A-Za-z]{3,9})[\s\-]+(\d{4})/);
+  if(m1){
+    var k = m1[2].slice(0,3); k = k.charAt(0).toUpperCase() + k.slice(1).toLowerCase();
+    if(k in months){
+      d = new Date(parseInt(m1[3],10), months[k], parseInt(m1[1],10));
+      if(!isNaN(d.getTime())) return d;
+    }
+  }
+  // MMM DD YYYY  (e.g. 'Apr 24 2026' or 'May 1, 2026')
+  var m2 = ss.match(/([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{4})/);
+  if(m2){
+    var k2 = m2[1].slice(0,3); k2 = k2.charAt(0).toUpperCase() + k2.slice(1).toLowerCase();
+    if(k2 in months){
+      d = new Date(parseInt(m2[3],10), months[k2], parseInt(m2[2],10));
+      if(!isNaN(d.getTime())) return d;
+    }
+  }
+  return null;
+}
+
 function Badge(p){
   var c=p.color||GOLD;
   return e('span',{style:{display:'inline-block',padding:'2px 8px',borderRadius:10,fontSize:10,fontWeight:'bold',letterSpacing:1,textTransform:'uppercase',background:c+'22',color:c,border:'1px solid '+c+'44'}},p.children);
@@ -222,11 +255,17 @@ function Dashboard(p){
   var dateStr=now.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
 
   var pipeline=pl.pipeline||[];
+  // F-060/F-092b (S158 T2A): canonicalize ACTIVE/PURSUING/SUBMITTED from /api/system-status
+  // (which queries Supabase directly with no cap), client-side filter as fallback. TIER 1, IN PROPOSAL,
+  // STALE, NEW TODAY stay client-side because /api/system-status doesn't expose them. Post-S157 the
+  // pipeline array is the full active set (?limit=200), so client-side counts are also correct.
+  var ssP = (sysStatus && sysStatus.pipeline) ? sysStatus.pipeline : null;
+  var activeCount = ssP ? ssP.total_active : pipeline.length;
+  var pursuing = ssP ? ssP.pursuing : pipeline.filter(function(o){return o.stage==='pursuing'}).length;
+  var submitted = ssP ? ssP.submitted : pipeline.filter(function(o){return o.stage==='submitted'}).length;
   var tier1=pipeline.filter(function(o){return(o.opi_score||0)>=75}).length;
-  var pursuing=pipeline.filter(function(o){return o.stage==='pursuing'}).length;
   var inProposal=pipeline.filter(function(o){return o.stage==='proposal'}).length;
-  var submitted=pipeline.filter(function(o){return o.stage==='submitted'}).length;
-  var stale=pipeline.filter(function(o){var d=o.due_date?new Date(o.due_date):null;return d&&d<now&&o.stage!=='won'&&o.stage!=='lost'}).length;
+  var stale=pipeline.filter(function(o){var d=parseFlexibleDate(o.due_date);return d&&d<now&&o.stage!=='won'&&o.stage!=='lost'}).length;
   var newToday=pipeline.filter(function(o){var d=o.discovered_at?new Date(o.discovered_at):null;return d&&(now-d)<86400000}).length;
   var avgOpi=sysStatus&&sysStatus.pipeline?sysStatus.pipeline.avg_opi:0;
   var memCount=sysStatus&&sysStatus.intelligence?sysStatus.intelligence.organism_memories:0;
@@ -266,7 +305,7 @@ function Dashboard(p){
   // Navigation targets per stat
   var statNavMap={ACTIVE:'discovery','TIER 1':'tracker',PURSUING:'tracker','IN PROPOSAL':'proposal',SUBMITTED:'tracker',STALE:'tracker','NEW TODAY':'discovery','AVG OPI':'tracker',MEMORIES:'chat'};
   var stats=[
-    {label:'ACTIVE',value:pipeline.length,color:CYAN},
+    {label:'ACTIVE',value:activeCount,color:CYAN},
     {label:'TIER 1',value:tier1,color:GREEN},
     {label:'PURSUING',value:pursuing,color:GOLD},
     {label:'IN PROPOSAL',value:inProposal,color:ORANGE},
@@ -620,7 +659,10 @@ function PipelineTracker(p){
   var stE4=useState({}),oppDetails=stE4[0],setOppDetails=stE4[1]; // keyed by opp id
 
   var pipeline=pl.pipeline||[];
-  var stages=['all','identified','pursuing','proposal','submitted','won','lost'];
+  // F-116b (S158 T2A): added real DB stages — archived, declaration_tracking, no_bid, filtered.
+  // Ordered: active-set states first (identified→submitted), then outcome (won/lost/no_bid), then
+  // archive/filter (archived/filtered), then meta (declaration_tracking).
+  var stages=['all','identified','pursuing','proposal','submitted','won','lost','no_bid','archived','filtered','declaration_tracking'];
   var allVerticals=pipeline.reduce(function(a,o){var v=o.vertical||'Unknown';if(a.indexOf(v)===-1)a.push(v);return a},[]).sort();
   var filtered=pipeline.filter(function(o){
     if(stageFilter!=='all'&&o.stage!==stageFilter)return false;
@@ -888,7 +930,7 @@ function PipelineTracker(p){
     e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}},
       e('div',null,
         e('h2',{style:{color:GOLD,margin:0}},'Pipeline Tracker'),
-        e('div',{style:{fontSize:12,color:TEXT_D}},pipeline.length+' opportunities tracked')
+        e('div',{style:{fontSize:12,color:TEXT_D}},pipeline.length+' active opportunities tracked')
       ),
       e('div',{style:{display:'flex',gap:8}},
         e(Btn,{onClick:cleanTestData,variant:'ghost',small:true},'🧹 Clean Test Data'),
@@ -948,7 +990,8 @@ function PipelineTracker(p){
     filtered.map(function(o){
       var isExpanded=expanded===o.id;
       var sc=o.opi_score||0;
-      var daysLeft=o.due_date?Math.ceil((new Date(o.due_date)-new Date())/(1000*60*60*24)):null;
+      var _ddL=parseFlexibleDate(o.due_date);
+      var daysLeft=_ddL?Math.ceil((_ddL-new Date())/(1000*60*60*24)):null;
       var sc_color=stageColor(o.stage);
       var det=oppDetails[o.id]||o;
       var mems=oppMemories[o.id]||[];
@@ -1807,7 +1850,8 @@ function OpportunityBriefModule(p){
   var o=pl.selected;
   var det=detail||o;
   var sc=o.opi_score||0;
-  var daysLeft=o.due_date?Math.ceil((new Date(o.due_date)-new Date())/(1000*60*60*24)):null;
+  var _ddL2=parseFlexibleDate(o.due_date);
+  var daysLeft=_ddL2?Math.ceil((_ddL2-new Date())/(1000*60*60*24)):null;
 
   function toggleSection(key){var c=Object.assign({},expanded);c[key]=!c[key];setExpanded(c)}
 
@@ -3275,9 +3319,9 @@ function PipelineScannerModule(p){
   var pipeline=pl.pipeline||[];
   var now=new Date();
   var deadlines=pipeline.filter(function(o){return o.due_date&&o.status==='active'}).map(function(o){
-    var d=new Date(o.due_date),diff=Math.ceil((d-now)/(1000*60*60*24));
+    var d=parseFlexibleDate(o.due_date),diff=d?Math.ceil((d-now)/(1000*60*60*24)):null;
     return Object.assign({},o,{days_left:diff});
-  }).sort(function(a,b){return a.days_left-b.days_left});
+  }).filter(function(o){return o.days_left!==null}).sort(function(a,b){return a.days_left-b.days_left});
   var urgent=deadlines.filter(function(o){return o.days_left<=14&&o.days_left>0});
   var overdue=deadlines.filter(function(o){return o.days_left<=0});
   var recompetes=pipeline.filter(function(o){return(o.scope_analysis||'').toLowerCase().indexOf('recompete')>-1||(o.title||'').toLowerCase().indexOf('recompete')>-1});
