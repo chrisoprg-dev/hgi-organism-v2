@@ -14469,6 +14469,9 @@ async function recordOpportunityOutcome(oppId, outcome, notes) {
   //    Heuristic: proposal_content should contain vertical + work_area matches to methodology_briefs.
   //    Cheap fallback: match any methodology_briefs.title that appears in proposal_content.
   var methUpdated = 0;
+  // T3C R3 S161: Track which briefs got cited so we can refresh them after outcome.
+  // Closes F-007 (methodology_briefs frozen) without requiring AUTO_ORCH_ENABLED=true.
+  var citedRefreshes = [];
   try {
     var proposalText = String(opp.proposal_content || '');
     if (proposalText.length > 500) {
@@ -14501,6 +14504,8 @@ async function recordOpportunityOutcome(oppId, outcome, notes) {
                 updated_at: new Date().toISOString()
               }).eq('id', brief.id);
               methUpdated++;
+              // T3C R3 S161: queue this brief for async post-outcome refresh
+              citedRefreshes.push({ id: brief.id, work_area: brief.work_area, title: brief.title });
             } catch (e) {
               log(log_pfx + ' methodology brief ' + brief.id + ' update failed: ' + (e.message||'').slice(0,120));
             }
@@ -14511,6 +14516,35 @@ async function recordOpportunityOutcome(oppId, outcome, notes) {
     }
   } catch (e) {
     log(log_pfx + ' methodology attribution failed: ' + (e.message||'').slice(0,150));
+  }
+
+  // === T3C R3 S161: Methodology refresh on outcome events (F-007 closure) ===
+  // When an opp completes won/lost, fire async refresh of cited methodology briefs.
+  // setImmediate so the HTTP response returns quickly; refresh runs in background.
+  // Cost ~$0.30-0.50/brief × max 3 briefs = ~$1-1.50 per won/lost outcome event.
+  // No-ops for no_bid/withdrawn outcomes (no learning signal).
+  if (citedRefreshes.length > 0 && (outcome === 'won' || outcome === 'lost')) {
+    var oppVertical = opp.vertical;
+    var refreshList = citedRefreshes.slice(0, 3);  // hard cap at 3 refreshes per outcome
+    var refreshLogPfx = log_pfx;
+    setImmediate(async function() {
+      log(refreshLogPfx + ' R3 async methodology refresh START: ' + refreshList.length + ' briefs');
+      for (var ri = 0; ri < refreshList.length; ri++) {
+        var refreshTarget = refreshList[ri];
+        try {
+          var rrRes = await agentMethodologyResearcher({
+            vertical: oppVertical,
+            work_area: refreshTarget.work_area,
+            title: refreshTarget.title,
+            force: true
+          }, { softCap: 1.50, hardCap: 2.50 });
+          log(refreshLogPfx + ' R3 methodology refresh ' + (refreshTarget.id||'').slice(0,40) + ': ' + (rrRes && rrRes.status ? rrRes.status : 'unknown'));
+        } catch (re) {
+          log(refreshLogPfx + ' R3 methodology refresh ' + (refreshTarget.id||'').slice(0,40) + ' failed: ' + (re.message||'').slice(0,120));
+        }
+      }
+      log(refreshLogPfx + ' R3 async methodology refresh DONE');
+    });
   }
 
   // 6) Store learning-loop summary observation (replaces what stubs used to do with zero effect)
@@ -14530,7 +14564,8 @@ async function recordOpportunityOutcome(oppId, outcome, notes) {
     outcome: outcome,
     predicted_pwin: predictedPwin,
     pwin_calibration_recorded: calibrationRelevant && predictedPwin != null,
-    methodology_briefs_updated: methUpdated
+    methodology_briefs_updated: methUpdated,
+    methodology_refreshes_queued: (outcome === 'won' || outcome === 'lost') ? Math.min(citedRefreshes.length, 3) : 0
   };
 }
 
