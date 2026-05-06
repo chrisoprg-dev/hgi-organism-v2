@@ -13794,7 +13794,7 @@ async function agentIntelligence(opp, state, cycleBrief) {
     'Write in the professional tone of a competitive intelligence analyst at a top government consulting firm.';
 
   var prompt = cycleBrief + '\n\n' + oppFull(opp) + preResearch + '\n\nORGANISM MEMORY:\n' + ctx.memText + '\n\n' + taskInstructions;
-  var out = await claudeCall(taskInstructions, prompt, 4000, { webSearch: true });
+  var out = await claudeCall(taskInstructions, prompt, 4000, { webSearch: true, agent: 'agentIntelligence' });
   if (!out || out.length < 100) return null;
   log('INTEL: ' + out.length + ' chars');
 
@@ -13850,7 +13850,7 @@ async function agentFinancial(opp, state, cycleBrief) {
     'Write with the precision of a government contracts CFO.';
 
   var prompt = cycleBrief + '\n\n' + oppFull(opp) + preResearch + '\n\nORGANISM MEMORY:\n' + ctx.memText + '\n\n' + taskInstructions;
-  var out = await claudeCall(taskInstructions, prompt, 4000, { webSearch: true });
+  var out = await claudeCall(taskInstructions, prompt, 4000, { webSearch: true, agent: 'agentFinancial' });
   if (!out || out.length < 100) return null;
   log('FINANCIAL: ' + out.length + ' chars');
   var hasUrl = /https?:\/\//.test(out);
@@ -13893,7 +13893,7 @@ async function agentWinnability(opp, state, cycleBrief) {
   var prompt = cycleBrief + '\n\n' + oppFull(opp) + '\n\nORGANISM MEMORY:\n' + ctx.memText +
     (lastWin ? '\n\nYOUR PREVIOUS ASSESSMENT:\n' + (lastWin.observation || '').slice(0, 1000) : '') +
     '\n\n' + taskInstructions;
-  var out = await claudeCall(taskInstructions, prompt, 2500);
+  var out = await claudeCall(taskInstructions, prompt, 2500, { agent: 'agentWinnability' });
   if (!out || out.length < 100 || out.trim() === 'NO_MATERIAL_CHANGE') {
     if (out && out.trim() === 'NO_MATERIAL_CHANGE') log('WINNABILITY: No material change');
     return null;
@@ -13935,7 +13935,7 @@ async function agentCRM(opp, state, cycleBrief) {
     'Write as a capture manager building an engagement plan.';
 
   var prompt = cycleBrief + '\n\n' + oppFull(opp) + preResearch + '\n\nORGANISM MEMORY:\n' + ctx.memText + '\n\n' + taskInstructions;
-  var out = await claudeCall(taskInstructions, prompt, 2500, { webSearch: true });
+  var out = await claudeCall(taskInstructions, prompt, 2500, { webSearch: true, agent: 'agentCRM' });
   if (!out || out.length < 100) return null;
   log('CRM: ' + out.length + ' chars');
   var hasUrl = /https?:\/\//.test(out);
@@ -13963,7 +13963,7 @@ async function agentQualityGate(opp, state, cycleBrief) {
     'Write as a senior proposal compliance reviewer.';
 
   var prompt = cycleBrief + '\n\n' + oppFull(opp) + '\n\nORGANISM MEMORY:\n' + ctx.memText + '\n\n' + taskInstructions;
-  var out = await claudeCall(taskInstructions, prompt, 2500);
+  var out = await claudeCall(taskInstructions, prompt, 2500, { agent: 'agentQualityGate' });
   if (!out || out.length < 100) return null;
   log('QUALITY GATE: ' + out.length + ' chars');
   await storeMemory('quality_gate', opp.id, (opp.agency || '') + ',compliance', out, 'analysis', null, 'high');
@@ -13998,7 +13998,7 @@ async function agentStaffingPlan(opp, state, cycleBrief) {
   var prompt = cycleBrief + '\n\n' + oppFull(opp) + '\n\nORGANISM MEMORY:\n' + ctx.memText +
     (lastPlan ? '\n\nPREVIOUS PLAN:\n' + (lastPlan.observation || '').slice(0, 800) : '') +
     '\n\n' + taskInstructions;
-  var out = await claudeCall(taskInstructions, prompt, 4000);
+  var out = await claudeCall(taskInstructions, prompt, 4000, { agent: 'agentStaffingPlan' });
   if (!out || out.length < 100 || out.trim() === 'NO_MATERIAL_CHANGE') return null;
   log('STAFFING: ' + out.length + ' chars');
   await storeMemory('staffing_plan_agent', opp.id, (opp.agency || '') + ',staffing', out, 'analysis', null, 'high');
@@ -14029,7 +14029,7 @@ async function agentProposalWriter(opp, state, cycleBrief) {
     'Write as a Shipley-trained proposal professional.';
 
   var prompt = cycleBrief + '\n\n' + oppFull(opp) + '\n\nORGANISM MEMORY:\n' + ctx.memText + '\n\n' + taskInstructions;
-  var out = await claudeCall(taskInstructions, prompt, 4000, { webSearch: true });
+  var out = await claudeCall(taskInstructions, prompt, 4000, { webSearch: true, agent: 'agentProposalWriter' });
   if (!out || out.length < 100) return null;
   log('PROPOSAL WRITER: ' + out.length + ' chars');
   await storeMemory('proposal_agent', opp.id, (opp.agency || '') + ',proposal', out, 'analysis', null, 'medium');
@@ -14046,7 +14046,7 @@ async function agentRedTeam(opp, state, cycleBrief) {
   var ctx = buildAgentCtx(state, 'red_team', opp.id);
   var task = 'TASK: Role-play as each named competitor from Intelligence findings.\nFor each: (1) their likely win themes (2) pricing approach (3) past performance advantages (4) specific ghosts HGI should write to neutralize them (5) HGI self-imposed weaknesses an evaluator would score down.\nNote confidence level of underlying intel — inferred competitor requires different strategy than verified one.\nDo NOT web search — synthesize from Intelligence and Financial findings.';
   var prompt = cycleBrief + '\n\n' + oppFull(opp) + '\n\nORGANISM MEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 2500);
+  var out = await claudeCall(task, prompt, 2500, { agent: 'agentRedTeam' });
   if (!out || out.length < 100) return null;
   await storeMemory('red_team', opp.id, (opp.agency || '') + ',competitive_intel', out, 'competitive_intel', null, 'medium');
   return { agent: 'red_team', opp: opp.title, chars: out.length };
@@ -14058,7 +14058,7 @@ async function agentBrief(opp, state, cycleBrief) {
   var ctx = buildAgentCtx(state, 'brief_agent', opp.id);
   var task = 'TASK: 1-page team briefing. Situation summary, competitive landscape (named competitors), win strategy, top 3 actions, deadline status. Decision-oriented for the team lead.';
   var prompt = cycleBrief + '\n\n' + oppFull(opp) + '\n\nORGANISM MEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1500, { model: HAIKU });
+  var out = await claudeCall(task, prompt, 1500, { model: HAIKU, agent: 'agentBrief' });
   if (!out || out.length < 100) return null;
   await storeMemory('brief_agent', opp.id, (opp.agency || '') + ',briefing', out, 'analysis', null, 'medium');
   return { agent: 'brief_agent', opp: opp.title, chars: out.length };
@@ -14069,7 +14069,7 @@ async function agentOppBrief(opp, state, cycleBrief) {
   var ctx = buildAgentCtx(state, 'opportunity_brief_agent', opp.id);
   var task = 'TASK: Deep single-opportunity dossier integrating ALL intelligence. A reader with zero context should understand this opportunity, HGI competitive position, and recommended actions from this document alone.';
   var prompt = cycleBrief + '\n\n' + oppFull(opp) + '\n\nORGANISM MEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 2500, { model: HAIKU });
+  var out = await claudeCall(task, prompt, 2500, { model: HAIKU, agent: 'agentOppBrief' });
   if (!out || out.length < 100) return null;
   await storeMemory('opportunity_brief_agent', opp.id, (opp.agency || '') + ',dossier', out, 'analysis', null, 'medium');
   return { agent: 'opportunity_brief_agent', opp: opp.title, chars: out.length };
@@ -14080,7 +14080,7 @@ async function agentPriceToWin(opp, state, cycleBrief) {
   var ctx = buildAgentCtx(state, 'price_to_win', opp.id);
   var task = 'TASK: Determine price-to-win range. Work backward from evaluation criteria weighting. If price <20% of eval, invest in technical quality. Use Financial Agent benchmarks. Output: FLOOR (break-even), TARGET (win price), CEILING (lose on price). Show all math.';
   var prompt = cycleBrief + '\n\n' + oppFull(opp) + '\n\nORGANISM MEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 2000);
+  var out = await claudeCall(task, prompt, 2000, { agent: 'agentPriceToWin' });
   if (!out || out.length < 100) return null;
   await storeMemory('price_to_win', opp.id, (opp.agency || '') + ',pricing', out, 'pricing_benchmark', null, 'medium');
   return { agent: 'price_to_win', opp: opp.title, chars: out.length };
@@ -14091,7 +14091,7 @@ async function agentProposalAssembly(opp, state, cycleBrief) {
   var ctx = buildAgentCtx(state, 'proposal_assembly', opp.id);
   var task = 'TASK: Assess proposal readiness. List all RFP-required sections. For each: COMPLETE/PARTIAL/MISSING status, which agent produced content, what gaps remain. Readiness score 0-100. Specific next actions to reach submission-ready.';
   var prompt = cycleBrief + '\n\n' + oppFull(opp) + '\n\nORGANISM MEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 2500);
+  var out = await claudeCall(task, prompt, 2500, { agent: 'agentProposalAssembly' });
   if (!out || out.length < 100) return null;
   await storeMemory('proposal_assembly', opp.id, (opp.agency || '') + ',assembly', out, 'analysis', null, 'medium');
   return { agent: 'proposal_assembly', opp: opp.title, chars: out.length };
@@ -14103,7 +14103,7 @@ async function agentOralPrep(opp, state, cycleBrief) {
   var ctx = buildAgentCtx(state, 'oral_prep', opp.id);
   var task = 'TASK: Oral presentation strategy. 3-5 key messages, anticipated tough questions from evaluators, prepared answers with evidence, speaker assignments, timing.';
   var prompt = cycleBrief + '\n\n' + oppFull(opp) + '\n\nORGANISM MEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 2000, { model: HAIKU });
+  var out = await claudeCall(task, prompt, 2000, { model: HAIKU, agent: 'agentProposalAssembly' });
   if (!out || out.length < 100) return null;
   await storeMemory('oral_prep', opp.id, (opp.agency || '') + ',oral', out, 'analysis', null, 'medium');
   return { agent: 'oral_prep', opp: opp.title, chars: out.length };
@@ -14115,7 +14115,7 @@ async function agentPostAward(opp, state) {
   var ctx = buildAgentCtx(state, 'post_award', opp.id);
   var task = 'TASK: If won: transition plan, staffing confirmation, onboarding. If submitted: protest risk, debrief prep, incumbent transition.';
   var prompt = oppFull(opp) + '\n\nORGANISM MEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1200, { model: 'claude-haiku-4-5-20251001' });
+  var out = await claudeCall(task, prompt, 1200, { model: 'claude-haiku-4-5-20251001', agent: 'agentProposalAssembly' });
   if (!out || out.length < 100) return null;
   await storeMemory('post_award', opp.id, (opp.agency || '') + ',post_award', out, 'analysis', null, 'medium');
   return { agent: 'post_award', opp: opp.title, chars: out.length };
@@ -14133,7 +14133,7 @@ async function agentDiscovery(state) {
   var ctx = buildAgentCtx(state, 'discovery_agent', null);
   var task = 'TASK: Search for pre-solicitation signals 6-24 months out in HGI verticals. Search congressional appropriations, agency strategic plans, procurement forecasts. Each signal: source URL, timeline, estimated value, recommended action.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1500, { webSearch: true, model: HAIKU });
+  var out = await claudeCall(task, prompt, 1500, { webSearch: true, model: HAIKU, agent: 'agentProposalAssembly' });
   if (!out || out.length < 100) return null;
   var hasUrl = /https?:\/\//.test(out);
   await storeMemory('discovery_agent', null, 'pre_solicitation', out, 'analysis', hasUrl ? 'web_search' : null, hasUrl ? 'high' : 'inferred');
