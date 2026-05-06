@@ -975,7 +975,8 @@ if (url === '/api/cycle-history') {
   try {
     var chMems = await supabase.from('organism_memory')
       .select('observation,created_at')
-      .eq('agent','v2')
+      // S162 H3: read 'session_summary' (was 'v2'). Old agent='v2' rows from pre-S162 will scroll off naturally as new entries accumulate.
+      .eq('agent','session_summary')
       .order('created_at',{ascending:false}).limit(30);
     var cycles = (chMems.data || []).map(function(m) {
       var obs = m.observation || '';
@@ -17147,7 +17148,8 @@ async function runSession(trigger) {
         }
       }
       
-      await storeMemory('v2', null, 'v2,skeleton,session',
+      // S162 H3: agent name 'session_summary' (was 'v2') — fixes write-bug surfaced in S161 R1.
+      await storeMemory('session_summary', null, 'v2,skeleton,session',
         'V4 SKELETON SESSION - trigger:' + trigger + ' pipeline:' + state.pipeline.length + ' agents:' + allResults.length + ' newOpps:' + newOppsFound + ' newRFPs:' + newRFPsRetrieved,
         'analysis', null, 'high');
       log('=== SKELETON SESSION COMPLETE: ' + id + ' | ' + allResults.length + ' agents fired (cost-control mode) ===');
@@ -17178,7 +17180,8 @@ async function runSession(trigger) {
       log('SMART FILTER: ' + activeOpps.length + ' of ' + beforeCount + ' opps need analysis (' + (beforeCount - activeOpps.length) + ' skipped — no changes)');
       if (activeOpps.length === 0) {
         log('SMART: No per-opp changes — skipping per-opp agents but RUNNING system-wide agents');
-        await storeMemory('v2', null, 'v2,smart,session', 'SMART SESSION — no per-opp changes across ' + beforeCount + ' opps. System-wide agents still running. Trigger: ' + trigger, 'analysis', null, 'high');
+        // S162 H3: agent name 'session_summary' (was 'v2').
+        await storeMemory('session_summary', null, 'v2,smart,session', 'SMART SESSION — no per-opp changes across ' + beforeCount + ' opps. System-wide agents still running. Trigger: ' + trigger, 'analysis', null, 'high');
         // Don't return — fall through to system-wide agents below
       }
     }
@@ -17301,7 +17304,8 @@ async function runSession(trigger) {
     }
     log('TRACKING: Updated last_analyzed_at for ' + activeOpps.length + ' opps');
 
-    await storeMemory('v2', null, 'v2,session',
+    // S162 H3: agent name 'session_summary' (was 'v2').
+    await storeMemory('session_summary', null, 'v2,session',
       'V4 SESSION - trigger:' + trigger + ' pipeline:' + state.pipeline.length + ' agents:' + allResults.length + ' opps_analyzed:' + activeOpps.length + ' uptime:' + Math.floor(process.uptime()) + 's',
       'analysis', null, 'high');
 
@@ -17743,9 +17747,10 @@ process.on('unhandledRejection', function(reason) {
 //   - V1 endpoint agents (organism_think, sonnet_work, opus_build, proposal_loop,
 //     research_analysis, react_*, etc.) are intentional corpses post-migration.
 //
-// Ghost detection below: queries last 2h of agent='v2' session-summary writes
-// (note: that label is itself a write-bug — these are runSession session
-// summaries, should be agent='runSession' or 'session_summary'; flagged S161 R1).
+// Ghost detection below: queries last 2h of agent='session_summary' session-summary writes
+// (note: this label was 'v2' until S162 H3, which was a write-bug — runSession session
+// summaries should be agent='session_summary'. Pre-S162 agent='v2' rows in organism_memory
+// will scroll off naturally as new agent='session_summary' rows accumulate.)
 // If another instance ran recently with lower uptime, this instance is stale
 // (older deploy still running) — skip cron, reschedule.
 // === WEEKDAY DAILY CRON — 7 AM CST (13:00 UTC) ===
@@ -17765,7 +17770,8 @@ function scheduleWeekdayCron() {
     try {
       var myStart = Math.floor(Date.now() / 1000 - process.uptime());
       var recent = await supabase.from('organism_memory').select('observation')
-        .eq('agent','v2').gte('created_at', new Date(Date.now() - 7200000).toISOString())
+        // S162 H3: read 'session_summary' (was 'v2').
+        .eq('agent','session_summary').gte('created_at', new Date(Date.now() - 7200000).toISOString())
         .order('created_at',{ascending:false}).limit(1);
       if (recent.data && recent.data.length > 0) {
         var obs = recent.data[0].observation || '';
