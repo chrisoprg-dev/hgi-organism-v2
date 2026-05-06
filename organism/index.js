@@ -27,6 +27,70 @@ var SONNET = 'claude-sonnet-4-6';
 const supabase = createClient(SB_URL, SB_KEY);
 const anthropic = new Anthropic({ apiKey: AK });
 
+// === S160 T4B AGENT REGISTRY CACHE ===
+// Single source of truth for the previously hardcoded `agents_active: 29` constant
+// that lived in 3 sites (/health, /api/system-status, /api/exec-brief) — see F-044, F-091b.
+// Cache is refreshed at startup and every 60s; /health reads cache synchronously.
+// computeActiveAgents() returns the keep-count (canonicals only — aliases excluded).
+// getAgentLists() returns the by-category lists used by /api/system-status.agents.
+// S160 T4B canon-marker: agent_registry-driven counts
+var agentRegistryCache = {
+  keep_canonical_count: 29,
+  per_opp:      ['intelligence_engine', 'financial_agent', 'winnability_agent', 'crm_agent', 'quality_gate'],
+  gated:        ['staffing_plan', 'proposal_writer', 'red_team', 'price_to_win', 'proposal_assembly'],
+  system_core:  ['pipeline_scanner', 'disaster_monitor', 'dashboard_agent', 'amendment_tracker', 'hunting_agent', 'opi_calibration', 'executive_brief', 'recruiting_bench', 'learning_loop'],
+  system_intel: ['discovery_agent', 'content_engine', 'knowledge_base_agent', 'scraper_insights', 'teaming_agent', 'budget_cycle', 'loss_analysis', 'recompete_agent', 'competitor_deep_dive', 'agency_profile_agent'],
+  utility_count: 0,
+  alias_map: {},      // alias_name -> canonical_name
+  refreshed_at: null,
+  source: 'fallback'  // 'fallback' until first DB refresh succeeds; then 'agent_registry'
+};
+
+async function refreshAgentRegistry() {
+  try {
+    var r = await supabase.from('agent_registry').select('agent_name, category, status, alias_of');
+    if (r.error) throw r.error;
+    var rows = r.data || [];
+    var canon = { per_opp: [], gated: [], system_core: [], system_intel: [], utility: [] };
+    var aliasMap = {};
+    var keepCount = 0, utilCount = 0;
+    rows.forEach(function (x) {
+      if (x.alias_of) { aliasMap[x.agent_name] = x.alias_of; return; }
+      if (x.status === 'keep' && canon[x.category]) {
+        canon[x.category].push(x.agent_name);
+        keepCount++;
+      } else if (x.category === 'utility') {
+        utilCount++;
+      }
+    });
+    agentRegistryCache = {
+      keep_canonical_count: keepCount,
+      per_opp:      canon.per_opp,
+      gated:        canon.gated,
+      system_core:  canon.system_core,
+      system_intel: canon.system_intel,
+      utility_count: utilCount,
+      alias_map: aliasMap,
+      refreshed_at: new Date().toISOString(),
+      source: 'agent_registry'
+    };
+  } catch (e) {
+    log('[agent_registry] refresh failed: ' + e.message + ' (using fallback values)');
+  }
+}
+function computeActiveAgents() { return agentRegistryCache.keep_canonical_count; }
+function getAgentLists() {
+  return {
+    per_opp:      agentRegistryCache.per_opp,
+    gated:        agentRegistryCache.gated,
+    system_core:  agentRegistryCache.system_core,
+    system_intel: agentRegistryCache.system_intel
+  };
+}
+// Initial seed-from-DB at startup, then periodic refresh.
+refreshAgentRegistry();
+setInterval(refreshAgentRegistry, 60 * 1000);
+
 // Ring buffer for in-memory log access
 var logBuffer = [];
 var LOG_MAX = 500;
@@ -211,10 +275,20 @@ const server = http.createServer(async (req, res) => {
 
     if (url === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      // F-091b (S158 T2A): agents_active was hardcoded 42 (stale). Truthful count is 29
-      // (5 per_opp + 5 gated + 9 system_core + 10 system_intel — see /api/system-status agents block).
-      // T4B will refactor both endpoints to compute from a shared registry; for now mirror /api/system-status.
-      res.end(JSON.stringify({ status: 'alive', uptime_seconds: Math.floor(process.uptime()), timestamp: new Date().toISOString(), version: 'V2.0-organism', agents_active: 29 }));
+      // S160 T4B (F-044, F-091b): agents_active now reads from agent_registry via
+      // computeActiveAgents(). Cache is refreshed at startup + every 60s. Initial
+      // value is the prior hardcoded 29; first successful DB refresh updates it.
+      // This kills the 3-site hardcode pattern (this site + /api/system-status +
+      // /api/exec-brief). Source field surfaces whether reading cache (DB-derived)
+      // or fallback (DB unreachable).
+      res.end(JSON.stringify({
+        status: 'alive',
+        uptime_seconds: Math.floor(process.uptime()),
+        timestamp: new Date().toISOString(),
+        version: 'V2.0-organism',
+        agents_active: computeActiveAgents(),
+        agents_source: agentRegistryCache.source
+      }));
       return;
     }
 
@@ -4606,15 +4680,60 @@ if (url === '/api/system-status') {
     var paCount = await supabase.from('pipeline_analytics').select('id', { count: 'exact', head: true });
     var outcomes = await supabase.from('opportunities').select('outcome').not('outcome', 'is', null);
     var outcomeData = outcomes.data || [];
-    
+
     var pursuing = state.pipeline.filter(function(o) { return o.stage === 'pursuing'; });
     var withRFP = state.pipeline.filter(function(o) { return o.rfp_document_retrieved === true; });
-    
+
+    // S160 T4B (F-097b): sources now derived from hunt_runs ground truth instead
+    // of hardcoded marketing copy. Filter logic: a "scraper" is any source that has
+    // ever produced opportunities (lifetime SUM(opportunities_found) > 0) AND has
+    // run in the last 14 days (filters out decommissioned scrapers and the cron/
+    // event:*/api_cost/etc. system telemetry rows). Each source carries 24h/7d run
+    // counts and last_run timestamp so the dashboard can color by recency rather
+    // than by static "active/disabled" copy.
+    var sourcesActive = [], sourcesStale = [];
+    try {
+      var srcResp = await supabase.rpc('compute_active_scrapers');
+      if (srcResp && !srcResp.error && Array.isArray(srcResp.data)) {
+        srcResp.data.forEach(function (s) {
+          var entry = {
+            name: s.source,
+            runs_24h: parseInt(s.runs_24h || 0, 10),
+            runs_7d:  parseInt(s.runs_7d  || 0, 10),
+            last_run: s.last_run,
+            hours_since: s.hours_since != null ? parseFloat(s.hours_since) : null,
+            found_7d: parseInt(s.found_7d || 0, 10),
+            new_7d:   parseInt(s.new_7d   || 0, 10)
+          };
+          if (entry.runs_24h >= 1) sourcesActive.push(entry);
+          else                     sourcesStale.push(entry);
+        });
+      }
+    } catch (srcErr) { /* fall through with empty arrays */ }
+    // If the RPC isn't deployed yet, fall back to the old hardcoded names so
+    // /api/system-status still returns something usable. Once the SQL function
+    // lands the dashboard auto-switches to live data.
+    if (sourcesActive.length === 0 && sourcesStale.length === 0) {
+      sourcesActive = [
+        { name: 'Central Bidding (authenticated)', runs_24h: null, runs_7d: null, last_run: null, hours_since: null, found_7d: null, new_7d: null },
+        { name: 'SAM.gov',          runs_24h: null, runs_7d: null, last_run: null, hours_since: null, found_7d: null, new_7d: null },
+        { name: 'OpenFEMA',         runs_24h: null, runs_7d: null, last_run: null, hours_since: null, found_7d: null, new_7d: null },
+        { name: 'USAspending',      runs_24h: null, runs_7d: null, last_run: null, hours_since: null, found_7d: null, new_7d: null },
+        { name: 'Grants.gov',       runs_24h: null, runs_7d: null, last_run: null, hours_since: null, found_7d: null, new_7d: null },
+        { name: 'Federal Register', runs_24h: null, runs_7d: null, last_run: null, hours_since: null, found_7d: null, new_7d: null }
+      ];
+    }
+
+    // S160 T4B (F-044): agents block now reads from agent_registry cache.
+    // Lists rebuild every 60s from Supabase. Categories preserved from prior
+    // hardcode for UI compatibility.
+    var lists = getAgentLists();
+
     res.end(JSON.stringify({
       version: 'V4.5-full-intel',
       uptime_seconds: Math.floor(process.uptime()),
       timestamp: new Date().toISOString(),
-      
+
       pipeline: {
         total_active: state.pipeline.length,
         pursuing: pursuing.length,
@@ -4623,7 +4742,7 @@ if (url === '/api/system-status') {
         with_rfp: withRFP.length,
         avg_opi: state.pipeline.length > 0 ? Math.round(state.pipeline.reduce(function(s,o) { return s + (o.opi_score || 0); }, 0) / state.pipeline.length) : 0
       },
-      
+
       intelligence: {
         organism_memories: (memCount.count || 0),
         competitive_intelligence: (ciCount.count || 0),
@@ -4636,37 +4755,162 @@ if (url === '/api/system-status') {
         agency_profiles: (agCount.count || 0),
         pipeline_analytics: (paCount.count || 0)
       },
-      
+
       outcomes: {
         total: outcomeData.length,
         wins: outcomeData.filter(function(o) { return o.outcome === 'won'; }).length,
         losses: outcomeData.filter(function(o) { return o.outcome === 'lost'; }).length,
         no_bids: outcomeData.filter(function(o) { return o.outcome === 'no_bid'; }).length
       },
-      
+
       agents: {
-        active: 29,
-        per_opp: ['intelligence_engine', 'financial_agent', 'winnability_agent', 'crm_agent', 'quality_gate'],
-        gated: ['staffing_plan', 'proposal_writer', 'red_team', 'price_to_win', 'proposal_assembly'],
-        system_core: ['pipeline_scanner', 'disaster_monitor', 'dashboard_agent', 'amendment_tracker', 'hunting_agent', 'opi_calibration', 'executive_brief', 'recruiting_bench', 'learning_loop'],
-        system_intel: ['discovery_agent', 'content_engine', 'knowledge_base_agent', 'scraper_insights', 'teaming_agent', 'budget_cycle', 'loss_analysis', 'recompete_agent', 'competitor_deep_dive', 'agency_profile_agent'],
+        active: computeActiveAgents(),
+        per_opp:      lists.per_opp,
+        gated:        lists.gated,
+        system_core:  lists.system_core,
+        system_intel: lists.system_intel,
+        utility_count: agentRegistryCache.utility_count,
+        source: agentRegistryCache.source,
+        refreshed_at: agentRegistryCache.refreshed_at,
         cut_available: 7
       },
-      
+
       endpoints: {
-        core: ['/health', '/api/pipeline', '/api/memories', '/api/diagnostics', '/api/trigger'],
+        core: ['/health', '/api/pipeline', '/api/memories', '/api/diagnostics', '/api/trigger', '/api/agents'],
         proposal: ['/api/produce-proposal', '/api/proposal-doc', '/api/compliance-matrix', '/api/rate-table', '/api/org-chart'],
         intelligence: ['/api/disaster-check', '/api/loss-analysis', '/api/exec-brief', '/api/compliance-check', '/api/phase3'],
         data: ['/api/competitors', '/api/contacts', '/api/regulatory', '/api/teaming', '/api/agencies', '/api/recompetes', '/api/analytics'],
         system: ['/api/system-status', '/api/fetch-rfp', '/api/hunt-stats', '/api/crash-log', '/api/cycle-history', '/api/record-outcome']
       },
-      
+
       sources: {
-        active: ['Central Bidding (authenticated)', 'SAM.gov', 'OpenFEMA', 'USAspending', 'Grants.gov', 'Federal Register'],
-        disabled: ['LaPAC (ColdFusion, no API)']
+        active: sourcesActive,
+        stale:  sourcesStale,
+        source: (sourcesActive.length || sourcesStale.length) ? 'hunt_runs' : 'fallback'
       }
     }));
   } catch (e) { res.end(JSON.stringify({ error: e.message })); }
+  return;
+}
+
+
+// === AGENT REGISTRY — /api/agents ===
+// S160 T4B (F-044, F-091b, F-096b): single source of truth for agent roster + activity.
+// Returns the agent_registry table joined with organism_memory activity rollups
+// across 24h/7d/30d windows, plus gap analysis (registered-not-firing, firing-not-
+// registered, cut-still-firing). The Dashboard ORGANISM STATUS dot grid reads
+// per-agent activity from this endpoint to color dots by recency rather than by
+// static category color (the F-096b fix).
+if (url === '/api/agents') {
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+  try {
+    var regResp = await supabase.from('agent_registry').select('*').order('agent_name');
+    if (regResp.error) throw regResp.error;
+    var registry = regResp.data || [];
+
+    // Build alias map: alias_name -> canonical_name. Activity rollups canonicalize
+    // through this map so the 3 known naming-mismatch pairs (staffing_plan_agent ->
+    // staffing_plan, proposal_agent -> proposal_writer, executive_brief_agent ->
+    // executive_brief) roll up to their canonical category-listed entries.
+    var aliasMap = {};
+    registry.forEach(function (r) { if (r.alias_of) aliasMap[r.agent_name] = r.alias_of; });
+    function canon(name) { return aliasMap[name] || name; }
+
+    // Pull 30 days of memory writes for activity rollup. (Lightweight — agent + ts only.)
+    var sinceIso = new Date(Date.now() - 30 * 86400000).toISOString();
+    var memResp = await supabase
+      .from('organism_memory')
+      .select('agent, created_at')
+      .gte('created_at', sinceIso);
+    var memories = memResp.data || [];
+
+    var now = Date.now();
+    var counts24 = {}, counts7 = {}, counts30 = {}, lastFire = {};
+    var rawCounts24 = {}; // pre-canonicalization, for "firing_not_registered"
+    memories.forEach(function (m) {
+      if (!m || !m.agent) return;
+      var raw = m.agent;
+      var k = canon(raw);
+      var ts = new Date(m.created_at).getTime();
+      var ageMs = now - ts;
+      counts30[k] = (counts30[k] || 0) + 1;
+      if (ageMs <= 7 * 86400000) counts7[k] = (counts7[k] || 0) + 1;
+      if (ageMs <= 86400000)     counts24[k] = (counts24[k] || 0) + 1;
+      if (ageMs <= 86400000)     rawCounts24[raw] = (rawCounts24[raw] || 0) + 1;
+      if (!lastFire[k] || ts > lastFire[k]) lastFire[k] = ts;
+    });
+
+    var canonRows = registry.filter(function (r) { return !r.alias_of; });
+
+    // Per-agent enriched rows
+    var agents = canonRows.map(function (r) {
+      var lf = lastFire[r.agent_name];
+      return {
+        name: r.agent_name,
+        category: r.category,
+        status: r.status,
+        s148: r.s148_classification,
+        added_session: r.added_session,
+        notes: r.notes,
+        fires_24h: counts24[r.agent_name] || 0,
+        fires_7d:  counts7[r.agent_name]  || 0,
+        fires_30d: counts30[r.agent_name] || 0,
+        last_fire: lf ? new Date(lf).toISOString() : null,
+        hours_since_last: lf ? Math.round(((now - lf) / 3600000) * 10) / 10 : null
+      };
+    });
+
+    // Gap analysis
+    var registeredNames = {};
+    registry.forEach(function (r) { registeredNames[r.agent_name] = true; });
+
+    var registered_not_firing_7d = canonRows
+      .filter(function (r) { return r.status === 'keep' && (counts7[r.agent_name] || 0) === 0; })
+      .map(function (r) { return r.agent_name; });
+
+    var firing_not_registered = [];
+    Object.keys(rawCounts24).forEach(function (raw) {
+      if (!registeredNames[raw] && firing_not_registered.indexOf(raw) === -1) firing_not_registered.push(raw);
+    });
+
+    var cut_still_firing = canonRows
+      .filter(function (r) { return r.status === 'cut' && (counts7[r.agent_name] || 0) > 0; })
+      .map(function (r) { return r.agent_name; });
+
+    var byCategory = { per_opp: 0, gated: 0, system_core: 0, system_intel: 0, utility: 0 };
+    var byStatus   = { keep: 0, cut: 0, dormant: 0, investigate: 0 };
+    canonRows.forEach(function (r) {
+      byCategory[r.category] = (byCategory[r.category] || 0) + 1;
+      byStatus[r.status]     = (byStatus[r.status]     || 0) + 1;
+    });
+
+    res.end(JSON.stringify({
+      ts: new Date().toISOString(),
+      registry: {
+        total_canonical: canonRows.length,
+        aliases: registry.length - canonRows.length,
+        keep_canonical_count: byStatus.keep,
+        by_category: byCategory,
+        by_status: byStatus
+      },
+      activity: {
+        last_24h: { distinct_agents: Object.keys(counts24).length, by_agent: counts24 },
+        last_7d:  { distinct_agents: Object.keys(counts7).length,  by_agent: counts7 },
+        last_30d: { distinct_agents: Object.keys(counts30).length, by_agent: counts30 }
+      },
+      gap_analysis: {
+        registered_not_firing_7d: registered_not_firing_7d,
+        firing_not_registered:    firing_not_registered,
+        cut_still_firing:         cut_still_firing
+      },
+      agents: agents.sort(function (a, b) {
+        if ((b.fires_30d || 0) !== (a.fires_30d || 0)) return (b.fires_30d || 0) - (a.fires_30d || 0);
+        return a.name.localeCompare(b.name);
+      })
+    }));
+  } catch (e) {
+    res.end(JSON.stringify({ error: e.message }));
+  }
   return;
 }
 
@@ -5200,14 +5444,14 @@ if (url === '/api/exec-brief') {
       alerts: alerts,
       awaiting_award: submitted.map(function(o) { return { title: o.title, opi: o.opi_score }; }),
       recent_intel: briefMems,
-      agent_health: { active_agents: 29, version: 'V2.0-organism', last_cycle: briefMems.length > 0 ? briefMems[0].when : null }
-      // T2C S159 commit 6 cleanup: was active_agents:42 (stale F-091b residue — S158 fix only hit
-      // /health line 217 and /api/system-status agents.active line 4648; this third site at
-      // /api/exec-brief.agent_health.active_agents was missed). Now mirrors the 5+5+9+10=29 sum
-      // from /api/system-status. NOTE: 29 itself is a hand-maintained constant, NOT a real
-      // population census — /api/diagnostics shows ~25 distinct agents fired in last 24h with
-      // 11+ NOT in the named 29-list. T4B planned to compute all three sites from a shared
-      // registry derived from organism_memory writes (real ground truth) instead of hardcoded.
+      agent_health: { active_agents: computeActiveAgents(), version: 'V2.0-organism', last_cycle: briefMems.length > 0 ? briefMems[0].when : null }
+      // S160 T4B (F-044, F-091b): active_agents now derived from agent_registry cache
+      // via computeActiveAgents() — kills the third hardcoded site (S159 commit 6 had
+      // patched the literal 42→29; S160 replaces the literal entirely). All three sites
+      // (/health, /api/system-status, /api/exec-brief) now share a single source of truth.
+      // Past T2C S159 commit 6 cleanup note (was active_agents:42 stale F-091b residue —
+      // S158 fix only hit /health line 217 and /api/system-status agents.active line 4648;
+      // this third site was missed). Now resolved structurally rather than by literal patch.
     }));
   } catch (e) { res.end(JSON.stringify({ error: e.message })); }
   return;
