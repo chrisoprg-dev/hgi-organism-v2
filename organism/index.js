@@ -8999,7 +8999,9 @@ async function claudeCall(system, prompt, maxTokens, opts) {
   };
 
   if (useSearch) {
-    params.tools = [{ type: 'web_search_20250305', name: 'web_search' }];
+    // S163 H4: max_uses=5 caps web_search invocations per call. Without this, Haiku/Sonnet
+    // can fire web_search unboundedly per turn (May 4: avg 13/call for decision-maker tasks).
+    params.tools = [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }];
   }
 
   var response = await anthropic.messages.create(params);
@@ -9021,7 +9023,9 @@ async function multiSearch(queries) {
       var r = await anthropic.messages.create({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 1500,
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        // S163 H4: max_uses=3 — multiSearch queries are narrow; Haiku can usually answer in 1-3 searches.
+        // Pre-S163 May 4: avg 6 searches/call (386/64). Cap reduces by ~50%.
+        tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }],
         system: 'Intelligence analyst. Return specific verified findings with sources. Be concise.',
         messages: [{ role: 'user', content: queries[i].q }]
       });
@@ -9985,7 +9989,8 @@ async function agentPursuitResearcher(opp, opts) {
       execResp = await anthropic.messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 2500,
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        // S163 H4: max_uses=5 — pursuit research per item.
+        tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }],
         system: execSystem,
         messages: [{ role: 'user', content: execUser }]
       });
@@ -10218,7 +10223,8 @@ async function agentMethodologyResearcher(params, opts) {
       rResp = await anthropic.messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 3500,
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        // S163 H4: max_uses=8 — methodology research is genuinely deep (regulations, GAO, OIG audits).
+        tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 8 }],
         system: researchSystem,
         messages: [{ role: 'user', content: 'RESEARCH FOCUS: ' + rq.focus + '\n\n' + rq.query + '\n\nReturn ONLY the JSON array of source extracts.' }]
       });
@@ -10635,7 +10641,8 @@ async function agentCompetitorBriefResearcher(params, opts) {
       rResp = await anthropic.messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 3500,
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        // S163 H4: max_uses=8 — competitor profiling per pass; pre-S163 May 4: 23 searches/call.
+        tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 8 }],
         system: researchSystem,
         messages: [{ role: 'user', content: 'COMPETITOR: ' + competitorName + '\nRESEARCH FOCUS: ' + rq.focus + '\n\n' + rq.query + '\n\nReturn ONLY the JSON array of source extracts.' }]
       });
@@ -16961,7 +16968,8 @@ async function orchestrateOpp(opp) {
   try {
     var researchResp = await anthropic.messages.create({
       model: 'claude-sonnet-4-6', max_tokens: 5000,
-      tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+      // S163 H4: max_uses=10 — capture intelligence is the most ambitious research call (agency profile, competitive landscape, win strategy, ghost language). Highest cap.
+      tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 10 }],
       system: 'HGI senior capture intelligence analyst. Always search the web for agency facts, incumbents, budgets. Never guess. Cite sources.',
       messages: [{ role: 'user', content: 'Capture intelligence brief for HGI.\n\nOPP: ' + opp.title + '\nAGENCY: ' + (opp.agency || '') + '\nSTATE: ' + (opp.state || 'LA') + '\nOPI: ' + opp.opi_score + '\nSCOPE:\n' + (scopeAnalysis || '').slice(0, 1500) + '\nFINANCIAL:\n' + (finAnalysis || '').slice(0, 1500) + '\n' + kbContext.slice(0, 1500) + '\n\nORGANISM INTELLIGENCE (existing competitor data, contacts, relationships, incumbent info, budget cycles, regulatory context, outcome lessons, cross-opp patterns):\n' + orchSlice + '\n\nUse the organism intelligence above as your STARTING POINT — do not duplicate what the organism already knows. Search the web to FILL GAPS and verify/update existing intelligence. Provide:\n1. AGENCY PROFILE — budget, leadership, procurement patterns. Cross-reference agency profiles above.\n2. COMPETITIVE LANDSCAPE — START with the competitor data above, then add new findings. Who will bid? What are their real weaknesses HGI can exploit?\n3. HGI WIN STRATEGY — 3 differentiators mapped to eval criteria. Use relationship data above to identify insider advantages.\n4. GHOST LANGUAGE — specific themes that highlight competitor weaknesses without naming them (based on the weaknesses data above)\n5. RED FLAGS\n6. 48-HOUR ACTION PLAN — use role titles only, never names\n7. RISKS & CHALLENGES — honest assessment' }]
     });
