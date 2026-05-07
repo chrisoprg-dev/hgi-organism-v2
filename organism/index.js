@@ -14094,8 +14094,51 @@ async function agentProposalWriter(opp, state, cycleBrief) {
 // TIER 2 ANALYSTS — Sonnet, 2500 tokens, write to memory only
 // ============================================================
 
+// S166 H9: RFP-validity gate. Detects "wrong document retrieved" cases like Citrus County
+// where rfp_text >= 500 chars but content is a SaaS marketing/login page rather than the RFP.
+// 5 agents (proposal_agent, proposal_assembly, opportunity_brief_agent, price_to_win, red_team)
+// fired on Citrus and each wrote thousands of chars of "the RFP wasn't actually retrieved"
+// disclaimers — ~$3 burn for one bad retrieval. Pattern: high-char rfp_text but missing all
+// canonical RFP markers (scope of work, evaluation criteria, etc.) AND containing marketing
+// CTAs (request a demo, schedule a meeting, etc.). When detected, stub-and-defer.
+function isRfpTextLikelyValid(rfpText) {
+  if (!rfpText || rfpText.length < 500) return false;
+  var lc = rfpText.toLowerCase();
+  var rfpMarkers = ['scope of work', 'statement of work', 'evaluation criteria',
+    'submission requirements', 'evaluation factors', 'performance period',
+    'section l', 'section m', 'request for proposal', 'request for qualifications',
+    'request for quotation', 'request for information', 'proposal due',
+    'submission deadline', 'solicitation no', 'rfp no', 'rfq no',
+    'minimum qualifications', 'mandatory requirements', 'price proposal',
+    'technical proposal', 'cost proposal'];
+  var hasRfpMarker = rfpMarkers.some(function(m) { return lc.indexOf(m) !== -1; });
+  if (!hasRfpMarker) return false;
+  var marketingMarkers = ['request a demo', 'schedule a demo', 'sign up free',
+    'start your free trial', 'book a meeting', 'contact sales', 'try it free',
+    'get started today', 'customer testimonial'];
+  var marketingCount = marketingMarkers.filter(function(m) { return lc.indexOf(m) !== -1; }).length;
+  if (marketingCount >= 2) return false;
+  return true;
+}
+
+function rfpInvalidStub(agentLabel, opp) {
+  return agentLabel.toUpperCase() + ' DEFERRED — RFP TEXT INVALID OR MARKETING-PAGE.\n\n' +
+    'rfp_text=' + ((opp.rfp_text||'').length) + ' chars but missing canonical RFP markers ' +
+    '(scope of work, evaluation criteria, submission requirements, etc.) — likely a wrong-doc retrieval ' +
+    '(e.g. SaaS vendor portal, marketing page, login screen).\n\n' +
+    'RESOLUTION: queue /api/fetch-rfp retry, or mark documents_fetched=false to trigger re-retrieval. ' +
+    agentLabel + ' will run automatically once a valid RFP is retrieved.\n\n' +
+    'Generated: ' + new Date().toISOString() + ' | S166 H9 RFP-validity gate.';
+}
+
 async function agentRedTeam(opp, state, cycleBrief) {
   log('RED TEAM: ' + (opp.title || '?').slice(0, 50));
+  if (!isRfpTextLikelyValid(opp.rfp_text)) {
+    var stubRT = rfpInvalidStub('red_team', opp);
+    await storeMemory('red_team', opp.id, (opp.agency || '') + ',competitive_intel,deferred', stubRT, 'competitive_intel', null, 'high');
+    log('RED TEAM: gate — RFP invalid/missing, deferred [S166 H9]');
+    return { agent: 'red_team', opp: opp.title, chars: stubRT.length, gated: true };
+  }
   var ctx = buildAgentCtx(state, 'red_team', opp.id);
   var task = 'TASK: Role-play as each named competitor from Intelligence findings.\nFor each: (1) their likely win themes (2) pricing approach (3) past performance advantages (4) specific ghosts HGI should write to neutralize them (5) HGI self-imposed weaknesses an evaluator would score down.\nNote confidence level of underlying intel — inferred competitor requires different strategy than verified one.\nDo NOT web search — synthesize from Intelligence and Financial findings.';
   var prompt = cycleBrief + '\n\n' + oppFull(opp) + '\n\nORGANISM MEMORY:\n' + ctx.memText + '\n\n' + task;
@@ -14119,6 +14162,12 @@ async function agentBrief(opp, state, cycleBrief) {
 
 async function agentOppBrief(opp, state, cycleBrief) {
   log('OPP BRIEF: ' + (opp.title || '?').slice(0, 50));
+  if (!isRfpTextLikelyValid(opp.rfp_text)) {
+    var stubOB = rfpInvalidStub('opportunity_brief_agent', opp);
+    await storeMemory('opportunity_brief_agent', opp.id, (opp.agency || '') + ',dossier,deferred', stubOB, 'analysis', null, 'high');
+    log('OPP BRIEF: gate — RFP invalid/missing, deferred [S166 H9]');
+    return { agent: 'opportunity_brief_agent', opp: opp.title, chars: stubOB.length, gated: true };
+  }
   var ctx = buildAgentCtx(state, 'opportunity_brief_agent', opp.id);
   var task = 'TASK: Deep single-opportunity dossier integrating ALL intelligence. A reader with zero context should understand this opportunity, HGI competitive position, and recommended actions from this document alone.';
   var prompt = cycleBrief + '\n\n' + oppFull(opp) + '\n\nORGANISM MEMORY:\n' + ctx.memText + '\n\n' + task;
@@ -14130,6 +14179,12 @@ async function agentOppBrief(opp, state, cycleBrief) {
 
 async function agentPriceToWin(opp, state, cycleBrief) {
   log('PRICE TO WIN: ' + (opp.title || '?').slice(0, 50));
+  if (!isRfpTextLikelyValid(opp.rfp_text)) {
+    var stubP2W = rfpInvalidStub('price_to_win', opp);
+    await storeMemory('price_to_win', opp.id, (opp.agency || '') + ',pricing,deferred', stubP2W, 'pricing_benchmark', null, 'high');
+    log('PRICE TO WIN: gate — RFP invalid/missing, deferred [S166 H9]');
+    return { agent: 'price_to_win', opp: opp.title, chars: stubP2W.length, gated: true };
+  }
   var ctx = buildAgentCtx(state, 'price_to_win', opp.id);
   var task = 'TASK: Determine price-to-win range. Work backward from evaluation criteria weighting. If price <20% of eval, invest in technical quality. Use Financial Agent benchmarks. Output: FLOOR (break-even), TARGET (win price), CEILING (lose on price). Show all math.';
   var prompt = cycleBrief + '\n\n' + oppFull(opp) + '\n\nORGANISM MEMORY:\n' + ctx.memText + '\n\n' + task;
@@ -14987,6 +15042,11 @@ async function agentLossAnalysis(state) {
       }
     }
   } catch (e) { log('LOSS ANALYSIS scan failed: ' + (e.message||'').slice(0,120)); }
+  // S166 H10: skip trivial memory write when nothing was processed (dead corpus)
+  if (processed + skipped + errors === 0) {
+    log('LOSS ANALYSIS: no unprocessed lost opps in corpus — skipping memory write [S166 H10]');
+    return { agent: 'loss_analysis', opp: 'system', processed: 0, skipped: 0, errors: 0, gated: true };
+  }
   var observation = 'S138 LOSS ANALYSIS: processed=' + processed + ' skipped=' + skipped + ' errors=' + errors;
   await storeMemory('loss_analysis', null, 'outcomes', observation, 'analysis', null, 'medium');
   return { agent: 'loss_analysis', opp: 'system', processed: processed, skipped: skipped, errors: errors };
@@ -15002,6 +15062,11 @@ async function agentWinRateAnalytics(state) {
       var m = calib.by_vertical[v];
       return v + ': n=' + m.sample_size + (m.sample_size > 0 ? ' predicted=' + m.mean_predicted_pwin + '% observed_win_rate=' + m.observed_win_rate_pct + '% bias=' + m.bias + ' direction=' + m.direction : '');
     }).join(' | ') : 'no-data';
+    // S166 H10: skip trivial memory write when sample is too small for meaningful analytics
+    if ((calib.total_sample || 0) < 5) {
+      log('WIN RATE: sample=' + (calib.total_sample || 0) + ' < 5 — skipping memory write [S166 H10]');
+      return { agent: 'win_rate_analytics', opp: 'system', total_sample: calib.total_sample || 0, gated: true };
+    }
     var observation = 'S138 WIN RATE ANALYTICS: total_sample=' + (calib.total_sample || 0) + ' by_vertical={ ' + verticalSummary + ' }';
     await storeMemory('win_rate_analytics', null, 'analytics', observation, 'analysis', null, 'medium');
     return { agent: 'win_rate_analytics', opp: 'system', total_sample: calib.total_sample || 0 };
@@ -15041,6 +15106,11 @@ async function agentLearningLoop(state) {
       .limit(5);
     var topStr = (topRes.data || []).map(function(b){ return b.title + ' [' + b.vertical + '] win_rate=' + (b.outcome_correlation != null ? (b.outcome_correlation*100).toFixed(0)+'%' : 'n/a') + ' n=' + b.usage_count; }).join(' || ');
     var botStr = (bottomRes.data || []).map(function(b){ return b.title + ' [' + b.vertical + '] win_rate=' + (b.outcome_correlation != null ? (b.outcome_correlation*100).toFixed(0)+'%' : 'n/a') + ' n=' + b.usage_count; }).join(' || ');
+    // S166 H10: skip trivial memory write when no briefs in corpus to analyze
+    if ((refreshed.briefs_scanned || 0) === 0) {
+      log('LEARNING LOOP: 0 briefs scanned — skipping memory write [S166 H10]');
+      return { agent: 'learning_loop', opp: 'system', briefs_updated: 0, briefs_scanned: 0, gated: true };
+    }
     var observation = 'S138 LEARNING LOOP: refreshed ' + (refreshed.briefs_updated || 0) + '/' + (refreshed.briefs_scanned || 0) + ' briefs. TOP: ' + (topStr || 'none') + ' | BOTTOM: ' + (botStr || 'none');
     await storeMemory('learning_loop', null, 'patterns', observation, 'analysis', null, 'medium');
     return { agent: 'learning_loop', opp: 'system', briefs_updated: refreshed.briefs_updated || 0, briefs_scanned: refreshed.briefs_scanned || 0 };
