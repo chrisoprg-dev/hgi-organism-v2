@@ -9111,9 +9111,18 @@ async function claudeCall(system, prompt, maxTokens, opts) {
 }
 
 // === MULTI-SEARCH: Targeted pre-research before agent reasoning ===
-async function multiSearch(queries) {
+async function multiSearch(queries, opi) {
+  // S166 H12: dynamic cap based on OPI. Pre-S166: hard cap=5. Now:
+  //   System-wide calls (no opi passed): cap=3 (40% reduction baseline).
+  //   Per-opp calls with opi >= 75: cap=3 (top-tier pursuits get full breadth).
+  //   Per-opp calls with opi < 75: cap=2 (lower-priority pursuits get tighter scope).
+  // Christopher-approved: drops multiSearch burn by ~25-35% without losing signal on top opps.
   var results = [];
-  var maxQueries = Math.min(queries.length, 5); // SESSION 89: Cap at 5 searches per agent to control token cost
+  var cap;
+  if (opi == null) cap = 3;
+  else if (opi >= 75) cap = 3;
+  else cap = 2;
+  var maxQueries = Math.min(queries.length, cap);
   for (var i = 0; i < maxQueries; i++) {
     try {
       var r = await anthropic.messages.create({
@@ -13779,7 +13788,7 @@ async function agentIntelligence(opp, state, cycleBrief) {
     { label: 'AGENCY PROCUREMENT', q: agency + ' ' + st + ' council minutes professional services contract approval' },
     { label: 'PORTAL ACTIVITY', q: ttl + ' ' + agency + ' Central Bidding questions addendum amendment 2026' },
     { label: 'MARKET COMPETITORS', q: st + ' ' + vert + ' consulting firms awarded contracts parishes municipalities 2024 2025' }
-  ]);
+  ], opp.opi_score); /*S166 H12*/
   log('INTEL pre-research: ' + preResearch.length + ' chars from targeted searches');
 
   var taskInstructions = 'TASK: Research competitive intelligence for this opportunity using web search.\n' +
@@ -13882,7 +13891,7 @@ async function agentFinancial(opp, state, cycleBrief) {
     { label: 'AGENCY AWARDS', q: agency + ' ' + vert + ' contract award amount value 2023 2024 2025' },
     { label: 'MARKET RATES', q: st + ' ' + vert + ' consulting hourly rate price bid tabulation comparable' },
     { label: 'FEDERAL COMPARABLES', q: 'USAspending ' + st + ' ' + vert + ' grant management program administration award 2024 2025' }
-  ]);
+  ], opp.opi_score); /*S166 H12*/
   log('FINANCIAL pre-research: ' + preResearch.length + ' chars');
 
   var taskInstructions = 'TASK: Build a defensible pricing model for this opportunity.\n' +
@@ -13970,7 +13979,7 @@ async function agentCRM(opp, state, cycleBrief) {
     { label: 'LEADERSHIP/ORG CHART', q: agency + ' ' + st + ' leadership directory staff org chart department head contact' },
     { label: 'PROCUREMENT CONTACTS', q: agency + ' purchasing procurement director buyer specialist contact email phone' },
     { label: 'COUNCIL/BOARD', q: agency + ' council board members committee professional services ' + st }
-  ]);
+  ], opp.opi_score); /*S166 H12*/
   log('CRM pre-research: ' + preResearch.length + ' chars');
 
   var taskInstructions = 'TASK: Find decision-makers for this opportunity using web search.\n' +
@@ -14211,7 +14220,7 @@ async function agentOralPrep(opp, state, cycleBrief) {
   var ctx = buildAgentCtx(state, 'oral_prep', opp.id);
   var task = 'TASK: Oral presentation strategy. 3-5 key messages, anticipated tough questions from evaluators, prepared answers with evidence, speaker assignments, timing.';
   var prompt = cycleBrief + '\n\n' + oppFull(opp) + '\n\nORGANISM MEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 2000, { model: HAIKU, agent: 'agentProposalAssembly' });
+  var out = await claudeCall(task, prompt, 2000, { model: HAIKU, agent: 'agentOralPrep' }); /*S166 H13: was misnamed agentProposalAssembly*/
   if (!out || out.length < 100) return null;
   await storeMemory('oral_prep', opp.id, (opp.agency || '') + ',oral', out, 'analysis', null, 'medium');
   return { agent: 'oral_prep', opp: opp.title, chars: out.length };
@@ -14223,7 +14232,7 @@ async function agentPostAward(opp, state) {
   var ctx = buildAgentCtx(state, 'post_award', opp.id);
   var task = 'TASK: If won: transition plan, staffing confirmation, onboarding. If submitted: protest risk, debrief prep, incumbent transition.';
   var prompt = oppFull(opp) + '\n\nORGANISM MEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1200, { model: 'claude-haiku-4-5-20251001', agent: 'agentProposalAssembly' });
+  var out = await claudeCall(task, prompt, 1200, { model: 'claude-haiku-4-5-20251001', agent: 'agentPostAward' }); /*S166 H13: was misnamed agentProposalAssembly*/
   if (!out || out.length < 100) return null;
   await storeMemory('post_award', opp.id, (opp.agency || '') + ',post_award', out, 'analysis', null, 'medium');
   return { agent: 'post_award', opp: opp.title, chars: out.length };
@@ -14237,11 +14246,17 @@ async function agentPostAward(opp, state) {
 // --- SONNET RESEARCHERS (web search) ---
 
 async function agentDiscovery(state) {
+  // S166 H11: monthly schedule (1st of month UTC). Pre-solicitation 6-24mo signals
+  // don't change daily. Quarterly would arguably be sufficient; monthly is conservative.
+  if (new Date().getUTCDate() !== 1) {
+    log('DISCOVERY: skipped (monthly 1st schedule) [S166 H11]');
+    return { agent: 'discovery_agent', opp: 'system', skipped: 'monthly_schedule', date: new Date().getUTCDate() };
+  }
   log('DISCOVERY...');
   var ctx = buildAgentCtx(state, 'discovery_agent', null);
   var task = 'TASK: Search for pre-solicitation signals 6-24 months out in HGI verticals. Search congressional appropriations, agency strategic plans, procurement forecasts. Each signal: source URL, timeline, estimated value, recommended action.';
   var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\nMEMORY:\n' + ctx.memText + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1500, { webSearch: true, model: HAIKU, agent: 'agentProposalAssembly' });
+  var out = await claudeCall(task, prompt, 1500, { webSearch: true, model: HAIKU, agent: 'agentDiscovery' }); /*S166 H13: was misnamed agentProposalAssembly*/
   if (!out || out.length < 100) return null;
   var hasUrl = /https?:\/\//.test(out);
   await storeMemory('discovery_agent', null, 'pre_solicitation', out, 'analysis', hasUrl ? 'web_search' : null, hasUrl ? 'high' : 'inferred');
@@ -14352,6 +14367,11 @@ async function agentDisasterMonitor(state) {
 }
 
 async function agentSourceExpansion(state) {
+  // S166 H11: monthly schedule (1st of month UTC). Procurement portal landscape changes slowly.
+  if (new Date().getUTCDate() !== 1) {
+    log('SOURCE EXPANSION: skipped (monthly 1st schedule) [S166 H11]');
+    return { agent: 'source_expansion', opp: 'system', skipped: 'monthly_schedule', date: new Date().getUTCDate() };
+  }
   log('SOURCE EXPANSION...');
   var task = 'TASK: Map procurement portals for LA, MS, TX, FL, AL, GA. For each: URL, verticals covered, access requirements, estimated volume. Focus on portals not currently monitored.';
   var prompt = task;
@@ -14397,6 +14417,11 @@ async function agentAmendmentTracker(state) {
 }
 
 async function agentRegulatoryMonitor(state) {
+  // S166 H11: weekly schedule (Mondays UTC). Regulatory changes don't drop daily.
+  if (new Date().getUTCDay() !== 1) {
+    log('REGULATORY: skipped (weekly Mon schedule) [S166 H11]');
+    return { agent: 'regulatory_monitor', opp: 'system', skipped: 'weekly_schedule', day: new Date().getUTCDay() };
+  }
   log('REGULATORY MONITOR...');
   var task = 'TASK: Search Federal Register, FEMA policy updates, HUD notices, LA legislature for regulatory changes affecting HGI verticals. For each: change, effective date, impact, recommended response.';
   var prompt = task;
@@ -14420,6 +14445,13 @@ async function agentEntrepreneurial(state) {
 }
 
 async function agentRecompete(state) {
+  // S166 H11: weekly schedule (Mondays UTC). Pre-S166: fired daily, produced generic
+  // web research output rarely actionable. Now: 1 fire/week (Monday) is enough for
+  // recompete-watching since contracts don't expire on a daily cadence.
+  if (new Date().getUTCDay() !== 1) {
+    log('RECOMPETE: skipped (weekly Mon schedule) [S166 H11]');
+    return { agent: 'recompete_agent', opp: 'system', skipped: 'weekly_schedule', day: new Date().getUTCDay() };
+  }
   log('RECOMPETE...');
   var ctx = buildAgentCtx(state, 'recompete_agent', null);
   var task = 'TASK: Monitor for recompete opportunities. Search for competitor contracts approaching expiration in HGI verticals. Timeline, threats, defense strategy.';
