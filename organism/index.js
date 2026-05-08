@@ -8930,9 +8930,18 @@ var cycleWrites = new Set();
 // Without this, simultaneous /api/trigger + /api/trigger-full + cron all run runSession
 // in parallel: duplicate observations, doubled API spend, pipeline state drift.
 // Locked sessions get a clean "skipped" return instead of silent collision.
+//
+// S167 LAYERED DB LOCK — added on top of in-memory lock. The in-memory boolean
+// catches same-process parallel calls instantly (no roundtrip). The DB-backed
+// lock (session_locks table + try_acquire_session_lock / release_session_lock
+// Postgres functions) catches the cross-process race that fires when Railway
+// rolls a deploy: old container + new container both run cron for ~30-60s
+// during the handoff window. S166 observed: New Orleans S&WB PDF processed twice
+// in 2 min, in-memory lock didn't help because each container had its own boolean.
 var _sessionInFlight = false;
 var _sessionLockAcquiredAt = null;
 var _sessionLockTrigger = null;
+var _sessionDbLockHolder = null; // S167: holder string for DB lock release in finally
 var _SESSION_STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 min stale-override safety
 
 async function storeMemory(agent, oppId, tags, observation, memType, sourceUrl, confidence) {
@@ -17339,22 +17348,47 @@ function _f016ActiveOppsFilter(o) {
 
 async function runSession(trigger) {
   var id = 'v4-' + Date.now();
+  var holder = (process.env.HOSTNAME || 'node') + ':' + process.pid + ':' + id;
   var isSkeleton = trigger.indexOf('skeleton') >= 0;
 
-  // S155 Concurrency Lock: refuse parallel sessions (clean rejection, not collision)
+  // S155 in-memory lock: instant rejection of same-process parallel calls (no DB roundtrip)
   if (_sessionInFlight) {
     var ageMs = Date.now() - (_sessionLockAcquiredAt || 0);
     if (ageMs < _SESSION_STALE_THRESHOLD_MS) {
-      log('SESSION REJECTED: ' + id + ' | trigger: ' + trigger + ' | reason: another session in flight (' + Math.round(ageMs/1000) + 's ago, holder: ' + _sessionLockTrigger + ')');
-      return { skipped: true, reason: 'session_in_flight', held_by: _sessionLockTrigger, age_seconds: Math.round(ageMs/1000) };
+      log('SESSION REJECTED (in-memory): ' + id + ' | trigger: ' + trigger + ' | reason: another session in flight (' + Math.round(ageMs/1000) + 's ago, holder: ' + _sessionLockTrigger + ')');
+      return { skipped: true, reason: 'session_in_flight_local', held_by: _sessionLockTrigger, age_seconds: Math.round(ageMs/1000) };
     }
-    log('SESSION OVERRIDE: ' + id + ' | reason: prior lock stale (' + Math.round(ageMs/1000) + 's old, holder: ' + _sessionLockTrigger + ') — taking lock');
+    log('SESSION OVERRIDE (in-memory): ' + id + ' | reason: prior lock stale (' + Math.round(ageMs/1000) + 's old, holder: ' + _sessionLockTrigger + ') — taking lock');
   }
+
+  // S167 DB-backed lock: cross-process safety. Catches the Railway deploy-overlap race
+  // where old + new container both run cron for ~30-60s during a rolling deploy.
+  // Falls open (proceeds without DB lock) on infrastructure failure rather than wedging.
+  var dbLockOk = false;
+  try {
+    var lockResp = await supabase.rpc('try_acquire_session_lock', {
+      p_lock_key: 'runSession',
+      p_holder: holder,
+      p_ttl_seconds: 1800,
+      p_trigger: trigger
+    });
+    dbLockOk = (lockResp && lockResp.data === true);
+    if (!dbLockOk) {
+      var peekResp = await supabase.rpc('peek_session_lock', { p_lock_key: 'runSession' });
+      var peek = (peekResp && peekResp.data && peekResp.data[0]) ? peekResp.data[0] : null;
+      log('SESSION REJECTED (DB lock): ' + id + ' | trigger: ' + trigger + ' | held_by: ' + (peek ? peek.holder : '?') + ' | age: ' + (peek ? peek.age_seconds : '?') + 's | trigger_label: ' + (peek ? peek.trigger_label : '?'));
+      return { skipped: true, reason: 'session_in_flight_db', held_by: peek ? peek.holder : null, age_seconds: peek ? peek.age_seconds : null };
+    }
+  } catch (lockErr) {
+    log('SESSION LOCK ERROR (proceeding without DB lock — relying on in-memory): ' + (lockErr.message || '').slice(0, 200));
+  }
+
   _sessionInFlight = true;
   _sessionLockAcquiredAt = Date.now();
   _sessionLockTrigger = trigger;
+  _sessionDbLockHolder = dbLockOk ? holder : null;
 
-  log('=== SESSION START: ' + id + ' | trigger: ' + trigger + ' | mode: ' + (isSkeleton ? 'SKELETON (cost-control)' : 'FULL') + ' ===');
+  log('=== SESSION START: ' + id + ' | trigger: ' + trigger + ' | mode: ' + (isSkeleton ? 'SKELETON (cost-control)' : 'FULL') + ' | db_lock: ' + (dbLockOk ? 'held' : 'NONE') + ' ===');
   cycleWrites.clear(); // Reset dedup tracker for new cycle
 
   // S154 Fix 5: SAFE AUTO-EXPIRE — runs before loadState so cleaned pipeline
@@ -17965,7 +17999,16 @@ async function runSession(trigger) {
       });
     } catch (e2) { log('Could not log crash: ' + e2.message); }
   } finally {
-    // S155: always release the session lock, even on crash or early return
+    // S167: release DB lock first (in-memory always cleared regardless of DB result)
+    if (_sessionDbLockHolder) {
+      try {
+        await supabase.rpc('release_session_lock', { p_lock_key: 'runSession', p_holder: _sessionDbLockHolder });
+      } catch (relErr) {
+        log('SESSION DB LOCK RELEASE ERROR (will expire via TTL): ' + (relErr.message || '').slice(0, 150));
+      }
+      _sessionDbLockHolder = null;
+    }
+    // S155: always release the in-memory session lock, even on crash or early return
     _sessionInFlight = false;
     _sessionLockAcquiredAt = null;
     _sessionLockTrigger = null;
