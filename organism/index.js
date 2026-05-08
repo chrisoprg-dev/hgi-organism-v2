@@ -14599,9 +14599,50 @@ async function agentTeaming(state) {
 
 async function agentBudgetCycle(state) {
   log('BUDGET CYCLE...');
-  var task = 'TASK: Track budget cycles for target agencies. Search budget documents, fiscal year calendars. When do agencies release RFPs relative to budget cycle? Timing recommendations.';
-  var prompt = 'PIPELINE:\n' + pipelineSummary(state.pipeline) + '\n\n' + task;
-  var out = await claudeCall(task, prompt, 1200, { webSearch: true, model: HAIKU, agent: 'agentBudgetCycle' });
+  // S167 H15: prompt rewritten to demand executable output. Old prompt was
+  // discursive ("When do agencies release RFPs..."), so Haiku came back with
+  // rhetorical questions and prose musings. Downstream runSession_extract_budget
+  // then found no parseable JSON and the budget_cycles table never populated.
+  // New prompt extracts distinct agencies from the live pipeline (the prior
+  // pipelineSummary stripped agency names entirely, leaving Haiku nothing
+  // concrete to research) and demands JSON-only output keyed to the schema of
+  // public.budget_cycles. Rules forbid clarifying questions and prose so the
+  // observation is directly extractable.
+  var agenciesSet = {};
+  (state.pipeline || []).forEach(function(o) {
+    var a = (o.agency || '').trim();
+    if (a) agenciesSet[a] = true;
+  });
+  var agencies = Object.keys(agenciesSet);
+  if (agencies.length === 0) {
+    log('BUDGET CYCLE: pipeline has no named agencies, skipping');
+    return null;
+  }
+  var agencyList = agencies.slice(0, 12).map(function(a, i) { return (i + 1) + '. ' + a; }).join('\n');
+  var task = 'Produce concrete budget-cycle data for the agencies below. Output ONLY a JSON array, no prose, no preamble, no clarifying questions.';
+  var prompt =
+    'AGENCIES IN HGI PIPELINE:\n' + agencyList + '\n\n' +
+    task + '\n\n' +
+    'Required output schema (one object per agency where data is verifiable):\n' +
+    '[\n' +
+    '  {\n' +
+    '    "agency": "exact name from list above",\n' +
+    '    "state": "2-letter state code, or null",\n' +
+    '    "fiscal_year_start": "month and day, e.g. July 1 or October 1",\n' +
+    '    "fiscal_year_end": "month and day, e.g. June 30",\n' +
+    '    "budget_amount": "annual budget in dollars or range, or null",\n' +
+    '    "procurement_window": "typical months the agency releases RFPs, e.g. March-May",\n' +
+    '    "rfp_timing": "weeks or months relative to fiscal year start when RFPs typically drop",\n' +
+    '    "hgi_vertical": "one of: Disaster Recovery | TPA/Claims | Property Tax Appeals | Workforce Services/WIOA | Construction Management | Program Administration | Housing/HUD | Grant Management",\n' +
+    '    "notes": "source URL or document title actually referenced"\n' +
+    '  }\n' +
+    ']\n\n' +
+    'Rules:\n' +
+    '- Use web_search to find actual fiscal calendars and budget documents per agency.\n' +
+    '- One object per distinct agency from the list. Skip an agency entirely if data is unavailable rather than inventing it.\n' +
+    '- The notes field MUST contain the URL or document name you used; entries without a source are invalid.\n' +
+    '- Output ONLY the JSON array - no markdown code fences, no commentary, no questions back to the user.';
+  var out = await claudeCall(task, prompt, 1500, { webSearch: true, model: HAIKU, agent: 'agentBudgetCycle' });
   if (!out || out.length < 100) return null;
   await storeMemory('budget_cycle', null, 'budget', out, 'analysis', null, 'medium');
   return { agent: 'budget_cycle', opp: 'system', chars: out.length };
