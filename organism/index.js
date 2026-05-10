@@ -15193,6 +15193,11 @@ async function agentLearningLoop(state) {
       log('LEARNING LOOP: 0 briefs scanned — skipping memory write [S166 H10]');
       return { agent: 'learning_loop', opp: 'system', briefs_updated: 0, briefs_scanned: 0, gated: true };
     }
+    // S169 H10b: also skip when corpus exists but nothing was updated and there is no top/bottom to surface (the S168 leak)
+    if ((refreshed.briefs_updated || 0) === 0 && !topStr && !botStr) {
+      log('LEARNING LOOP: briefs_updated=0 with no top/bottom analytics — skipping memory write [S169 H10b]');
+      return { agent: 'learning_loop', opp: 'system', briefs_updated: 0, briefs_scanned: refreshed.briefs_scanned || 0, gated: true };
+    }
     var observation = 'S138 LEARNING LOOP: refreshed ' + (refreshed.briefs_updated || 0) + '/' + (refreshed.briefs_scanned || 0) + ' briefs. TOP: ' + (topStr || 'none') + ' | BOTTOM: ' + (botStr || 'none');
     await storeMemory('learning_loop', null, 'patterns', observation, 'analysis', null, 'medium');
     return { agent: 'learning_loop', opp: 'system', briefs_updated: refreshed.briefs_updated || 0, briefs_scanned: refreshed.briefs_scanned || 0 };
