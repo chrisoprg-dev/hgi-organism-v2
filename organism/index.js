@@ -151,6 +151,34 @@ var PRICING = {
 };
 var WEB_SEARCH_USD_PER_CALL = 0.01; // S154: $10/1000 web_search tool invocations
 
+// === SESSION COST KILL-SWITCH (S169 T2-7 prereq) ===
+// Per-session accumulator. Reset at top of runSession. Warn fires once at WARN threshold,
+// kill fires once at KILL threshold. Once kill fires, _enforceSessionCostCap() throws on
+// any subsequent claudeCall/multiSearch/callWithContinuation invocation, blocking further
+// API spend for the rest of the session. The session naturally winds down as per-agent
+// try/catches absorb the throws and proceed to the next agent (which also bounces off the
+// kill). Direct anthropic.messages.create() callsites that bypass these three helpers
+// continue to spend until they finish — but they do call trackCost, so they accumulate
+// against the session total and any subsequent claudeCall/multiSearch path is blocked.
+// Defaults per D3 (S168): warn $20, kill $35. Override via env.
+var _sessionCostUsd = 0;
+var _sessionCostWarnFired = false;
+var _sessionCostKillFired = false;
+var SESSION_COST_WARN_USD = parseFloat(process.env.SESSION_COST_WARN_USD || '20');
+var SESSION_COST_KILL_USD = parseFloat(process.env.SESSION_COST_KILL_USD || '35');
+function _resetSessionCost() {
+  _sessionCostUsd = 0;
+  _sessionCostWarnFired = false;
+  _sessionCostKillFired = false;
+}
+function _enforceSessionCostCap() {
+  if (_sessionCostKillFired) {
+    var err = new Error('SESSION_COST_KILL: per-session spend $' + _sessionCostUsd.toFixed(4) + ' >= kill $' + SESSION_COST_KILL_USD.toFixed(2) + ' — API calls blocked');
+    err._sessionCostKill = true;
+    throw err;
+  }
+}
+
 // S154: countWebSearches — counts web_search tool invocations in any anthropic.messages.create
 // response, including direct calls that bypass claudeCall(). Caller passes the count to trackCost
 // via the extra.web_searches field so per-call cost rows include tool fees.
@@ -177,7 +205,7 @@ function countWebSearches(response) {
 // Backward-compatible: existing 3-arg trackCost(agent, model, usage) calls still work
 // — extra defaults to {}, web_searches=0, endpoint=null, etc.
 function trackCost(agent, model, usage, extra) {
-  if (!usage) return;
+  if (!usage) return 0;
   extra = extra || {};
   var p = PRICING[model] || PRICING['claude-haiku-4-5-20251001'];
   var inTok = usage.input_tokens || 0;
@@ -186,6 +214,42 @@ function trackCost(agent, model, usage, extra) {
   var tokenCost = inTok * p.in_per_tok + outTok * p.out_per_tok;
   var toolCost = ws * WEB_SEARCH_USD_PER_CALL;
   var totalCost = tokenCost + toolCost;
+  // S169 T2-7 prereq: session-cost accumulator + warn/kill triggers. Updates happen AFTER
+  // the call has completed (cost is known). Kill flag is checked at the START of the next
+  // claudeCall/multiSearch/callWithContinuation via _enforceSessionCostCap(), which throws.
+  _sessionCostUsd += totalCost;
+  if (_sessionCostUsd >= SESSION_COST_WARN_USD && !_sessionCostWarnFired) {
+    _sessionCostWarnFired = true;
+    log('COST WARN: session $' + _sessionCostUsd.toFixed(4) + ' >= warn $' + SESSION_COST_WARN_USD.toFixed(2));
+    try {
+      supabase.from('organism_memory').insert({
+        id: 'cost_warn-' + Date.now(),
+        agent: 'cost_tracker',
+        observation: 'SESSION COST WARN: $' + _sessionCostUsd.toFixed(4) + ' (>= $' + SESSION_COST_WARN_USD.toFixed(2) + '). Last call: agent=' + agent + ' model=' + model + ' cost=$' + totalCost.toFixed(4) + '. Kill threshold: $' + SESSION_COST_KILL_USD.toFixed(2) + '.',
+        memory_type: 'analysis',
+        entity_tags: 'cost,warn',
+        confidence: 'high',
+        status: 'scratch',
+        created_at: new Date().toISOString()
+      }).then(function(){}, function(_e){});
+    } catch(_we) {}
+  }
+  if (_sessionCostUsd >= SESSION_COST_KILL_USD && !_sessionCostKillFired) {
+    _sessionCostKillFired = true;
+    log('COST KILL: session $' + _sessionCostUsd.toFixed(4) + ' >= kill $' + SESSION_COST_KILL_USD.toFixed(2) + ' — blocking further API calls');
+    try {
+      supabase.from('organism_memory').insert({
+        id: 'cost_kill-' + Date.now(),
+        agent: 'cost_tracker',
+        observation: 'SESSION COST KILL: $' + _sessionCostUsd.toFixed(4) + ' (>= $' + SESSION_COST_KILL_USD.toFixed(2) + '). Subsequent claudeCall/multiSearch/callWithContinuation will throw. Inspect api_cost_log for the call sequence that drove the spend.',
+        memory_type: 'analysis',
+        entity_tags: 'cost,kill',
+        confidence: 'high',
+        status: 'verified',
+        created_at: new Date().toISOString()
+      }).then(function(){}, function(_e){});
+    } catch(_ke) {}
+  }
   costLog.push({ agent: agent, model: model, input_tokens: inTok, output_tokens: outTok, cost_usd: totalCost, ts: new Date().toISOString() });
   if (ws > 0) webSearchCount += ws;
   // Per-call row to unified ledger. Failure does not break the run.
@@ -208,6 +272,7 @@ function trackCost(agent, model, usage, extra) {
       metadata: extra.metadata || null
     }).then(function(){}, function(_e){ /* non-blocking */ });
   } catch(_pe) { /* non-blocking */ }
+  return totalCost;
 }
 
 // SESSION 107: Periodic cost flush — every 5 min, flush accumulated cost to hunt_runs
@@ -248,6 +313,7 @@ setInterval(function() { flushCostLog('interval').catch(function(){}); }, 5 * 60
 // NOTE: Do NOT use this for calls that include `tools` (web_search) — continuation would
 // need to preserve tool_use/tool_result blocks which this helper does not handle.
 async function callWithContinuation(params, agentLabel, maxContinuations) {
+  _enforceSessionCostCap(); // S169 T2-7 prereq: throw if kill threshold already crossed
   maxContinuations = (maxContinuations == null) ? 2 : maxContinuations;
   var resp = await anthropic.messages.create(params);
   trackCost(agentLabel, params.model, resp.usage);
@@ -258,6 +324,7 @@ async function callWithContinuation(params, agentLabel, maxContinuations) {
     continuations++;
     log('[' + agentLabel + '] hit max_tokens, continuation ' + continuations + ' (' + allText.length + ' chars so far)');
     try {
+      _enforceSessionCostCap(); // S169 T2-7 prereq: throw if kill threshold already crossed
       var contParams = {
         model: params.model,
         max_tokens: params.max_tokens,
@@ -9080,6 +9147,7 @@ async function sendMorningBrief(state, sessionResults, trigger, newOppsFound, pr
 }
 
 async function claudeCall(system, prompt, maxTokens, opts) {
+  _enforceSessionCostCap(); // S169 T2-7 prereq: throw if kill threshold already crossed
   opts = opts || {};
   var model = opts.model || 'claude-sonnet-4-6';
   var useSearch = opts.webSearch || false;
@@ -9134,6 +9202,7 @@ async function multiSearch(queries, opi) {
   var maxQueries = Math.min(queries.length, cap);
   for (var i = 0; i < maxQueries; i++) {
     try {
+      _enforceSessionCostCap(); // S169 T2-7 prereq: throw if kill threshold already crossed
       var r = await anthropic.messages.create({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 1500,
@@ -17433,8 +17502,9 @@ async function runSession(trigger) {
   _sessionLockAcquiredAt = Date.now();
   _sessionLockTrigger = trigger;
   _sessionDbLockHolder = dbLockOk ? holder : null;
+  _resetSessionCost(); // S169 T2-7 prereq: reset per-session cost accumulator
 
-  log('=== SESSION START: ' + id + ' | trigger: ' + trigger + ' | mode: ' + (isSkeleton ? 'SKELETON (cost-control)' : 'FULL') + ' | db_lock: ' + (dbLockOk ? 'held' : 'NONE') + ' ===');
+  log('=== SESSION START: ' + id + ' | trigger: ' + trigger + ' | mode: ' + (isSkeleton ? 'SKELETON (cost-control)' : 'FULL') + ' | db_lock: ' + (dbLockOk ? 'held' : 'NONE') + ' | cost_warn: $' + SESSION_COST_WARN_USD.toFixed(2) + ' | cost_kill: $' + SESSION_COST_KILL_USD.toFixed(2) + ' ===');
   cycleWrites.clear(); // Reset dedup tracker for new cycle
 
   // S154 Fix 5: SAFE AUTO-EXPIRE — runs before loadState so cleaned pipeline
