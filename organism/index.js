@@ -16218,6 +16218,15 @@ async function agentHunting(state, trigger) {
     for (var hi = 0; hi < hgiRelevant.length; hi++) {
       if (text.includes(hgiRelevant[hi])) return true;
     }
+    // S171 (May 10): SAM.gov is already NAICS-scoped to HGI verticals by the fetcher
+    // (codes 541611/541618/541690/541219/561110/921190/923120/524291/624310). The
+    // keyword-DROP rule was built for Central Bidding's broad-portal noise; it wrongly
+    // filtered out federal opportunities whose titles don't repeat HGI keywords. Last
+    // sam_gov row landed Apr 11 (30 days dark) while federal_funnel_monitor reported
+    // "OK" because it counts post-fetch newOpps, not post-filter survivors. Bypass
+    // the final DROP for sam_gov; the Haiku scorer downstream will reject true noise
+    // via opi<45 cutoff at line 16341.
+    if (o.source === 'sam_gov') return true;
     // If it matches neither list, DROP it — CB has hundreds of irrelevant bids per entity
     return false;
   });
