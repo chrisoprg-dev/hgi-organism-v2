@@ -15777,28 +15777,44 @@ async function agentHunting(state, trigger) {
         var sd = await sr.json();
         var samBatch = sd.opportunitiesData || [];
         sourceCounts.sam_gov = (sourceCounts.sam_gov || 0) + samBatch.length;
-        samBatch.forEach(function(o) {
+        // S172 (May 10): SAM.gov search returns description as a URL, not text. Without
+        // fetching it, Haiku scores SAM items on title+metadata only and rejects all of
+        // them (verified S171 hunt: 109 found, 0 qualified). Sort by postedDate desc,
+        // take top 8 per NAICS, fetch real description for each so the scorer has real
+        // content. Cap = 8/NAICS * 9 NAICS = 72 enrichment calls/cron, ~30s added.
+        samBatch.sort(function(a,b){ return (b.postedDate||'').localeCompare(a.postedDate||''); });
+        var samTop = samBatch.slice(0, 8);
+        for (var sbi = 0; sbi < samTop.length; sbi++) {
+          var o = samTop[sbi];
           // S155B: SAM.gov v2 actually returns `noticeId` (not `opportunityId`) and
-          // `solicitationNumber`. Field-name bug killed federal funnel since ~Apr 11
-          // (24+ days, zero records ingested). solicitationNumber is the stable ID
-          // for dedup; noticeId backs the source URL. Description field doesn't
-          // exist on the search endpoint — synthesize from type/setaside/NAICS/sol#.
+          // `solicitationNumber`. solicitationNumber is the stable ID for dedup;
+          // noticeId backs the source URL.
           var _stableId = o.solicitationNumber || o.noticeId || '';
           var _samCand = { title: o.title, solicitation_number: _stableId };
-          if (o.title && !isDupe(_samCand)) {
-            var _setAside = o.typeOfSetAsideDescription || 'No set-aside';
-            var _noticeType = o.type || '?';
-            newOpps.push({
-              title: o.title,
-              agency: o.fullParentPathName || 'Federal',
-              source: 'sam_gov',
-              source_url: 'https://sam.gov/opp/' + (o.noticeId || ''),
-              description: '[' + _noticeType + '] [Set-aside: ' + _setAside + '] [NAICS: ' + samNAICS[sni] + '] [Sol#: ' + (o.solicitationNumber || 'n/a') + '] [Posted: ' + (o.postedDate || '?') + ']',
-              due_date: o.responseDeadLine || null,
-              solicitation_number: _stableId || null
-            });
+          if (!o.title || isDupe(_samCand)) continue;
+          // Fetch full description text from the URL SAM provides
+          var _realDesc = '';
+          if (o.description && typeof o.description === 'string' && o.description.indexOf('http') === 0) {
+            try {
+              var _dr = await fetch(o.description + '&api_key=' + samApiKey);
+              if (_dr.ok) {
+                var _dj = await _dr.json();
+                _realDesc = (_dj.description || '').replace(/<[^>]+>/g, ' ').replace(/&[a-z]+;/g, ' ').replace(/\s{2,}/g, ' ').trim().slice(0, 3000);
+              }
+            } catch(_dErr) { /* description fetch is best-effort, never block intake */ }
           }
-        });
+          var _setAside = o.typeOfSetAsideDescription || 'No set-aside';
+          var _noticeType = o.type || '?';
+          newOpps.push({
+            title: o.title,
+            agency: o.fullParentPathName || 'Federal',
+            source: 'sam_gov',
+            source_url: 'https://sam.gov/opp/' + (o.noticeId || ''),
+            description: '[' + _noticeType + '] [Set-aside: ' + _setAside + '] [NAICS: ' + samNAICS[sni] + '] [Sol#: ' + (o.solicitationNumber || 'n/a') + '] [Posted: ' + (o.postedDate || '?') + ']' + (_realDesc ? '\n\n' + _realDesc : ''),
+            due_date: o.responseDeadLine || null,
+            solicitation_number: _stableId || null
+          });
+        }
       }
     } catch (eS) { log('HUNTING SAM ncode=' + samNAICS[sni] + ' err: ' + (eS.message||'').slice(0,80)); }
   }
