@@ -15742,57 +15742,73 @@ async function agentHunting(state, trigger) {
 
   // LaPAC — now handled by huntLaPAC() above
 
-  // SAM.gov — NAICS-driven (S152 #1, replaces broken keyword search)
-  // Per official GSA docs: SAM.gov v2 API has NO keyword/q parameter — only title/ncode/ptype/state.
-  // Old loop's q= was silently ignored, returning generic 13,664 active list every call.
-  // New strategy: loop HGI NAICS codes with ncode=, capture all relevant notice types incl
-  // Sources Sought (ptype=r) which is highest-leverage for direct federal pursuit (pre-RFP intel).
-  // Set-aside, notice type, and NAICS captured into description so scorer can flag HGI eligibility.
-  // No state filter — federal place-of-performance varies; HGI now pursuing direct federal contracts.
-  var samNAICS = [
-    '541611',  // Mgmt Consulting (~72/30d)
-    '541618',  // Other Mgmt Consulting (~7/30d)
-    '541690',  // Other Sci/Tech Consulting (~41/30d)
-    '541219',  // Other Accounting (~5/30d)
-    '561110',  // Office Admin Services (~12/30d)
-    '921190',  // Other Govt Support (~12/30d)
-    '923120',  // Public Health Admin (~1/30d)
-    '524291',  // Claims Adjusting (federal claims rare)
-    '624310'   // Vocational Rehab (sparse but keep)
-    // 561990 Other Support Services dropped — pre-flight showed mostly shredding/document destruction
+  // SAM.gov — keyword-driven (S173 May 10, replaces S152 NAICS-driven strategy)
+  // S152 NAICS strategy fetched 100+ items/run for 30 days; ALL 65 historical samgov
+  // rows were filtered noise (OPI 2-38, avg 6) — federal mgmt-consulting NAICS codes
+  // returned defense/IT/strategic-planning contracts that aren't HGI work. Keyword
+  // search via SAM v2 `&title=` matches the procurement language federal agencies
+  // actually use for HGI's work types (CDBG-DR, FEMA program admin, TPA, WIOA, etc).
+  // Per SAM keyword: limit=20 items, top 3 by postedDate get description-enriched
+  // for Haiku scoring (S172 enrichment pattern reused).
+  var samKeywords = [
+    // Disaster Recovery
+    'disaster recovery',
+    'CDBG-DR',
+    'CDBG',
+    'FEMA',
+    'hazard mitigation',
+    'community development block grant',
+    // TPA / Claims
+    'third party administrator',
+    'claims administration',
+    'workers compensation administrator',
+    // Workforce / WIOA
+    'WIOA',
+    'workforce development',
+    'one-stop operator',
+    // Property Tax / Appeals
+    'property tax appeal',
+    // Housing / HUD
+    'HUD program',
+    'Section 8',
+    'voucher administration',
+    // Grant Management
+    'grant management',
+    'grant administration',
+    'fiscal agent',
+    // Program Administration / Construction Mgmt
+    'program administration',
+    'construction management',
+    'owner representative'
   ];
   var samNoticeTypes = 'k,o,p,r,s';  // Combined, Solicitation, Presolicitation, Sources Sought, Special Notice
-  for (var sni = 0; sni < samNAICS.length; sni++) {
+  for (var ski = 0; ski < samKeywords.length; ski++) {
     try {
       var samApiKey = process.env.SAM_GOV_API_KEY || 'DEMO_KEY';
       var samUrl = 'https://api.sam.gov/prod/opportunities/v2/search' +
         '?api_key=' + samApiKey +
-        '&ncode=' + samNAICS[sni] +
+        '&title=' + encodeURIComponent(samKeywords[ski]) +
         '&ptype=' + samNoticeTypes +
         '&postedFrom=' + daysAgo(30) +
         '&postedTo=' + today() +
-        '&limit=100';
+        '&limit=20';
       var sr = await fetch(samUrl);
       if (sr.ok) {
         var sd = await sr.json();
         var samBatch = sd.opportunitiesData || [];
         sourceCounts.sam_gov = (sourceCounts.sam_gov || 0) + samBatch.length;
-        // S172 (May 10): SAM.gov search returns description as a URL, not text. Without
-        // fetching it, Haiku scores SAM items on title+metadata only and rejects all of
-        // them (verified S171 hunt: 109 found, 0 qualified). Sort by postedDate desc,
-        // take top 8 per NAICS, fetch real description for each so the scorer has real
-        // content. Cap = 8/NAICS * 9 NAICS = 72 enrichment calls/cron, ~30s added.
+        // Sort by postedDate desc, take top 3 per keyword for description enrichment.
+        // Cap = 3/keyword * 22 keywords = 66 max enrichment calls per cron, ~25s added.
         samBatch.sort(function(a,b){ return (b.postedDate||'').localeCompare(a.postedDate||''); });
-        var samTop = samBatch.slice(0, 8);
+        var samTop = samBatch.slice(0, 3);
         for (var sbi = 0; sbi < samTop.length; sbi++) {
           var o = samTop[sbi];
-          // S155B: SAM.gov v2 actually returns `noticeId` (not `opportunityId`) and
-          // `solicitationNumber`. solicitationNumber is the stable ID for dedup;
-          // noticeId backs the source URL.
+          // S155B: SAM.gov v2 returns `noticeId` and `solicitationNumber`.
+          // solicitationNumber is the stable ID for dedup; noticeId backs the source URL.
           var _stableId = o.solicitationNumber || o.noticeId || '';
           var _samCand = { title: o.title, solicitation_number: _stableId };
           if (!o.title || isDupe(_samCand)) continue;
-          // Fetch full description text from the URL SAM provides
+          // Fetch full description text from the URL SAM provides (S172 pattern)
           var _realDesc = '';
           if (o.description && typeof o.description === 'string' && o.description.indexOf('http') === 0) {
             try {
@@ -15805,21 +15821,22 @@ async function agentHunting(state, trigger) {
           }
           var _setAside = o.typeOfSetAsideDescription || 'No set-aside';
           var _noticeType = o.type || '?';
+          var _foundNAICS = o.naicsCode || (Array.isArray(o.naicsCodes) ? o.naicsCodes[0] : '') || 'unknown';
           newOpps.push({
             title: o.title,
             agency: o.fullParentPathName || 'Federal',
             source: 'sam_gov',
             source_url: 'https://sam.gov/opp/' + (o.noticeId || ''),
-            description: '[' + _noticeType + '] [Set-aside: ' + _setAside + '] [NAICS: ' + samNAICS[sni] + '] [Sol#: ' + (o.solicitationNumber || 'n/a') + '] [Posted: ' + (o.postedDate || '?') + ']' + (_realDesc ? '\n\n' + _realDesc : ''),
+            description: '[' + _noticeType + '] [Set-aside: ' + _setAside + '] [NAICS: ' + _foundNAICS + '] [Sol#: ' + (o.solicitationNumber || 'n/a') + '] [Posted: ' + (o.postedDate || '?') + '] [Match keyword: ' + samKeywords[ski] + ']' + (_realDesc ? '\n\n' + _realDesc : ''),
             due_date: o.responseDeadLine || null,
             solicitation_number: _stableId || null
           });
         }
       }
-    } catch (eS) { log('HUNTING SAM ncode=' + samNAICS[sni] + ' err: ' + (eS.message||'').slice(0,80)); }
+    } catch (eS) { log('HUNTING SAM keyword="' + samKeywords[ski] + '" err: ' + (eS.message||'').slice(0,80)); }
   }
   if (!('sam_gov' in sourceCounts)) sourceCounts.sam_gov = 0;
-  log('HUNTING: SAM.gov found ' + sourceCounts.sam_gov + ' results across ' + samNAICS.length + ' NAICS codes (Sources Sought + Solicitations)');
+  log('HUNTING: SAM.gov found ' + sourceCounts.sam_gov + ' results across ' + samKeywords.length + ' HGI keywords (Sources Sought + Solicitations)');
 
   // S155B FEDERAL FUNNEL MONITOR: write SAM.gov hunter snapshot to organism_memory.
   // Without this, silent failures (24-day blackout pre-S155B) leave no trace.
@@ -15831,7 +15848,7 @@ async function agentHunting(state, trigger) {
     await supabase.from('organism_memory').insert({
       id: 'fed-hunter-' + Date.now() + '-sam',
       agent: 'federal_funnel_monitor',
-      observation: 'SAM.gov: ' + sourceCounts.sam_gov + ' raw -> ' + _samPushed + ' pushed across ' + samNAICS.length + ' NAICS codes. Status: ' + _samStatus,
+      observation: 'SAM.gov: ' + sourceCounts.sam_gov + ' raw -> ' + _samPushed + ' pushed across ' + samKeywords.length + ' HGI keywords. Status: ' + _samStatus,
       memory_type: 'system_health',
       entity_tags: 'federal,sam_gov,health,' + _samStatus.toLowerCase(),
       source_url: null, confidence: 'high', status: 'scratch',
