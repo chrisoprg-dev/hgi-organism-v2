@@ -16347,6 +16347,16 @@ async function agentHunting(state, trigger) {
           continue;
         }
       }
+      // S169 T0: response-shape guard. Haiku occasionally returns malformed JSON or
+      // a parseable but partial object missing opi/vertical/why/capture_action. Without
+      // this guard `undefined < 45` evaluates false and the malformed record slips past
+      // the FILTER check downstream, getting inserted with opi_score=null and
+      // capture_organism_text='undefined: undefined' (today's 9 centralbidding_v2 records
+      // were created this way — S169 audit). Skip+log instead of insert.
+      if (!score || typeof score.opi !== 'number' || isNaN(score.opi) || typeof score.vertical !== 'string') {
+        log('HUNTING: SCORE INVALID for "' + (cand.title||'').slice(0,55) + '" — opi:' + (score && typeof score.opi) + ' vert:' + (score && typeof score.vertical) + ' — skip insert');
+        continue;
+      }
       // Phase 3 instrumentation: log every Haiku score decision so we can calibrate
       log('HUNTING: SCORE ' + (cand.title||'').slice(0,55) + ' → opi:' + (score.opi||'?') + ' vert:' + (score.vertical||'?') + ' ' + (score.capture_action||'?') + ' exp:' + !!score.expired + (score.why ? ' why:"' + score.why.slice(0,80) + '"' : ''));
 
