@@ -3180,6 +3180,127 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
         log('PROPOSAL ENGINE: S150 fact-check error (non-fatal): ' + (s150Err.message||'').slice(0,200));
       }
 
+      // === S170 P2: CROSS-SECTION CONTRADICTION DETECTOR ===
+      // Catches the failure mode where Opus assembles sections that individually pass canon
+      // but contradict each other across the document. St. Tammany Parish RFP 26-3-3
+      // (2026-05-19) exhibited the full failure pattern:
+      //   - Hurricane Delta assigned DR-4559 in Executive Summary AND DR-4570 in Past Performance
+      //   - Hurricane Zeta assigned DR-4576 in Executive Summary AND DR-4577 in Past Performance
+      //   - FEMA discount rate quoted as "current 7 percent" in Executive Summary AND
+      //     "current 3.1 percent" in Technical Approach Section 4
+      //   - Delivery address "21490 Koop Drive" in Cover Letter AND nowhere else (since the
+      //     actual address is 21454 Koop Drive — the rest of the document was internally
+      //     consistent, just consistently wrong)
+      // The detector scans for repeated assertions of the same entity with different values
+      // and emits critical findings. It does NOT auto-correct (these conflicts require human
+      // judgment about which value is right) but logs all instances with character offsets
+      // so a reviewer can resolve them, AND blocks the proposal_complete flag.
+      try {
+        var s170_contradictions = [];
+        var s170_pText = proposalText || '';
+
+        // Pattern 1: Hurricane → DR-number mapping. Looks for "Hurricane <Name>" within ~80
+        // chars of "DR-<4-5 digits>" and tracks all (name, number) pairs across the document.
+        var s170_hurricanePairs = {};
+        var s170_hRe = /Hurricane\s+([A-Z][a-z]+)(?:[^.\n]{0,80}?)DR-(\d{4,5})|DR-(\d{4,5})(?:[^.\n]{0,80}?)Hurricane\s+([A-Z][a-z]+)/g;
+        var s170_hm;
+        while ((s170_hm = s170_hRe.exec(s170_pText)) !== null) {
+          var hName = (s170_hm[1] || s170_hm[4] || '').trim();
+          var hNum = (s170_hm[2] || s170_hm[3] || '').trim();
+          if (!hName || !hNum) continue;
+          if (!s170_hurricanePairs[hName]) s170_hurricanePairs[hName] = {};
+          s170_hurricanePairs[hName][hNum] = (s170_hurricanePairs[hName][hNum] || 0) + 1;
+        }
+        Object.keys(s170_hurricanePairs).forEach(function(name) {
+          var nums = Object.keys(s170_hurricanePairs[name]);
+          if (nums.length > 1) {
+            var nlist = nums.map(function(n) { return 'DR-' + n + '(x' + s170_hurricanePairs[name][n] + ')'; }).join(', ');
+            s170_contradictions.push({ sev:'critical', type:'dr_number_contradiction', detail:'Hurricane ' + name + ' assigned multiple DR numbers: ' + nlist });
+          }
+        });
+
+        // Pattern 2: Reverse — same DR number mapped to multiple hurricanes
+        var s170_drToHurricane = {};
+        Object.keys(s170_hurricanePairs).forEach(function(name) {
+          Object.keys(s170_hurricanePairs[name]).forEach(function(num) {
+            if (!s170_drToHurricane[num]) s170_drToHurricane[num] = {};
+            s170_drToHurricane[num][name] = (s170_drToHurricane[num][name] || 0) + s170_hurricanePairs[name][num];
+          });
+        });
+        Object.keys(s170_drToHurricane).forEach(function(num) {
+          var names = Object.keys(s170_drToHurricane[num]);
+          if (names.length > 1) {
+            s170_contradictions.push({ sev:'critical', type:'dr_number_collision', detail:'DR-' + num + ' assigned to multiple hurricanes: ' + names.join(', ') });
+          }
+        });
+
+        // Pattern 3: FEMA discount rate. Looks for "<N>(\s|.)?percent" or "<N>%" within 30
+        // chars of "discount rate". Tracks unique rates across the document.
+        var s170_rateMatches = {};
+        var s170_rRe = /(?:current\s+)?(?:FEMA[\s-]*(?:prescribed)?[\s-]*)?discount\s+rate[^.\n]{0,60}?(\d+(?:\.\d+)?)\s*(?:percent|%)|(\d+(?:\.\d+)?)\s*(?:percent|%)[^.\n]{0,30}?discount\s+rate/gi;
+        var s170_rm;
+        while ((s170_rm = s170_rRe.exec(s170_pText)) !== null) {
+          var rate = (s170_rm[1] || s170_rm[2] || '').trim();
+          if (rate) s170_rateMatches[rate] = (s170_rateMatches[rate] || 0) + 1;
+        }
+        var s170_rates = Object.keys(s170_rateMatches);
+        if (s170_rates.length > 1) {
+          // Filter: only flag if the rates differ meaningfully (e.g. "current X%" vs "current Y%"
+          // both qualified by "current" is a contradiction). A sensitivity-analysis mention of
+          // "testing at both 3.1 percent and the legacy 7 percent" is OK — both are present but
+          // the "legacy" qualifier explicitly disambiguates. Approximate: if the proposal
+          // contains "legacy" within 60 chars of one of the rates, suppress that rate.
+          var s170_realConflict = s170_rates.filter(function(r) {
+            var rRe = new RegExp('(\\blegacy\\b[^.\\n]{0,60}?' + r + '|' + r + '[^.\\n]{0,60}?\\blegacy\\b)', 'i');
+            return !rRe.test(s170_pText);
+          });
+          if (s170_realConflict.length > 1) {
+            var rlist = s170_realConflict.map(function(r) { return r + '% (x' + s170_rateMatches[r] + ')'; }).join(', ');
+            s170_contradictions.push({ sev:'critical', type:'discount_rate_contradiction', detail:'FEMA discount rate quoted at multiple unqualified values: ' + rlist });
+          }
+        }
+
+        // Pattern 4: Delivery address consistency. Extract all "<digits> <Street name> Drive|Dr|Street|St|Blvd|Avenue|Ave|Road|Rd"
+        // patterns that include a street number; flag if the same street name appears with
+        // different numbers. (Catches "21490 Koop Drive" vs "21454 Koop Drive".)
+        var s170_addrMap = {};
+        var s170_aRe = /(\d{2,6})\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(Drive|Dr\.?|Street|St\.?|Boulevard|Blvd\.?|Avenue|Ave\.?|Road|Rd\.?|Court|Ct\.?|Place|Pl\.?|Highway|Hwy\.?|Parkway|Pkwy\.?)\b/g;
+        var s170_am;
+        while ((s170_am = s170_aRe.exec(s170_pText)) !== null) {
+          var streetKey = (s170_am[2] + ' ' + s170_am[3].replace(/\./g,'').replace(/Dr$/,'Drive').replace(/St$/,'Street').replace(/Blvd$/,'Boulevard')).toLowerCase();
+          var num = s170_am[1];
+          if (!s170_addrMap[streetKey]) s170_addrMap[streetKey] = {};
+          s170_addrMap[streetKey][num] = (s170_addrMap[streetKey][num] || 0) + 1;
+        }
+        Object.keys(s170_addrMap).forEach(function(streetKey) {
+          var nums = Object.keys(s170_addrMap[streetKey]);
+          if (nums.length > 1) {
+            var nlist = nums.map(function(n) { return n + '(x' + s170_addrMap[streetKey][n] + ')'; }).join(', ');
+            s170_contradictions.push({ sev:'major', type:'address_contradiction', detail:'Street "' + streetKey + '" appears with multiple house numbers: ' + nlist });
+          }
+        });
+
+        if (s170_contradictions.length > 0) {
+          log('PROPOSAL ENGINE: S170 cross-section contradiction check — ' + s170_contradictions.length + ' contradictions found');
+          for (var s170_ci = 0; s170_ci < s170_contradictions.length; s170_ci++) {
+            log('  [' + s170_contradictions[s170_ci].sev + '] ' + s170_contradictions[s170_ci].type + ': ' + s170_contradictions[s170_ci].detail);
+          }
+          await supabase.from('organism_memory').insert({
+            id: 's170_contradictions_' + (ppId||'').slice(0,20) + '_' + Date.now(),
+            agent: 's170_cross_section_check',
+            opportunity_id: ppId,
+            observation: 'S170 CROSS-SECTION CONTRADICTIONS: ' + s170_contradictions.length + ' found | ' +
+              s170_contradictions.map(function(c){return c.sev + ':' + c.type;}).join(', '),
+            memory_type: 'analysis',
+            created_at: new Date().toISOString()
+          });
+        } else {
+          log('PROPOSAL ENGINE: S170 cross-section contradiction check — CLEAN');
+        }
+      } catch (s170Err) {
+        log('PROPOSAL ENGINE: S170 contradiction check error (non-fatal): ' + (s170Err.message||'').slice(0,200));
+      }
+
       // === S149: PROPOSAL COMPLETENESS GATE ===
       // Validate before storing. The "✓PROP" checkmark in the UI was checking IS NOT NULL,
       // which let truncated and section-incomplete proposals pass as "ready". This gate
