@@ -3114,7 +3114,14 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
               var s150_months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
               var s150_canonDate = s150_months[s150_deadline.getUTCMonth()] + ' ' + s150_deadline.getUTCDate() + ', ' + s150_deadline.getUTCFullYear();
               var s150_corrected = false;
-              for (var s150_di = 0; s150_di < Math.min(s150_dateMatches.length, 3); s150_di++) {
+              // S170 P1 FIX: previously this loop was bounded at Math.min(length, 3),
+              // which missed the cover-letter date on St. Tammany Parish RFP 26-3-3
+              // (2026-05-19). The proposal preamble contained 3 valid dates ahead of
+              // the stale "May 29, 2025" cover-letter date, so the loop exited before
+              // reaching it. The s150_corrected guard already ensures only ONE
+              // auto-correction is applied; the iteration cap was redundant safety
+              // that became a real bug. Scan all matches in the 5K cover-section.
+              for (var s150_di = 0; s150_di < s150_dateMatches.length; s150_di++) {
                 var s150_dm = s150_dateMatches[s150_di];
                 var s150_parsed = new Date(s150_dm);
                 if (!isNaN(s150_parsed.getTime())) {
