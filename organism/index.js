@@ -1774,6 +1774,26 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       // This tells Opus EXACTLY what to produce — sections, forms, page limits, positions.
       var rfpText = (opp.rfp_text && opp.rfp_text.trim().length > 500) ? opp.rfp_text : '';
       var complianceBlueprint = null;
+
+      // S170 P0 SOURCE-URL CONTAMINATION GUARD (St. Tammany Parish RFP 26-3-3, 2026-05-19):
+      // When source_url is a LaPAC department-listing (dspBid.cfm?search=department&term=N)
+      // the AUTO-RFP fetcher populates rfp_text with the listing HTML body containing
+      // sibling-bid titles. Feeding that to Sonnet as 'RFP TEXT' produced 14 phantom
+      // scope items (700 Gallon Trailer Mounted Jet Rodder, LA 22 Beautification, etc.)
+      // plus a phantom 923456 project number, fabricated addendum references, and a
+      // wrong delivery address — all cascaded into a contaminated 109K-char proposal.
+      // The rfp_document_retrieved flag is the existing signal that says 'I confirmed a
+      // substantive RFP document was retrieved (>2000 chars from a PDF)'. When that is
+      // false, anything in rfp_text is unreliable and must not drive blueprint parsing.
+      var rfpDocumentVerified = (opp.rfp_document_retrieved === true);
+      var sourceUrlStr = String(opp.source_url || '');
+      var isLaPacDeptListing = /dspBid\.cfm\?[^"\s]*search=department/i.test(sourceUrlStr);
+
+      if (rfpText.length > 500 && !rfpDocumentVerified) {
+        log('PROPOSAL ENGINE STAGE 1: SOURCE-URL CONTAMINATION GUARD — rfp_text present (' + rfpText.length + ' chars) but rfp_document_retrieved=false. Source URL: ' + sourceUrlStr.slice(0, 120) + (isLaPacDeptListing ? ' [LaPAC dept-listing pattern matched]' : '') + '. REFUSING to parse blueprint from unverified source. Falling back to unparsed mode (description-driven).');
+        rfpText = '';
+      }
+
       if (rfpText.length > 500) {
         log('PROPOSAL ENGINE STAGE 1: Parsing RFP compliance blueprint...');
         try {
