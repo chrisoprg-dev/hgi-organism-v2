@@ -1329,6 +1329,95 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
     log('PROPOSAL ENGINE: exclusion guardrail query failed for ' + ppId + ' (' + (exclErr.message||exclErr) + '). Proceeding without block.');
   }
 
+  // === S170 P0+: RFP DOCUMENT VERIFIED GUARD ===
+  // The system's north star is autonomous production of submission-ready proposals.
+  // That standard cannot be met when the input is not a confirmed RFP document.
+  // St. Tammany Parish RFP 26-3-3 (2026-05-19) produced an 11-error contaminated
+  // proposal because rfp_text was populated from a LaPAC department-listing page
+  // while rfp_document_retrieved was false. The blueprint-parser guard (added at
+  // line ~1782) stopped the blueprint contamination, but the rest of the pipeline
+  // would still produce a degraded proposal. This guard refuses to produce a
+  // proposal at all when the input is not verified — failing loudly at the front
+  // door rather than silently emitting a contaminated output 45 minutes later.
+  //
+  // Acceptance criteria for proposal production:
+  //   - opp.rfp_document_retrieved === true, OR
+  //   - opp.rfp_text length >= 5000 chars AND source_url is NOT a LaPAC department
+  //     listing pattern (in which case rfp_text was probably manually injected with
+  //     real RFP content by Christopher via add_to_pipeline or a direct DB write).
+  //
+  // Override: POST {force:true} or ?force=true (logs bypass to organism_memory).
+  if (!ppForce) {
+    try {
+      var rfpCheckR = await supabase.from('opportunities')
+        .select('id,title,source_url,rfp_text,rfp_document_retrieved,description')
+        .eq('id', ppId)
+        .single();
+      var rfpOpp = rfpCheckR.data;
+      if (rfpOpp) {
+        var s170_verified = (rfpOpp.rfp_document_retrieved === true);
+        var s170_srcUrl = String(rfpOpp.source_url || '');
+        var s170_isLapacDept = /dspBid\.cfm\?[^"\s]*search=department/i.test(s170_srcUrl);
+        var s170_rfpTextLen = (rfpOpp.rfp_text || '').length;
+        var s170_descLen = (rfpOpp.description || '').length;
+        var s170_substantialText = s170_rfpTextLen >= 5000;
+        // Manual override path: text was injected directly and source URL is NOT a
+        // dept-listing (the only known contamination source we have evidence for).
+        var s170_manualInjection = s170_substantialText && !s170_isLapacDept;
+
+        if (!s170_verified && !s170_manualInjection) {
+          var s170_reason;
+          if (s170_isLapacDept) {
+            s170_reason = 'source_url is a LaPAC department-listing (search=department&term=N) — the rfp_text on this opp is the listing-page HTML, not an actual RFP. Either (a) update opp.source_url to point to a specific bid-detail or RFP-PDF URL and re-trigger AUTO-RFP, or (b) manually populate opp.rfp_text with the RFP text and set opp.rfp_document_retrieved=true.';
+          } else if (s170_rfpTextLen < 500) {
+            s170_reason = 'opp.rfp_text is empty or too short (' + s170_rfpTextLen + ' chars). No verified RFP document on file. AUTO-RFP may not have run, or the source URL did not yield extractable content. Populate opp.rfp_text with the actual RFP text and set opp.rfp_document_retrieved=true before re-firing.';
+          } else if (s170_rfpTextLen < 5000) {
+            s170_reason = 'opp.rfp_text is present but too short (' + s170_rfpTextLen + ' chars) to be a real RFP, and rfp_document_retrieved=false. Likely a partial scrape or summary. Populate the full RFP text and set rfp_document_retrieved=true before re-firing.';
+          } else {
+            s170_reason = 'opp.rfp_document_retrieved=false. AUTO-RFP did not confirm a substantive RFP retrieval. Verify the source URL points to an actual RFP, re-run AUTO-RFP, or manually set rfp_document_retrieved=true if rfp_text is known-good.';
+          }
+          log('PROPOSAL ENGINE: REFUSED — RFP document not verified for ' + ppId + '. ' + s170_reason + ' Override: {force:true}.');
+          try {
+            await supabase.from('organism_memory').insert({
+              id: 's170_rfp_unverified_' + ppId.slice(0,20) + '_' + Date.now(),
+              agent: 's170_rfp_verified_guard',
+              opportunity_id: ppId,
+              observation: 'S170 RFP-VERIFIED GUARD: refused. ' + s170_reason + ' | rfp_text=' + s170_rfpTextLen + ' chars | source_url=' + s170_srcUrl.slice(0,200) + ' | description=' + s170_descLen + ' chars',
+              memory_type: 'analysis',
+              confidence: 'high',
+              created_at: new Date().toISOString()
+            });
+          } catch (_s170LogErr) {}
+          res.writeHead(422, {'Content-Type':'application/json'});
+          res.end(JSON.stringify({
+            error: 'rfp_document_not_verified',
+            message: 'Refusing to produce a proposal from unverified RFP input. The system is designed to autonomously produce submission-ready proposals, which requires a confirmed RFP document on file.',
+            opportunity_id: ppId,
+            opportunity_title: rfpOpp.title || '',
+            diagnosis: s170_reason,
+            current_state: {
+              rfp_document_retrieved: rfpOpp.rfp_document_retrieved === true,
+              rfp_text_length: s170_rfpTextLen,
+              source_url: s170_srcUrl,
+              source_url_pattern_lapac_dept_listing: s170_isLapacDept
+            },
+            override_with: { id: ppId, force: true, force_reason: 'document RFP text manually verified by Christopher' }
+          }));
+          return;
+        }
+        if (!s170_verified && s170_manualInjection) {
+          log('PROPOSAL ENGINE: S170 RFP-VERIFIED GUARD — rfp_document_retrieved=false but rfp_text length=' + s170_rfpTextLen + ' chars and source URL is not a dept-listing. Treating as manual injection. Proceeding.');
+        } else {
+          log('PROPOSAL ENGINE: S170 RFP-VERIFIED GUARD — passed (rfp_document_retrieved=true, ' + s170_rfpTextLen + ' chars).');
+        }
+      }
+    } catch (s170Err) {
+      log('PROPOSAL ENGINE: S170 RFP-verified guard query failed for ' + ppId + ' (' + (s170Err.message||s170Err) + '). Proceeding without block.');
+    }
+  } else {
+    log('PROPOSAL ENGINE: S170 RFP-VERIFIED GUARD — bypassed via force flag on ' + ppId + '.');
+  }
+
   log('PROPOSAL ENGINE: Starting for ' + ppId);
   res.writeHead(200, {'Content-Type':'application/json'});
   res.end(JSON.stringify({started:true, id:ppId}));
