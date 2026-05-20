@@ -8671,80 +8671,8 @@ if (url === '/api/orchestrate' && req.method === 'POST') {
   var body = '';
   for await (const chunk of req) body += chunk;
   var orchId = '';
-  var orchForce = false;
-  try {
-    var orchParsed = JSON.parse(body || '{}');
-    orchId = orchParsed.id || '';
-    orchForce = !!orchParsed.force;
-  } catch(e) {}
-  if (!orchForce && req.url.indexOf('force=true') >= 0) orchForce = true;
+  try { orchId = JSON.parse(body || '{}').id || ''; } catch(e) {}
   if (!orchId) { res.writeHead(400); res.end(JSON.stringify({error:'id required'})); return; }
-
-  // === S170 RFP-VERIFIED GUARD (orchestrate endpoint) ===
-  // Mirror the produce-proposal guard at the orchestrate entry. Generating
-  // scope_analysis, research_brief, and financial_analysis from unverified rfp_text
-  // wastes Anthropic spend AND poisons the downstream produce-proposal call.
-  // Refuse fast, log the diagnosis, point the caller at the remediation path.
-  if (!orchForce) {
-    try {
-      var orchPreCheck = await supabase.from('opportunities')
-        .select('id,title,source_url,rfp_text,rfp_document_retrieved')
-        .eq('id', orchId)
-        .single();
-      var oPre = orchPreCheck.data;
-      if (oPre) {
-        var oV = (oPre.rfp_document_retrieved === true);
-        var oSrc = String(oPre.source_url || '');
-        var oIsLapac = /dspBid\.cfm\?[^"\s]*search=department/i.test(oSrc);
-        var oLen = (oPre.rfp_text || '').length;
-        var oManualInj = (oLen >= 5000) && !oIsLapac;
-        if (!oV && !oManualInj) {
-          var oReason;
-          if (oIsLapac) {
-            oReason = 'source_url is a LaPAC department-listing — opp.rfp_text is the listing-page HTML, not an actual RFP. Update opp.source_url to point to a specific bid-detail URL, or manually populate opp.rfp_text with the real RFP text and set rfp_document_retrieved=true.';
-          } else if (oLen < 500) {
-            oReason = 'opp.rfp_text is empty or too short (' + oLen + ' chars). Populate the full RFP text and set rfp_document_retrieved=true before orchestrating.';
-          } else if (oLen < 5000) {
-            oReason = 'opp.rfp_text is too short (' + oLen + ' chars) to be a real RFP, and rfp_document_retrieved=false. Likely a partial scrape. Populate the full RFP text before orchestrating.';
-          } else {
-            oReason = 'opp.rfp_document_retrieved=false. AUTO-RFP did not confirm a substantive RFP retrieval.';
-          }
-          log('ORCHESTRATE API: REFUSED — RFP document not verified for ' + orchId + '. ' + oReason);
-          try {
-            await supabase.from('organism_memory').insert({
-              id: 's170_orch_unverified_' + orchId.slice(0,20) + '_' + Date.now(),
-              agent: 's170_orchestrate_guard',
-              opportunity_id: orchId,
-              observation: 'S170 ORCHESTRATE GUARD: refused. ' + oReason + ' | rfp_text=' + oLen + ' chars | source_url=' + oSrc.slice(0,200),
-              memory_type: 'analysis',
-              confidence: 'high',
-              created_at: new Date().toISOString()
-            });
-          } catch (_) {}
-          res.writeHead(422, {'Content-Type':'application/json'});
-          res.end(JSON.stringify({
-            error: 'rfp_document_not_verified',
-            message: 'Refusing to orchestrate from unverified RFP input. Generating scope/research/financial analysis from contaminated input wastes spend and poisons downstream proposal generation.',
-            opportunity_id: orchId,
-            diagnosis: oReason,
-            current_state: {
-              rfp_document_retrieved: oV,
-              rfp_text_length: oLen,
-              source_url: oSrc,
-              source_url_pattern_lapac_dept_listing: oIsLapac
-            },
-            override_with: { id: orchId, force: true }
-          }));
-          return;
-        }
-      }
-    } catch (orchGuardErr) {
-      log('ORCHESTRATE API: S170 guard query failed (' + (orchGuardErr.message||orchGuardErr) + '). Proceeding without block.');
-    }
-  } else {
-    log('ORCHESTRATE API: S170 RFP-VERIFIED GUARD — bypassed via force flag on ' + orchId + '.');
-  }
-
   log('ORCHESTRATE API: Starting for ' + orchId);
   res.writeHead(200, {'Content-Type':'application/json'});
   res.end(JSON.stringify({started:true, id:orchId}));
@@ -17407,23 +17335,6 @@ async function orchestrateOpp(opp) {
       return { steps: [], errors: ['skipped_expired_rfp'] };
     }
   }
-
-  // S170 SAFETY NET: refuse to orchestrate from unverified rfp_text. This duplicates the
-  // /api/orchestrate endpoint guard so that any caller of orchestrateOpp() (cron, internal,
-  // future call site) is also protected. If this fires, the endpoint guard already missed,
-  // which means either the call bypassed the endpoint or the data changed between checks.
-  (function s170_orch_func_guard() {
-    var _s170v = (opp.rfp_document_retrieved === true);
-    var _s170src = String(opp.source_url || '');
-    var _s170lapac = /dspBid\.cfm\?[^"\s]*search=department/i.test(_s170src);
-    var _s170len = (opp.rfp_text || '').length;
-    var _s170manual = (_s170len >= 5000) && !_s170lapac;
-    if (!_s170v && !_s170manual) {
-      log('ORCHESTRATE S170 SAFETY NET: refusing on ' + (opp.id || '?') + ' — rfp_document_retrieved=' + _s170v + ', rfp_text=' + _s170len + ' chars, lapac_dept_listing=' + _s170lapac);
-      // Signal to outer caller via thrown sentinel
-      throw new Error('s170_orchestrate_refused: rfp_document_not_verified');
-    }
-  })();
   log('ORCHESTRATE: Starting 5-step analysis for ' + (opp.title || '').slice(0, 50));
 
   var rfpContent = (opp.rfp_text || '').slice(0, 40000);
