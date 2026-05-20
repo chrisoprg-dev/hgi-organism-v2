@@ -17622,7 +17622,18 @@ async function orchestrateOpp(opp) {
   }
   log('ORCHESTRATE: Starting 5-step analysis for ' + (opp.title || '').slice(0, 50));
 
-  var rfpContent = (opp.rfp_text || '').slice(0, 40000);
+  // S171 SCOPE TRUNCATION FIX: Matches S150 fix on extractRFPRequirements.
+  // Previous 40K cap silently hid addenda + late-document attachments from the
+  // scope analyst AND the fact-checker. Discovered on RTA 2026-015 where the
+  // corpus was 141K (121K main + Add I + Add II Q&A + Add III). Attachment 1
+  // (the actual scope of services) started at char ~108K and was invisible.
+  // Addendum II struck "price shall not be considered" from §1.12 and changed
+  // the evaluation criteria — also invisible. Result: scope agent claimed
+  // Attachment 1 was unrendered, used the original (struck) §1.12 language,
+  // and reported the wrong evaluation point breakdown. Sonnet 4.6 + Haiku 4.5
+  // both have 200K native context windows; 180K leaves headroom for system
+  // prompt + organism intel + KB context + 8K output.
+  var rfpContent = (opp.rfp_text || '').slice(0, 180000);
   var kbContext = await kbQuery(opp.vertical, opp.title + ' ' + (opp.agency || ''));
 
   // ═══ ALL-INTO-ALL ORCHESTRATION: Load EVERY intelligence source ═══
@@ -17725,7 +17736,11 @@ async function orchestrateOpp(opp) {
           '- CLEAN: zero claims invented\n' +
           '- FLAGGED: 1-2 minor claims invented (can be fixed with annotation)\n' +
           '- CONTAMINATED: 3+ claims invented OR any claim that reframes the opportunity (like inventing a funding source). Scope should be regenerated.\n\n' +
-          'RFP TEXT:\n' + (rfpContent || '').slice(0, 30000) + '\n\n' +
+          // S171: increased from 30000 to 150000. Fact-checker runs on Haiku 4.5
+          // (200K context). Old 30K cap meant fact-check couldn't catch scope claims
+          // that contradicted material in pages 40+ of dense RFPs (addenda, late
+          // attachments). 150K leaves room for the scope analysis text + prompt.
+          'RFP TEXT:\n' + (rfpContent || '').slice(0, 150000) + '\n\n' +
           'SCOPE ANALYSIS:\n' + scopeText;
         var fcResp = await anthropic.messages.create({
           model: 'claude-haiku-4-5-20251001', max_tokens: 1500,
