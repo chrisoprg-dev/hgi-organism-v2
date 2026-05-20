@@ -1162,6 +1162,218 @@ if (url === '/api/chat' && req.method === 'POST') {
 
 
 // === PROPOSAL PRODUCTION ENGINE ===
+// === UPLOAD RFP — /api/upload-rfp ===
+// Closes the loop on the S170 RFP-verified guard. When an opp has unverified rfp_text
+// (LaPAC department-listing scrape, empty, or partial), the guards refuse downstream
+// orchestrate/produce-proposal calls. This endpoint is the remediation path: POST
+// the actual RFP text (or PDF) here, and the opp becomes ready for the pipeline.
+//
+// Three input modes, picked by Content-Type and body:
+//   1. JSON with { id, rfp_text, rfp_document_url? } — caller pre-extracts text.
+//      Simplest path; works from any client.
+//   2. Raw PDF binary, with ?id=<oppId> in query string. Server extracts text via
+//      the pdf-parse library that's already a project dependency.
+//   3. JSON with { id, pdf_base64, rfp_document_url? } — base64-encoded PDF.
+//      Useful from MCP clients that can't easily POST binary.
+//
+// On success: updates opp.rfp_text, opp.rfp_document_retrieved=true, opp.last_updated.
+// Logs to organism_memory with agent 'rfp_uploader'. Returns the new char count.
+if (url.startsWith('/api/upload-rfp') && req.method === 'POST') {
+  // Collect body — handle large PDFs (up to ~25MB practical limit)
+  var rfpUpBufs = [];
+  var rfpUpTotal = 0;
+  var RFP_UP_MAX = 30 * 1024 * 1024; // 30 MB
+  try {
+    for await (const chunk of req) {
+      rfpUpBufs.push(chunk);
+      rfpUpTotal += chunk.length;
+      if (rfpUpTotal > RFP_UP_MAX) {
+        res.writeHead(413, {'Content-Type':'application/json'});
+        res.end(JSON.stringify({error:'payload_too_large', message:'Upload exceeded 30MB cap.'}));
+        return;
+      }
+    }
+  } catch(rfpUpReadErr) {
+    res.writeHead(400, {'Content-Type':'application/json'});
+    res.end(JSON.stringify({error:'body_read_failed', message:(rfpUpReadErr.message||'').slice(0,200)}));
+    return;
+  }
+  var rfpUpBody = Buffer.concat(rfpUpBufs);
+  var rfpUpCT = String(req.headers['content-type'] || '').toLowerCase();
+
+  // Resolve oppId — from query string OR JSON body
+  var rfpOppId = '';
+  var rfpInputText = '';
+  var rfpDocUrl = '';
+  var rfpSource = '';  // 'json_text' | 'json_base64' | 'binary_pdf'
+  try {
+    var qm = (req.url.match(/[?&]id=([^&]+)/) || [])[1];
+    if (qm) rfpOppId = decodeURIComponent(qm);
+  } catch(_) {}
+
+  // Branch on content type
+  if (rfpUpCT.indexOf('application/pdf') >= 0 ||
+      rfpUpCT.indexOf('application/octet-stream') >= 0) {
+    // Mode 2: raw binary PDF
+    rfpSource = 'binary_pdf';
+    if (!rfpOppId) {
+      res.writeHead(400, {'Content-Type':'application/json'});
+      res.end(JSON.stringify({error:'id_required', message:'For binary PDF uploads, pass the opportunity id in the query string: /api/upload-rfp?id=<oppId>'}));
+      return;
+    }
+    if (!pdfParse) {
+      res.writeHead(503, {'Content-Type':'application/json'});
+      res.end(JSON.stringify({error:'pdf_parse_unavailable', message:'pdf-parse library not loaded on this instance. Use JSON text mode instead: POST {id, rfp_text}.'}));
+      return;
+    }
+    try {
+      var rfpUpParsed = await pdfParse(rfpUpBody);
+      rfpInputText = rfpUpParsed.text || '';
+    } catch(rfpUpPdfErr) {
+      res.writeHead(400, {'Content-Type':'application/json'});
+      res.end(JSON.stringify({error:'pdf_parse_failed', message:(rfpUpPdfErr.message||'').slice(0,200)}));
+      return;
+    }
+  } else {
+    // Mode 1 or 3: JSON payload
+    var rfpUpParsedBody;
+    try {
+      rfpUpParsedBody = JSON.parse(rfpUpBody.toString('utf8') || '{}');
+    } catch(rfpUpJsonErr) {
+      res.writeHead(400, {'Content-Type':'application/json'});
+      res.end(JSON.stringify({error:'invalid_json', message:'Body must be valid JSON or raw binary PDF.'}));
+      return;
+    }
+    if (!rfpOppId) rfpOppId = String(rfpUpParsedBody.id || '');
+    rfpDocUrl = String(rfpUpParsedBody.rfp_document_url || '');
+
+    if (rfpUpParsedBody.rfp_text) {
+      rfpSource = 'json_text';
+      rfpInputText = String(rfpUpParsedBody.rfp_text || '');
+    } else if (rfpUpParsedBody.pdf_base64) {
+      rfpSource = 'json_base64';
+      if (!pdfParse) {
+        res.writeHead(503, {'Content-Type':'application/json'});
+        res.end(JSON.stringify({error:'pdf_parse_unavailable', message:'pdf-parse library not loaded on this instance. Use {rfp_text} mode instead.'}));
+        return;
+      }
+      try {
+        var rfpUpPdfBuf = Buffer.from(String(rfpUpParsedBody.pdf_base64), 'base64');
+        if (rfpUpPdfBuf.length < 100) throw new Error('decoded PDF buffer too small: ' + rfpUpPdfBuf.length + ' bytes');
+        var rfpUpParsed2 = await pdfParse(rfpUpPdfBuf);
+        rfpInputText = rfpUpParsed2.text || '';
+      } catch(rfpUpB64Err) {
+        res.writeHead(400, {'Content-Type':'application/json'});
+        res.end(JSON.stringify({error:'pdf_base64_decode_or_parse_failed', message:(rfpUpB64Err.message||'').slice(0,200)}));
+        return;
+      }
+    } else {
+      res.writeHead(400, {'Content-Type':'application/json'});
+      res.end(JSON.stringify({error:'no_content', message:'Provide either {rfp_text:...} or {pdf_base64:...} in the JSON body, or POST raw PDF bytes with Content-Type: application/pdf and ?id=<oppId>.'}));
+      return;
+    }
+  }
+
+  if (!rfpOppId) {
+    res.writeHead(400, {'Content-Type':'application/json'});
+    res.end(JSON.stringify({error:'id_required'}));
+    return;
+  }
+
+  // Validate extracted text length
+  var rfpInputLen = (rfpInputText || '').trim().length;
+  if (rfpInputLen < 500) {
+    res.writeHead(400, {'Content-Type':'application/json'});
+    res.end(JSON.stringify({
+      error: 'rfp_text_too_short',
+      message: 'Extracted/provided rfp_text is too short to be a real RFP: ' + rfpInputLen + ' chars. Minimum 500 chars required.',
+      char_count: rfpInputLen,
+      source: rfpSource
+    }));
+    return;
+  }
+
+  // Verify opp exists
+  var rfpUpOppR;
+  try {
+    rfpUpOppR = await supabase.from('opportunities')
+      .select('id,title,source_url,rfp_text,rfp_document_retrieved')
+      .eq('id', rfpOppId)
+      .single();
+  } catch(rfpUpFetchErr) {
+    res.writeHead(500, {'Content-Type':'application/json'});
+    res.end(JSON.stringify({error:'opp_fetch_failed', message:(rfpUpFetchErr.message||'').slice(0,200)}));
+    return;
+  }
+  if (!rfpUpOppR || !rfpUpOppR.data) {
+    res.writeHead(404, {'Content-Type':'application/json'});
+    res.end(JSON.stringify({error:'opp_not_found', opportunity_id:rfpOppId}));
+    return;
+  }
+  var rfpUpOpp = rfpUpOppR.data;
+  var rfpUpPriorLen = (rfpUpOpp.rfp_text || '').length;
+  var rfpUpPriorVerified = (rfpUpOpp.rfp_document_retrieved === true);
+
+  // Cap rfp_text at 200000 chars (same cap AUTO-RFP uses)
+  var rfpTextToStore = rfpInputText.slice(0, 200000);
+
+  // Update opp
+  var rfpUpUpdate = {
+    rfp_text: rfpTextToStore,
+    rfp_document_retrieved: true,
+    last_updated: new Date().toISOString()
+  };
+  if (rfpDocUrl) rfpUpUpdate.rfp_document_url = rfpDocUrl;
+
+  try {
+    var rfpUpdR = await supabase.from('opportunities')
+      .update(rfpUpUpdate)
+      .eq('id', rfpOppId)
+      .select('id')
+      .single();
+    if (!rfpUpdR || !rfpUpdR.data) throw new Error('update returned no row');
+  } catch(rfpUpdErr) {
+    res.writeHead(500, {'Content-Type':'application/json'});
+    res.end(JSON.stringify({error:'opp_update_failed', message:(rfpUpdErr.message||'').slice(0,200)}));
+    return;
+  }
+
+  // Log to organism_memory for accountability
+  try {
+    await supabase.from('organism_memory').insert({
+      id: 'rfp_upload_' + rfpOppId.slice(0,20) + '_' + Date.now(),
+      agent: 'rfp_uploader',
+      opportunity_id: rfpOppId,
+      observation: 'RFP UPLOAD: ' + rfpInputLen + ' chars (stored ' + rfpTextToStore.length + ' after 200K cap) via ' + rfpSource +
+        '. Prior state: rfp_text=' + rfpUpPriorLen + ' chars, rfp_document_retrieved=' + rfpUpPriorVerified +
+        '. Now: rfp_document_retrieved=true' + (rfpDocUrl ? ' | source: ' + rfpDocUrl.slice(0,200) : ''),
+      memory_type: 'analysis',
+      confidence: 'high',
+      created_at: new Date().toISOString()
+    });
+  } catch(_rfpUpLogErr) {}
+
+  log('UPLOAD RFP: opp ' + rfpOppId + ' updated. ' + rfpInputLen + ' chars (' + rfpSource + '). Prior: ' + rfpUpPriorLen + ' chars verified=' + rfpUpPriorVerified + '.');
+
+  res.writeHead(200, {'Content-Type':'application/json'});
+  res.end(JSON.stringify({
+    success: true,
+    opportunity_id: rfpOppId,
+    opportunity_title: rfpUpOpp.title || '',
+    rfp_text_length: rfpTextToStore.length,
+    rfp_text_length_provided: rfpInputLen,
+    truncated: rfpInputLen > 200000,
+    rfp_document_retrieved: true,
+    source: rfpSource,
+    rfp_document_url: rfpDocUrl || null,
+    prior_state: {
+      rfp_text_length: rfpUpPriorLen,
+      rfp_document_retrieved: rfpUpPriorVerified
+    }
+  }));
+  return;
+}
+
 if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
   let body = '';
   for await (const chunk of req) body += chunk;
