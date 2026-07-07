@@ -16118,90 +16118,86 @@ async function huntCentralBidding(isCron) {
 
 async function huntLaPAC() {
   var results = [];
-  if (!puppeteer) { log('LaPAC: Puppeteer not available — trying HTTP fallback'); }
-  // Try Puppeteer first, fall back to HTTP
-  if (puppeteer) {
-    var browser = null;
-    try {
-      browser = await puppeteer.launch({
-        headless: 'new', args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--single-process'], timeout: 20000
-      });
-      var page = await browser.newPage();
-      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
-      page.setDefaultTimeout(12000);
-      // Try both known LaPAC URLs
-      var loaded = false;
-      var urls = ['https://wwwcfprd.doa.louisiana.gov/osp/lapac/pubMain.cfm', 'https://lapac.doa.louisiana.gov/vendor/bidding/current-solicitations/'];
-      for (var li = 0; li < urls.length && !loaded; li++) {
-        try {
-          await page.goto(urls[li], { waitUntil: 'networkidle2', timeout: 15000 });
-          loaded = true;
-        } catch (e) { log('LaPAC: ' + urls[li].slice(0, 50) + ' failed: ' + e.message.slice(0, 40)); }
-      }
-      if (loaded) {
-        var bids = await page.evaluate(function() {
-          var found = [];
-          // Extract table rows with bid data
-          document.querySelectorAll('tr').forEach(function(row) {
-            var cells = row.querySelectorAll('td');
-            if (cells.length >= 2) {
-              var title = (cells[1] || cells[0]).textContent.trim();
-              var link = row.querySelector('a');
-              if (title.length > 5) {
-                found.push({
-                  title: title.slice(0, 200),
-                  agency: cells.length > 2 ? cells[2].textContent.trim() : 'Louisiana State Agency',
-                  url: link ? (link.href || '') : '',
-                  due: cells.length > 3 ? cells[3].textContent.trim() : null
-                });
-              }
-            }
-          });
-          // Also check for any bid-like links
-          document.querySelectorAll('a').forEach(function(a) {
-            var text = (a.textContent || '').trim();
-            if (text.length > 20 && (a.href || '').includes('lapac') && !found.some(function(f) { return f.title === text; })) {
-              found.push({ title: text.slice(0, 200), agency: 'Louisiana State Agency', url: a.href || '', due: null });
-            }
-          });
-          return found;
-        });
-        bids.forEach(function(b) {
-          if (b.title && b.title.length > 5) {
-            results.push({
-              title: b.title, agency: b.agency,
-              source: 'lapac_v2', source_url: b.url || 'https://wwwcfprd.doa.louisiana.gov/osp/lapac/pubMain.cfm',
-              description: b.title, due_date: b.due || null
-            });
-          }
+  // S174 (Jul 7 2026) FIX: prior version scraped pubMain.cfm, the LaPAC MENU page —
+  // which has ZERO real bid listings, only navigation links ("Search For Open Bids",
+  // "Vendor Registration Menu", etc). It was misidentifying 2 nav links as "listings"
+  // every single day for 26+ days straight, with zero real opportunities ever surfacing.
+  // Root cause confirmed by fetching the live page directly — it's a menu, not a bid table.
+  // FIX: deptbids.cfm lists every LA department/agency with a live bid count in parens,
+  // e.g. "Non State - Sewerage & Water Board of New Orleans - (7)". Departments with
+  // count>0 link to dspBid.cfm?search=department&term=N, which has the ACTUAL bid table
+  // (bid#, description, date issued, bid open date/time). No auth needed — plain HTTP,
+  // no Puppeteer required (removes a browser-launch failure point entirely for this source).
+  try {
+    var deptResp = await fetch('https://wwwcfprd.doa.louisiana.gov/osp/lapac/deptbids.cfm', {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+      signal: AbortSignal.timeout(15000)
+    });
+    if (!deptResp.ok) { log('LaPAC: deptbids.cfm HTTP ' + deptResp.status); return results; }
+    var deptHtml = await deptResp.text();
+    var deptRx = /<a href="(dspBid\.cfm\?search=department&term=\d+)"[^>]*>\s*<strong>([^<]+)<\/strong>/g;
+    var deptMatch;
+    var depts = [];
+    while ((deptMatch = deptRx.exec(deptHtml)) !== null) {
+      var deptLabel = deptMatch[2].replace(/&amp;/g, '&').trim();
+      var countM = deptLabel.match(/\((\d+)\)\s*$/);
+      var count = countM ? parseInt(countM[1], 10) : 0;
+      if (count > 0) {
+        depts.push({
+          url: 'https://wwwcfprd.doa.louisiana.gov/osp/lapac/' + deptMatch[1].replace(/&amp;/g, '&'),
+          agency: deptLabel.replace(/^[+\-*\s]+/, '').replace(/\s*-\s*\(\d+\)\s*$/, '').replace(/[*\s]+$/, '').trim(),
+          count: count
         });
       }
-    } catch (e) { log('LaPAC Puppeteer err: ' + (e.message || '').slice(0, 80)); }
-    finally { if (browser) { try { await browser.close(); } catch(e) {} } }
-  } else {
-    // HTTP fallback
-    try {
-      var resp = await fetch('https://wwwcfprd.doa.louisiana.gov/osp/lapac/pubMain.cfm', {
-        headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(15000)
-      });
-      if (resp.ok) {
-        var html = await resp.text();
-        var rowRx = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-        var rowM;
-        while ((rowM = rowRx.exec(html)) !== null && results.length < 25) {
+    }
+    log('LaPAC: ' + depts.length + ' departments with active bids (' + depts.reduce(function(s, d) { return s + d.count; }, 0) + ' total listings across LA state/local agencies)');
+
+    for (var di = 0; di < depts.length; di++) {
+      var d = depts[di];
+      try {
+        var bidResp = await fetch(d.url, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+          signal: AbortSignal.timeout(10000)
+        });
+        if (!bidResp.ok) continue;
+        var bidHtml = await bidResp.text();
+        var rowRx = /<tr class="(?:oddRow|evenRow)">([\s\S]*?)<\/tr>/g;
+        var rowMatch;
+        while ((rowMatch = rowRx.exec(bidHtml)) !== null) {
+          var cellRx = /<td[^>]*>([\s\S]*?)<\/td>/g;
           var cells = [];
-          var cellRx = /<td[^>]*>([\s\S]*?)<\/td>/gi;
-          var cellM;
-          while ((cellM = cellRx.exec(rowM[1])) !== null) { cells.push(cellM[1].replace(/<[^>]+>/g, '').trim()); }
-          if (cells.length >= 2 && cells[0].length > 3) {
-            var linkM = /href=["']([^"']+)["']/i.exec(rowM[1]);
-            results.push({ title: (cells[1] || cells[0]).slice(0, 200), agency: cells[2] || 'Louisiana State Agency', source: 'lapac_v2', source_url: linkM ? linkM[1] : 'https://wwwcfprd.doa.louisiana.gov/osp/lapac/pubMain.cfm', description: cells.slice(0, 4).join(' — ').slice(0, 500), due_date: cells[3] || null });
+          var cellMatch;
+          while ((cellMatch = cellRx.exec(rowMatch[1])) !== null) {
+            var cellText = cellMatch[1]
+              .replace(/<[^>]+>/g, ' ')
+              .replace(/&#x28;/g, '(').replace(/&#x29;/g, ')')
+              .replace(/&amp;/g, '&').replace(/&#39;/g, "'")
+              .replace(/\s{2,}/g, ' ').trim();
+            cells.push(cellText);
           }
+          // Addenda-continuation rows (rowspan) can have <3 cells — skip, not new opps
+          if (cells.length < 3) continue;
+          var bidNo = cells[0];
+          var descRaw = cells[1].split(/\s*Original:/)[0].trim();
+          var dateIssued = cells[2];
+          var openDateRaw = cells.length > 3 ? cells[3] : '';
+          var dateM = openDateRaw.match(/(\d{2}\/\d{2}\/\d{4})/);
+          var dueDate = dateM ? dateM[1] : null;
+          if (!descRaw || descRaw.length < 4 || !bidNo) continue;
+          if (/\bcancell?ed\b/i.test(descRaw)) continue; // pre-cancelled listing, skip before it costs a Haiku call
+          results.push({
+            title: (descRaw + ' [Bid# ' + bidNo + ']').slice(0, 200),
+            agency: d.agency,
+            source: 'lapac_v2',
+            source_url: d.url,
+            description: descRaw + ' — LaPAC Bid #' + bidNo + ', issued ' + dateIssued + '.',
+            due_date: dueDate
+          });
         }
-      }
-    } catch (e) { log('LaPAC HTTP err: ' + (e.message||'').slice(0,60)); }
-  }
-  log('LaPAC: ' + results.length + ' listings found');
+      } catch (deErr) { log('LaPAC dept err (' + (d.agency || '').slice(0, 30) + '): ' + (deErr.message || '').slice(0, 60)); }
+    }
+  } catch (e) { log('LaPAC deptbids err: ' + (e.message || '').slice(0, 80)); }
+  log('LaPAC: ' + results.length + ' listings found across departments');
   return results;
 }
 
