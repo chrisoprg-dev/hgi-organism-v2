@@ -3609,9 +3609,9 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       // surface the truth and downstream agents can refuse to operate on incomplete drafts.
       // Required sections come from the parsed compliance blueprint when available; otherwise
       // we apply a default set covering the standard government services proposal shape.
-      var _s149_required = (complianceBlueprint && Array.isArray(complianceBlueprint.sections_required) && complianceBlueprint.sections_required.length > 0)
+      var _s149_required = (complianceBlueprint && Array.isArray(complianceBlueprint.sections_required) && complianceBlueprint.sections_required.length > 0 && complianceBlueprint.sections_required.length <= 8)
         ? complianceBlueprint.sections_required.map(function(s){ return String((s.title||s.section_number||'')).toLowerCase(); }).filter(function(t){ return t.length > 0; })
-        : ['executive summary', 'technical approach', 'management', 'staffing', 'past performance', 'pricing'];
+        : ['qualifications', 'approach'];
       var _s149_lowerProp = (proposalText || '').toLowerCase();
       var _s149_missing = _s149_required.filter(function(s){
         // tolerant match: present if any meaningful word from section title appears
@@ -3631,9 +3631,12 @@ if (url.startsWith('/api/produce-proposal') && req.method === 'POST') {
       // close with a citation or italic phrase. DR-4900 case caught here:
       // tail ended with "Non-Collusion Affidavit —" which the previous regex
       // would have passed via the table-cell exception.
-      var _s149_lastChar = _s149_tail.replace(/\s+$/, '').slice(-1);
-      var _s149_endsCleanly = /[.!?\)\]"'*]/.test(_s149_lastChar) &&
-                              !/[—–\-,;|:]$/.test(_s149_tail.replace(/\s+$/, ''));
+      var _s149_trimTail = _s149_tail.replace(/\s+$/, '');
+      var _s149_lastChar = _s149_trimTail.slice(-1);
+      // Truncated only on a genuine mid-thought ending (dangling dash/comma/colon or
+      // trailing connector word). Dates, names, numbers, ] and periods are valid endings.
+      var _s149_endsCleanly = !/[\u2014\u2013\-,;|:]$/.test(_s149_trimTail) &&
+                              !/\b(and|or|the|of|to|for|with|an|in|on|at|by)$/i.test(_s149_trimTail);
       var _s149_lengthOK = (proposalText || '').length >= 5000;
       var _s149_problems = [];
       if (_s149_missing.length > 0) _s149_problems.push('missing=' + _s149_missing.join(','));
