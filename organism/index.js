@@ -16908,7 +16908,10 @@ async function agentHunting(state, trigger) {
         // >45 days: no adjustment
       }
 
-      if (score.vertical === 'FILTER' || score.opi < 45) continue;
+      var _FED_SRC = ['sam_gov','grants_gov','usaspending','federal_register'];
+      var _isFed = _FED_SRC.indexOf(cand.source) !== -1;
+      if (score.vertical === 'FILTER') continue;
+      if (score.opi < 45 && !_isFed) continue; // surface low-scoring federal to watch list instead of dropping
 
       // S166 H6: solicitation-number dedup. Catches case where same RFP is discovered
       // via two different web_search queries (e.g. North Texas WSNT RFP #2026-002 was
@@ -16944,7 +16947,7 @@ async function agentHunting(state, trigger) {
       var newId = cand.source + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
       await supabase.from('opportunities').insert({
         id: newId, title: cand.title, agency: cand.agency, vertical: score.vertical,
-        opi_score: score.opi, status: 'active', stage: 'identified', source: cand.source,
+        opi_score: score.opi, status: (_isFed && score.opi < 60) ? 'federal_watch' : 'active', stage: 'identified', source: cand.source,
         source_url: cand.source_url, estimated_value: 'unknown', due_date: cand.due_date || null,
         solicitation_number: cand.solicitation_number || null,
         // S164 T3A: organism-generated initial scoring rationale → capture_organism_text typed column.
