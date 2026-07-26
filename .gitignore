@@ -1,0 +1,18 @@
+# Dependencies — installed by Railway at deploy time, never committed.
+node_modules/
+
+# Lockfile deliberately excluded in this PR.
+# The repo has deployed to Railway without one; committing a lockfile can switch
+# npm from `install` to `ci` resolution and change what actually ships. That is a
+# deploy-behavior change, and this branch is an anti-fabrication change — the two
+# should not ride together. Remove this line in a separate PR if you want the
+# lockfile tracked (generally you do).
+package-lock.json
+
+# Local env
+.env
+.env.local
+
+# OS noise
+Thumbs.db
+.DS_Store
