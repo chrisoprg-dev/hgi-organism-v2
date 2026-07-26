@@ -13,6 +13,18 @@ process.on('unhandledRejection', (r) => log('UNHANDLED: ' + (r instanceof Error 
 process.on('uncaughtException', (e) => log('UNCAUGHT: ' + e.message.slice(0,150)));
 
 import Anthropic from '@anthropic-ai/sdk';
+
+// S172 ANTI-FABRICATION LAYER — quote-anchored citation gate.
+// Pure module: no DB handle, no model calls, no network. See organism/citations.js
+// for the full rationale. Enforcement mode is resolved once at startup.
+import {
+  evaluateWrite as citationEvaluateWrite,
+  resolveEnforceMode as citationResolveEnforceMode,
+  primarySourceUrl as citationPrimarySourceUrl,
+  gateSummary as citationGateSummary,
+  buildCitationBlock as citationBuildBlock,
+  CITATION_PROMPT_CONTRACT
+} from './citations.js';
 var pdfParse = null;
 try { pdfParse = (await import('pdf-parse')).default; } catch(e) { console.log('pdf-parse not available: ' + e.message); }
 var puppeteer = null;
@@ -26,6 +38,15 @@ var SONNET = 'claude-sonnet-4-6';
 
 const supabase = createClient(SB_URL, SB_KEY);
 const anthropic = new Anthropic({ apiKey: AK });
+
+// S172: CITATION_ENFORCE = off | audit | priority | global. Default 'priority'.
+//   priority -> hard reject on scope_analysis / opi_score / financial_analysis /
+//               staffing_plan; audit-only everywhere else.
+//   global   -> hard reject on every instrumented path. Flip here once audit-mode
+//               telemetry shows agents are reliably emitting citation blocks.
+// Unset or unrecognized values fall back to 'priority' rather than silently
+// disabling the gate.
+var CITATION_ENFORCE = citationResolveEnforceMode(process.env.CITATION_ENFORCE);
 
 // === S160 T4B AGENT REGISTRY CACHE ===
 // Single source of truth for the previously hardcoded `agents_active: 29` constant
@@ -7316,6 +7337,112 @@ if (url.startsWith('/api/proposal-improve') && req.method === 'POST') {
   return;
 }
 
+// === S172: CITATION GATE TEST/REPLAY — /api/test-citation-gate ===
+// POST {id?, text?, target?, mode?, replay?, limit?}
+//   {id, text}      -> run the gate against a real opportunity's sources
+//   {id}            -> re-evaluate that opportunity's STORED scope_analysis
+//   {replay:true}   -> READ-ONLY sweep: evaluate every stored scope_analysis and
+//                      report what the gate would do. No writes, no model calls.
+// Zero model calls, so this costs nothing and cannot trip the cost breakers.
+// Mirrors the S132 harness below — this repo has no unit-test runner for
+// endpoint code, so a test endpoint is the house pattern.
+if (url.startsWith('/api/test-citation-gate') && req.method === 'POST') {
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+  try {
+    var cgBody = '';
+    await new Promise(function(resolve) { req.on('data', function(c) { cgBody += c; }); req.on('end', resolve); });
+    var cgData = JSON.parse(cgBody || '{}');
+    var cgMode = cgData.mode ? citationResolveEnforceMode(cgData.mode) : CITATION_ENFORCE;
+
+    // ---- REPLAY: read-only blast-radius report across stored scope_analysis ----
+    if (cgData.replay) {
+      var cgLimit = Math.min(parseInt(cgData.limit, 10) || 200, 500);
+      var cgRows = await supabase.from('opportunities')
+        .select('id, title, opi_score, status, rfp_text, rfp_document_retrieved, scope_analysis, agency, description')
+        .not('scope_analysis', 'is', null)
+        .order('discovered_at', { ascending: false })
+        .limit(cgLimit);
+      var cgOut = [], cgAllow = 0, cgBlock = 0, cgCodes = {};
+      var cgList = (cgRows && cgRows.data) || [];
+      for (var cgi = 0; cgi < cgList.length; cgi++) {
+        var r = cgList[cgi];
+        if (!r.scope_analysis) continue;
+        var v = citationEvaluateWrite({
+          target: 'scope_analysis',
+          text: r.scope_analysis,
+          sources: {
+            oppId: r.id,
+            fields: { rfp_text: r.rfp_text || '', title: r.title || '', agency: r.agency || '', description: r.description || '' },
+            listing: [r.title, r.agency, r.description].filter(Boolean).join(' | ')
+          },
+          mode: 'priority',
+          requireRfpRetrieved: true,
+          rfpDocumentRetrieved: (r.rfp_document_retrieved === true)
+        });
+        if (v.allow) cgAllow++; else cgBlock++;
+        cgCodes[v.code] = (cgCodes[v.code] || 0) + 1;
+        cgOut.push({
+          id: r.id, title: (r.title || '').slice(0, 60), opi: r.opi_score, status: r.status,
+          rfp_retrieved: (r.rfp_document_retrieved === true),
+          allow: v.allow, code: v.code, citations: (v.stats && v.stats.total) || 0
+        });
+      }
+      log('S172 REPLAY: scanned=' + cgOut.length + ' allow=' + cgAllow + ' block=' + cgBlock);
+      res.end(JSON.stringify({
+        success: true, replay: true, read_only: true,
+        scanned: cgOut.length, would_allow: cgAllow, would_block: cgBlock,
+        by_code: cgCodes, rows: cgOut
+      }, null, 2));
+      return;
+    }
+
+    // ---- Single evaluation ----
+    var cgId = cgData.id || cgData.opportunity_id;
+    if (!cgId) { res.end(JSON.stringify({ error: 'id required (or replay:true)' })); return; }
+    var cgOppRes = await supabase.from('opportunities')
+      .select('id, title, agency, description, solicitation_number, naics, due_date, estimated_value, source_url, rfp_text, rfp_document_retrieved, scope_analysis')
+      .eq('id', cgId).single();
+    if (!cgOppRes.data) { res.end(JSON.stringify({ error: 'opportunity not found' })); return; }
+    var cgOpp = cgOppRes.data;
+    var cgText = (typeof cgData.text === 'string' && cgData.text.length) ? cgData.text : cgOpp.scope_analysis;
+    if (!cgText) { res.end(JSON.stringify({ error: 'no text supplied and scope_analysis is empty' })); return; }
+
+    var cgResult = citationEvaluateWrite({
+      target: cgData.target || 'scope_analysis',
+      text: cgText,
+      sources: {
+        oppId: cgOpp.id,
+        fields: {
+          rfp_text: cgOpp.rfp_text || '', title: cgOpp.title || '', agency: cgOpp.agency || '',
+          description: cgOpp.description || '', solicitation_number: cgOpp.solicitation_number || '',
+          naics: cgOpp.naics || '', due_date: cgOpp.due_date || '',
+          estimated_value: cgOpp.estimated_value || '', source_url: cgOpp.source_url || ''
+        },
+        listing: [cgOpp.title, cgOpp.agency, cgOpp.description].filter(Boolean).join(' | ')
+      },
+      mode: cgMode,
+      requireRfpRetrieved: cgData.requireRfpRetrieved !== false,
+      rfpDocumentRetrieved: (cgOpp.rfp_document_retrieved === true),
+      factCheckVerdict: cgData.factCheckVerdict || null,
+      force: !!cgData.force
+    });
+    log('S172 GATE TEST: ' + citationGateSummary(cgResult));
+    res.end(JSON.stringify({
+      success: true, read_only: true, opportunity_id: cgOpp.id,
+      enforce_mode: cgMode,
+      rfp_document_retrieved: (cgOpp.rfp_document_retrieved === true),
+      rfp_text_chars: (cgOpp.rfp_text || '').length,
+      allow: cgResult.allow, code: cgResult.code, enforced: cgResult.enforced,
+      would_reject: cgResult.wouldReject, bypass: cgResult.bypass,
+      reason: cgResult.reason, stats: cgResult.stats, anchors: cgResult.anchors,
+      clean_text_preview: (cgResult.cleanText || '').slice(0, 400)
+    }, null, 2));
+  } catch (cgErr) {
+    res.end(JSON.stringify({ error: cgErr.message, stack: (cgErr.stack || '').slice(0, 500) }));
+  }
+  return;
+}
+
 // === S132: CITATION VERIFIER TEST — /api/test-citation-verifier ===
 // POST {id: "opp_id", section?: "technical_approach"}
 // Runs verifySectionCitations() against an opportunity's already-populated
@@ -8968,7 +9095,9 @@ if (url === '/api/orchestrate' && req.method === 'POST') {
   (async function(){
     try {
       var orchOpp = await supabase.from('opportunities').select('*').eq('id', orchId).single();
-      if (orchOpp.data) await orchestrateOpp(orchOpp.data);
+      // S172: propagate the operator force flag so the citation gate honors the
+      // same override the S170 guard above already accepts.
+      if (orchOpp.data) await orchestrateOpp(orchOpp.data, { force: orchForce });
     } catch(e) { log('ORCHESTRATE API ERROR: ' + e.message); }
   })();
   return;
@@ -9536,11 +9665,98 @@ var _sessionLockTrigger = null;
 var _sessionDbLockHolder = null; // S167: holder string for DB lock release in finally
 var _SESSION_STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 min stale-override safety
 
-async function storeMemory(agent, oppId, tags, observation, memType, sourceUrl, confidence) {
+// S172: quarantine sink for writes the citation gate rejects. Deliberately a
+// direct insert rather than a storeMemory() call — routing it back through the
+// gated helper would recurse. Preserves the full rejected payload so an expensive
+// Sonnet generation is inspectable rather than lost.
+async function citationQuarantine(kind, agent, oppId, target, payload, gateResult) {
+  try {
+    await supabase.from('organism_memory').insert({
+      id: kind + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+      agent: kind,
+      opportunity_id: oppId || null,
+      entity_tags: 'citation_' + (kind === 'citation_gate_bypass' ? 'bypass' : 'rejected') + ',s172,' + (target || 'unknown'),
+      observation:
+        (kind === 'citation_gate_bypass' ? 'CITATION GATE BYPASSED (force)' : 'CITATION GATE REJECTED WRITE') +
+        '\nagent: ' + agent +
+        '\ntarget: ' + target +
+        '\ncode: ' + (gateResult && gateResult.code) +
+        '\nmode: ' + (gateResult && gateResult.mode) +
+        '\nreason: ' + String((gateResult && gateResult.reason) || '').slice(0, 1500) +
+        '\n\n--- REJECTED PAYLOAD (preserved for review) ---\n' + String(payload || '').slice(0, 50000),
+      memory_type: 'citation_gate',
+      source_url: null,
+      confidence: 'high',
+      status: 'scratch',
+      created_at: new Date().toISOString()
+    });
+  } catch (qe) { log('S172 quarantine write failed: ' + (qe.message || '').slice(0, 160)); }
+}
+
+// S172: persist the verified citation manifest alongside a gated opportunities
+// write. Keeps provenance queryable without adding columns to production.
+async function citationManifestWrite(agent, oppId, target, manifest) {
+  try {
+    if (!manifest) return;
+    await supabase.from('organism_memory').insert({
+      id: 'citation_manifest-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+      agent: 'citation_manifest',
+      opportunity_id: oppId || null,
+      entity_tags: 'citation_manifest,s172,' + (target || 'unknown'),
+      observation: JSON.stringify({ writer: agent, target: target, manifest: manifest }),
+      memory_type: 'citation_manifest',
+      source_url: citationPrimarySourceUrl(manifest.citations, null),
+      confidence: 'high',
+      status: 'scratch',
+      created_at: new Date().toISOString()
+    });
+  } catch (me) { log('S172 manifest write failed: ' + (me.message || '').slice(0, 160)); }
+}
+
+// S172 NOTE ON storeMemory: the gate here enforces citation PRESENCE and SHAPE.
+// It cannot anchor quotes, because storeMemory receives prose only and holds no
+// source text — anchoring happens on the paths that do have sources in hand
+// (scope_analysis, opi_score). Anchors from this path are reported as
+// stats.unverified, never as verified. Under CITATION_ENFORCE=priority this path
+// is audit-only: it logs what it WOULD reject so the true rejection rate across
+// 132 distinct agent names is measurable before enforcement widens to 'global'.
+async function storeMemory(agent, oppId, tags, observation, memType, sourceUrl, confidence, gateOpts) {
   try {
     sourceUrl = sourceUrl || null;
     confidence = confidence || 'inferred';
     var status = 'scratch'; // Always scratch. Only curator promotes.
+
+    // --- S172 CITATION GATE ---
+    // Gate infrastructure agents bypass to avoid recursion and to keep the audit
+    // trail writable even when the gate is rejecting everything else.
+    var _s172Exempt = (agent === 'citation_gate_reject' || agent === 'citation_gate_bypass' ||
+                       agent === 'citation_manifest' || agent === 'cost_tracker');
+    var _s172 = null;
+    if (!_s172Exempt && CITATION_ENFORCE !== 'off') {
+      var _gOpts = gateOpts || {};
+      _s172 = citationEvaluateWrite({
+        target: _gOpts.target || 'organism_memory',
+        text: observation,
+        sources: _gOpts.sources || { oppId: oppId || null },
+        mode: CITATION_ENFORCE,
+        force: !!_gOpts.force
+      });
+      if (_s172.wouldReject || !_s172.allow) {
+        log('S172 GATE [' + agent + ']: ' + citationGateSummary(_s172));
+      }
+      if (!_s172.allow) {
+        await citationQuarantine('citation_gate_reject', agent, oppId, _s172.target, observation, _s172);
+        return { ok: false, written: false, code: _s172.code, reason: _s172.reason };
+      }
+      if (_s172.bypass) {
+        await citationQuarantine('citation_gate_bypass', agent, oppId, _s172.target, observation, _s172);
+      }
+      // Lift a real provenance reference into source_url when the caller passed
+      // none. 719 of 10,008 existing rows (7.2%) carry one; this is the path up.
+      if (!sourceUrl && _s172.citations && _s172.citations.length) {
+        sourceUrl = citationPrimarySourceUrl(_s172.citations, null);
+      }
+    }
 
     // Dedup: one write per agent per opp per cycle (in-memory, not Supabase)
     var dedupKey = agent + '|' + (oppId || 'system');
@@ -9550,12 +9766,15 @@ async function storeMemory(agent, oppId, tags, observation, memType, sourceUrl, 
         log('DEDUP: Allow ' + agent + ' (new source within cycle)');
       } else {
         log('DEDUP: Skip ' + agent + ' (already wrote this cycle) on ' + (oppId || 'system').slice(0, 30));
-        return;
+        return { ok: true, written: false, code: 'dedup_skip' };
       }
     }
     cycleWrites.add(dedupKey);
 
-    await supabase.from('organism_memory').insert({
+    // S172: capture the PostgREST result. supabase-js resolves with {error}
+    // rather than throwing, so the previous discarded return value meant DB
+    // errors were silently dropped even before the try/catch saw them.
+    var _memRes = await supabase.from('organism_memory').insert({
       id: agent + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
       agent: agent, opportunity_id: oppId || null,
       entity_tags: tags, observation: observation,
@@ -9565,7 +9784,15 @@ async function storeMemory(agent, oppId, tags, observation, memType, sourceUrl, 
       status: status,
       created_at: new Date().toISOString()
     });
-  } catch (e) { log('Memory error: ' + e.message); }
+    if (_memRes && _memRes.error) {
+      log('Memory insert error [' + agent + ']: ' + String(_memRes.error.message || _memRes.error).slice(0, 160));
+      return { ok: false, written: false, code: 'db_error', reason: String(_memRes.error.message || _memRes.error).slice(0, 200) };
+    }
+    return { ok: true, written: true, code: 'ok', gate: _s172 ? _s172.code : 'gate_off' };
+  } catch (e) {
+    log('Memory error: ' + e.message);
+    return { ok: false, written: false, code: 'exception', reason: (e.message || '').slice(0, 200) };
+  }
 }
 
 // === CLAUDE CALL: MODEL TIERING + WEB SEARCH + PROMPT CACHING ===
@@ -16844,7 +17071,13 @@ async function agentHunting(state, trigger) {
         '\n\nCRITICAL: A TPA opportunity in Louisiana with $1M+ value should score 75-85, NOT 13. Score based on HGI fit for THAT VERTICAL.' +
         '\n\nOPP: ' + cand.title + ' | ' + cand.agency + ' | ' + (cand.description || '').slice(0, 300) +
         '\n\nToday is ' + new Date().toISOString().split('T')[0] + '. DEADLINE RULES (follow exactly):\n1. If the listing text contains a SPECIFIC deadline date, extract it to deadline_found (YYYY-MM-DD).\n2. If that extracted date is BEFORE today, set expired:true and opi:0.\n3. If NO deadline is found in the listing text, set deadline_found:null AND expired:false. DO NOT GUESS. DO NOT ASSUME old.\n4. Absence of a deadline is NOT evidence of expiration. Score normally based on vertical fit.\n5. Federal Register notices and USAspending past-award records typically have no procurement deadline — these should be scored based on their content (regulatory notices = FILTER; recompete signals = score the vertical fit even if the historical contract has expired).' +
-        '\n\nJSON only (no prose, no preamble, no explanation — start immediately with {). Keep "why" under 120 characters: {"opi":N,"vertical":"disaster|tpa|housing|construction|grant|tax_appeals|federal|FILTER","capture_action":"GO|WATCH|NO-BID","why":"brief reason (120 char max)","deadline_found":"YYYY-MM-DD or null","expired":false}';
+        // S172: "evidence" grounds the score in the listing text. At intake there is
+        // no RFP document yet — scoring runs before any fetch — so the listing stub is
+        // the only source that exists. Requiring a verbatim span from it makes the
+        // evidence base explicit: an OPI 83 backed by a 300-char stub is now
+        // distinguishable from one backed by a real RFP.
+        '\n\nEVIDENCE (S172, required): copy a verbatim span of at least 24 characters from the OPP line above that justifies your vertical and score. Character-for-character — it is checked by exact substring match. If the listing is too thin to justify a score, copy whatever span you did rely on; do not invent text.' +
+        '\n\nJSON only (no prose, no preamble, no explanation — start immediately with {). Keep "why" under 120 characters: {"opi":N,"vertical":"disaster|tpa|housing|construction|grant|tax_appeals|federal|FILTER","capture_action":"GO|WATCH|NO-BID","why":"brief reason (120 char max)","evidence":"verbatim span copied from the OPP line","deadline_found":"YYYY-MM-DD or null","expired":false}';
       var scoreResp = await anthropic.messages.create({
         model: 'claude-haiku-4-5-20251001', max_tokens: 800,
         messages: [{ role: 'user', content: scorePrompt }]
@@ -16947,6 +17180,30 @@ async function agentHunting(state, trigger) {
         }
       } catch (_de) { /* dedup is best-effort, never block intake */ }
 
+      // ─── S172 INTAKE EVIDENCE CHECK ───────────────────────────────────────
+      // DELIBERATELY NON-BLOCKING, unlike the scope and rescore gates.
+      // Rationale: the only thing a hard reject could do here is refuse to CREATE
+      // the opportunity, which loses the discovery entirely. Dropping real
+      // opportunities is a worse failure than recording a weakly-grounded score —
+      // the north star is winning contracts. So intake annotates instead: the
+      // score is written either way, but an unverifiable evidence span is marked
+      // in capture_organism_text (which the interface displays) and quarantined
+      // for review. The score gets a hard-gated second look at the STEP 4 rescore,
+      // which DOES fail closed.
+      var _s172Listing = [cand.title, cand.agency, (cand.description || '').slice(0, 300)].filter(Boolean).join(' | ');
+      var _s172Intake = citationEvaluateWrite({
+        target: 'opi_score_intake',
+        text: 'intake score rationale\n\n' + citationBuildBlock(
+          score.evidence ? [{ src: 'listing', quote: String(score.evidence) }] : []),
+        sources: { oppId: null, listing: _s172Listing },
+        mode: CITATION_ENFORCE
+      });
+      var _s172Grounded = _s172Intake.allow && !_s172Intake.wouldReject;
+      if (!_s172Grounded) {
+        log('S172 INTAKE: ungrounded score for "' + (cand.title || '').slice(0, 55) + '" — ' +
+            _s172Intake.code + ' (opi ' + score.opi + ', inserting with marker)');
+      }
+
       var newId = cand.source + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
       await supabase.from('opportunities').insert({
         id: newId, title: cand.title, agency: cand.agency, vertical: score.vertical,
@@ -16956,13 +17213,22 @@ async function agentHunting(state, trigger) {
         // S164 T3A: organism-generated initial scoring rationale → capture_organism_text typed column.
         // opi_source='organism' tags the scored value as organism-derived. opi_organism_calculated
         // mirrors opi_score so the calibration loop has a baseline if user later overrides.
-        capture_organism_text: score.capture_action + ': ' + score.why,
+        // S172: prefix marks a score whose evidence span could not be verified against the listing.
+        capture_organism_text: (_s172Grounded ? '' : '[UNGROUNDED SCORE — S172:' + _s172Intake.code + '] ') +
+                               score.capture_action + ': ' + score.why,
         opi_source: 'organism',
         opi_organism_calculated: score.opi,
         opi_organism_calculated_at: new Date().toISOString(),
         discovered_at: new Date().toISOString(), last_updated: new Date().toISOString()
       });
-      qualified.push({ title: cand.title, opi: score.opi, source: cand.source });
+      // S172: preserve the ungrounded rationale for review without blocking intake.
+      if (!_s172Grounded) {
+        await citationQuarantine('citation_gate_reject', 'intake_scoring', newId, 'opi_score_intake',
+          'OPI ' + score.opi + ' | vertical ' + score.vertical + ' | why: ' + score.why +
+          '\nevidence span offered: ' + JSON.stringify(score.evidence || null) +
+          '\nlisting stub: ' + _s172Listing.slice(0, 2000), _s172Intake);
+      }
+      qualified.push({ title: cand.title, opi: score.opi, source: cand.source, grounded: _s172Grounded });
     } catch (e) { log('HUNTING: scoring error for "' + (cand.title||'').slice(0,50) + '" — ' + (e.message||'').slice(0,120)); }
   }
 
@@ -17611,7 +17877,15 @@ async function extractRFPRequirements(rfpText, opp) {
   return parsed;
 }
 
-async function orchestrateOpp(opp) {
+async function orchestrateOpp(opp, orchOpts) {
+  // S172: optional { force: bool }. Defaults to no override so the existing two
+  // callers (runSession AUTO_ORCH, /api/orchestrate) keep working unchanged.
+  var _s172Force = !!(orchOpts && orchOpts.force);
+  // S172: set true when the citation gate refuses the scope write. STEP 4's OPI
+  // rescore feeds on scope_analysis, so an ungrounded scope must not be allowed
+  // to move the score — that is the transitive path by which one fabrication
+  // becomes a pipeline-priority number.
+  var _s172ScopeBlocked = false;
   var oppId = opp.id;
   var d = String.fromCharCode(36);
   // F-016 (S157 T1A): skip orchestration on RFPs > 30 days past due (prevents wasted Anthropic spend)
@@ -17714,7 +17988,7 @@ async function orchestrateOpp(opp) {
   try {
     var scopeCall = await callWithContinuation({
       model: 'claude-sonnet-4-6', max_tokens: 8000,
-      system: 'Senior government contracting scope analyst. ' + classGuide + ' Geography: LA TX FL MS AL GA. Be exhaustive ABOUT WHAT THE RFP ACTUALLY SAYS. Do not infer or embellish. Cite specific RFP sections. If the RFP does not mention a funding source, program history, or scope element, do not claim it does. OUTPUT FORMAT (S119): Do NOT add classification headers, analyst-role attributions, document banners, "Principal Eyes Only" / "Eyes Only" / "Principals Only" / "Capture-Sensitive" markings, date/version stamps, session numbers, "Prepared for" labels, or any boilerplate metadata to your output. The orchestrator handles all framing. Return only the requested analysis content. This also applies to trailing sign-offs, attribution lines, or footer text. CITATION DISCIPLINE (S119): When you cite a specific RFP section number (e.g., "Section 7.2.1", "§5.8", "Section 8.1"), the section label must appear verbatim in the RFP text above. Do not invent section numbers or assume standard RFP numbering schemes (e.g., do NOT write "Section 8" if the RFP only contains "Section 5.8" — these are different sections). If you need to reference RFP content but cannot find a matching section number that appears verbatim, write "(per the RFP scope statement)" or describe by content rather than by fabricated number.',
+      system: 'Senior government contracting scope analyst. ' + classGuide + ' Geography: LA TX FL MS AL GA. Be exhaustive ABOUT WHAT THE RFP ACTUALLY SAYS. Do not infer or embellish. Cite specific RFP sections. If the RFP does not mention a funding source, program history, or scope element, do not claim it does. OUTPUT FORMAT (S119): Do NOT add classification headers, analyst-role attributions, document banners, "Principal Eyes Only" / "Eyes Only" / "Principals Only" / "Capture-Sensitive" markings, date/version stamps, session numbers, "Prepared for" labels, or any boilerplate metadata to your output. The orchestrator handles all framing. Return only the requested analysis content. This also applies to trailing sign-offs, attribution lines, or footer text. CITATION DISCIPLINE (S119): When you cite a specific RFP section number (e.g., "Section 7.2.1", "§5.8", "Section 8.1"), the section label must appear verbatim in the RFP text above. Do not invent section numbers or assume standard RFP numbering schemes (e.g., do NOT write "Section 8" if the RFP only contains "Section 5.8" — these are different sections). If you need to reference RFP content but cannot find a matching section number that appears verbatim, write "(per the RFP scope statement)" or describe by content rather than by fabricated number.\n\n' + CITATION_PROMPT_CONTRACT,
       messages: [{ role: 'user', content: 'Deep scope analysis for HGI go/no-go.\n\nGROUND RULE: Every factual claim in your output must be directly supported by the RFP TEXT below. Do NOT infer program funding sources (e.g., FEMA, CDBG, CDBG-DR), historical context (e.g., post-Katrina, post-COVID), or agency priorities from your general knowledge or from the organism intelligence unless the RFP text explicitly confirms them. If the RFP does not mention FEMA, do not frame the opportunity as a FEMA play. If the RFP does not mention CDBG, do not frame it as a CDBG play. The organism intelligence below is for COMPETITIVE positioning (who else is bidding, what rates they charge, who the incumbent is) — NOT for inferring scope or funding. If you are uncertain whether something is in the RFP, say so explicitly.\n\nOPPORTUNITY: ' + opp.title + '\nAGENCY: ' + (opp.agency || '') + '\nSTATE: ' + (opp.state || 'LA') + '\nVERTICAL: ' + (opp.vertical || 'general') + '\nRFP TEXT:\n' + rfpContent + '\n' + kbContext.slice(0, 2000) + '\n\nORGANISM INTELLIGENCE (competitors, contacts, disasters, budgets, regulations, patterns — FOR COMPETITIVE POSITIONING ONLY):\n' + orchSlice + '\n\nProvide:\n1. SUB-VERTICAL CLASSIFICATION — exact type of work, is this HGI core? (Base this ONLY on what the RFP describes, not on HGI past performance patterns.)\n2. SCOPE SUMMARY — what is being asked, plain English, 3-5 sentences. Stick to the RFP.\n3. DETAILED DELIVERABLES — every task and work product from the RFP. If you cite a task, it must be in the RFP text above.\n4. EVALUATION CRITERIA — exact criteria and point values from RFP. Quote or paraphrase from the RFP.\n5. HGI CAPABILITY ALIGNMENT — map each deliverable to HGI past performance, flag gaps. Use the competitor intelligence above to identify where HGI is stronger or weaker than likely bidders.\n6. COMPLIANCE REQUIREMENTS — licenses, certs, insurance, bonding AS SPECIFIED IN THE RFP. Do not add requirements from your general knowledge unless the RFP triggers them.\n7. CRITICAL QUESTIONS — what must HGI clarify before committing\n8. COMPETITIVE POSITIONING — based on the competitor data above, who is the primary threat and why? What is HGI\'s key differentiator?\n9. SOURCE CHECK — briefly note any claim you made that you are NOT 100% certain is in the RFP text above, so Christopher can verify.' }]
     }, 'orchestrator_scope', 2);
     var scopeText = scopeCall.text;
@@ -17770,9 +18044,69 @@ async function orchestrateOpp(opp) {
         }
       } catch(fce) { log('ORCHESTRATE FACT-CHECK error (non-fatal): ' + (fce.message||'').slice(0,120)); }
 
-      await supabase.from('opportunities').update({ scope_analysis: scopeToSave, last_updated: new Date().toISOString() }).eq('id', oppId);
-      results.steps.push('scope');
-      log('ORCHESTRATE: Scope done (' + scopeToSave.length + ' chars)');
+      // ═══════════════════════════════════════════════════════════════════
+      // S172 CITATION GATE — THE FAIL-CLOSED POINT
+      // Before this change the line below ran unconditionally: a CONTAMINATED
+      // fact-check verdict (computed ~40 lines up) only prepended a ⚠️ banner and
+      // the fabricated scope was persisted anyway. That is how the Session 106
+      // OPSB "post-Katrina FEMA PA + CDBG-DR" scope reached the database, and how
+      // 16 of 48 opportunities ended up with a scope_analysis written while
+      // rfp_document_retrieved was false.
+      //
+      // Three independent reasons to refuse, all fail-closed:
+      //   1. rfp_document_retrieved !== true  -> no verified source to ground against
+      //   2. fact-check verdict CONTAMINATED  -> honor the verdict we already paid for
+      //   3. citations missing / quotes not found verbatim in rfp_text
+      // The gate makes zero model calls, so it cannot trip the S142 or session
+      // cost breakers. force:true bypasses and is audit-logged (S143 convention).
+      // ═══════════════════════════════════════════════════════════════════
+      var _s172ScopeVerdict = (typeof fc !== 'undefined' && fc && fc.verdict) ? fc.verdict : null;
+      var _s172Scope = citationEvaluateWrite({
+        target: 'scope_analysis',
+        text: scopeToSave,
+        sources: {
+          oppId: oppId,
+          fields: {
+            rfp_text: opp.rfp_text || '',
+            title: opp.title || '',
+            agency: opp.agency || '',
+            description: opp.description || '',
+            solicitation_number: opp.solicitation_number || '',
+            naics: opp.naics || '',
+            due_date: opp.due_date || '',
+            estimated_value: opp.estimated_value || '',
+            source_url: opp.source_url || ''
+          },
+          listing: [opp.title, opp.agency, opp.description].filter(Boolean).join(' | ')
+        },
+        mode: CITATION_ENFORCE,
+        requireRfpRetrieved: true,
+        rfpDocumentRetrieved: (opp.rfp_document_retrieved === true),
+        factCheckVerdict: _s172ScopeVerdict,
+        force: _s172Force
+      });
+      log('S172 SCOPE GATE: ' + citationGateSummary(_s172Scope));
+
+      if (!_s172Scope.allow) {
+        _s172ScopeBlocked = true;
+        await citationQuarantine('citation_gate_reject', 'orchestrator_scope', oppId, 'scope_analysis', scopeToSave, _s172Scope);
+        results.errors.push('scope:citation_gate:' + _s172Scope.code);
+        log('ORCHESTRATE: Scope BLOCKED by S172 (' + _s172Scope.code + ') — scope_analysis NOT written for ' + oppId +
+            ' | ' + String(_s172Scope.reason || '').slice(0, 200));
+      } else {
+        if (_s172Scope.bypass) {
+          await citationQuarantine('citation_gate_bypass', 'orchestrator_scope', oppId, 'scope_analysis', scopeToSave, _s172Scope);
+        }
+        // Persist prose with the citation block stripped so the ~30 downstream
+        // readers of scope_analysis are unaffected; the manifest is stored
+        // separately in organism_memory (no production DDL required).
+        var _scopePersist = (_s172Scope.cleanText && _s172Scope.cleanText.length > 100) ? _s172Scope.cleanText : scopeToSave;
+        await supabase.from('opportunities').update({ scope_analysis: _scopePersist, last_updated: new Date().toISOString() }).eq('id', oppId);
+        await citationManifestWrite('orchestrator_scope', oppId, 'scope_analysis', _s172Scope.manifest);
+        results.steps.push('scope');
+        log('ORCHESTRATE: Scope done (' + _scopePersist.length + ' chars, ' +
+            ((_s172Scope.stats && _s172Scope.stats.verified) || 0) + ' citations verified)');
+      }
     }
   } catch(e) { results.errors.push('scope:' + e.message); log('ORCHESTRATE: Scope error: ' + e.message); }
 
@@ -17997,10 +18331,26 @@ async function orchestrateOpp(opp) {
     var opiMatch = opiText.match(/REVISED_OPI:\s*(\d+)/i);
     if (opiMatch) {
       var revisedOpi = parseInt(opiMatch[1]);
-      await supabase.from('opportunities').update({ opi_score: revisedOpi, last_updated: new Date().toISOString() }).eq('id', oppId);
-      results.revisedOpi = revisedOpi;
-      results.steps.push('opi_rescore');
-      log('ORCHESTRATE: OPI rescored ' + opp.opi_score + ' → ' + revisedOpi);
+      // S172 (a): range clamp. Previously absent — a malformed "REVISED_OPI: 9999"
+      // or "REVISED_OPI: -5" was written straight to the integer column with no
+      // sanity check. /api/update-opp already enforces 0-100 (index.js ~6106);
+      // this path did not.
+      if (isNaN(revisedOpi) || revisedOpi < 0 || revisedOpi > 100) {
+        results.errors.push('opi:out_of_range:' + String(opiMatch[1]).slice(0, 12));
+        log('ORCHESTRATE: OPI rescore REJECTED — out of range: ' + String(opiMatch[1]).slice(0, 12));
+      } else if (_s172ScopeBlocked && CITATION_ENFORCE !== 'off' && !_s172Force) {
+        // S172 (b): fail closed transitively. The rescore prompt is fed
+        // scopeAnalysis/finAnalysis/researchBrief. If the scope was just refused
+        // for being ungrounded, the number derived from it is ungrounded too.
+        results.errors.push('opi:citation_gate:scope_blocked');
+        log('ORCHESTRATE: OPI rescore BLOCKED by S172 — scope_analysis was refused for ' + oppId +
+            ', refusing to move opi_score on unverified input (was ' + opp.opi_score + ', model said ' + revisedOpi + ')');
+      } else {
+        await supabase.from('opportunities').update({ opi_score: revisedOpi, last_updated: new Date().toISOString() }).eq('id', oppId);
+        results.revisedOpi = revisedOpi;
+        results.steps.push('opi_rescore');
+        log('ORCHESTRATE: OPI rescored ' + opp.opi_score + ' → ' + revisedOpi);
+      }
     }
   } catch(e) { results.errors.push('opi:' + e.message); }
 

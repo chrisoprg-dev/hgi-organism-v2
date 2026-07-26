@@ -5,7 +5,9 @@
   "type": "module",
   "main": "organism/index.js",
   "scripts": {
-    "start": "node organism/index.js"
+    "start": "node organism/index.js",
+    "test": "node organism/citations.test.mjs",
+    "check": "node --check organism/index.js && node --check organism/citations.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
